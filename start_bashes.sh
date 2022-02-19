@@ -6,6 +6,9 @@ if [ -d ${base_path}/.tmp ];then
 rm -rf ${base_path}/.tmp
 mkdir ${base_path}/.tmp
 fi
+if [ ! -d ${base_path}/public/db ];then
+mkdir ${base_path}/.tmp
+fi
 nohup /usr/bin/google-chrome --incognito --no-first-run --no-gpu --user-data-dir=${base_path}/.tmp/ 127.0.0.1:8888 > ${base_path}/log/chrome.log 2>&1 &
 echo $! > ${base_path}/.chrome_pid
 
