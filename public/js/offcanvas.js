@@ -46,29 +46,30 @@ function addSubsystem(el) {
 }
 
 /* Search */
-function search() {
-  var searchbox = document.getElementById("searchbox");
-  searchbox.addEventListener("keyup", (k) => {
-    console.log("input");
+var itemsToSearchIn = document.getElementsByClassName("searchable");
+var searchStrings = [];
+for (const el of itemsToSearchIn) {
+  searchStrings.push({
+    id: el.id,
+    text: el.getAttribute("search-string").toLowerCase()
   });
-  var search = searchbox.value.toLowerCase();
-  search_len = search.length;
+}
 
-  var items_to_seach = document.getElementsByClassName("searchable");
-  if (search_len == 0){
-    for (const el in items_to_seach) {
+function search(val) {
 
+  if (val.length == 0){
+    for (const el of searchStrings) {
+      document.getElementById(el.id).style.display = "block";
+    }
+  } else {
+    for (const el of searchStrings) {
+      if (!el.text.includes(val)) {
+        document.getElementById(el.id).style.display = "none";
+      } else {
+        document.getElementById(el.id).style.display = "block";
+      }
     }
   }
-}
-search();
 
-/*
-function hideAddSubsystem(el){
-  var host_div_id = el.getAttribute("id");
-  var hostname = el.getAttribute("hostname");
-  var add_div = document.getElementById("add_subsystem_for_" + host_div_id);
-  add_div.style.display = "none";
 }
-*/
 

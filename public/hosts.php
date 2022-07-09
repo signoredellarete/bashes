@@ -1,9 +1,10 @@
 <!-- INFO -->
+
 <div 
   id="host_<?php echo $hosts_counter ?>" 
   hostname="<?php echo $host->hostname ?>" 
   class="d-flex bd-highlight mb-3 align-items-center rounded shadow-sm div-hover-grey"
-  onmouseover="showAddSubsystem(this)"
+  onmouseover="showAddSubsystem(this)" 
 >
   <div class="p-3 pe-0 bd-highlight">
     <svg class="bd-placeholder-img flex-shrink-0 me-2 rounded" width="45" height="45" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Placeholder: 32x32" preserveAspectRatio="xMidYMid slice" focusable="false">

@@ -23,7 +23,7 @@
     </div>
     <div class="ms-auto p-2 pe-3">
       <div class="input-group input-group">
-        <input id="searchbox" type="text" class="form-control input-rounded searchbox" placeholder="Search...">
+        <input onkeyup="search(this.value)" id="searchbox" type="text" class="form-control input-rounded searchbox" placeholder="Search...">
       </div>
     </div>
   </div>

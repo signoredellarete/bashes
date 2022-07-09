@@ -3,7 +3,7 @@
 Version=1.0
 Type=Application
 Terminal=false
-Exec=/home/fabrizio/Documents/fabrizio/bashes/start_bashes.sh
+Exec=/home/fabrizio/Documents/fabrizio/git/bashes/start_bashes.sh
 Name=Bashes
 Comment=Bashes
-Icon=/home/fabrizio/Documents/fabrizio/bashes/icons/bashes.png
+Icon=/home/fabrizio/Documents/fabrizio/git/bashes/icons/bashes.png
