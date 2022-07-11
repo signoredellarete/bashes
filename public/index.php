@@ -23,7 +23,8 @@
     </div>
     <div class="ms-auto p-2 pe-3">
       <div class="input-group input-group">
-        <input onkeyup="search(this.value)" id="searchbox" type="text" class="form-control input-rounded searchbox" placeholder="Search...">
+        <input onkeyup="search(this.value)" id="searchbox" type="text" class="form-control searchbox" placeholder="Search...">
+        <button onclick="resetInput('searchbox')" id="searchResetButton" class="btn btn-light" type="button">Reset</button>
       </div>
     </div>
   </div>

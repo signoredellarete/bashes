@@ -6,7 +6,7 @@
 <div
   id="docker_container_<?php echo $docker_counter ?>" 
   class="searchable" 
-  search-string="<?php echo $docker->hostname ?>"
+  search-string="<?php echo $docker->hostname ?><?php echo $docker->ip ?>"
 >
   <div 
     id="docker_<?php echo $docker_counter ?>" 

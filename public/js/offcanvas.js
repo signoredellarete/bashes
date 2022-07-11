@@ -25,7 +25,6 @@ function displayIsNone(el) {
   }
 }
 
-
 function showAddSubsystem(el){
   var host_div_id = el.id;
   //console.log(host_div_id);
@@ -71,5 +70,10 @@ function search(val) {
     }
   }
 
+}
+
+function resetInput(el) {
+  document.getElementById(el).value = '';
+  document.getElementById(el).dispatchEvent(new Event('keyup'));
 }
 

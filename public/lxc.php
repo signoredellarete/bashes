@@ -6,7 +6,7 @@
 <div
   id="lxc_container_<?php echo $lxc_counter ?>" 
   class="searchable" 
-  search-string="<?php echo $lxc->hostname ?>"
+  search-string="<?php echo $lxc->hostname ?><?php echo $lxc->ip ?>"
 >
   <div 
     id="lxc_<?php echo $lxc_counter ?>" 

@@ -6,7 +6,7 @@
 <div
   id="vm_container_<?php echo $vm_counter ?>" 
   class="searchable" 
-  search-string="<?php echo $vm->hostname ?>"
+  search-string="<?php echo $vm->hostname ?><?php echo $vm->ip ?>"
 >
   <div 
     id="vm_<?php echo $vm_counter ?>" 
