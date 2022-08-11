@@ -2,7 +2,7 @@
   require_once("lib/func.php");
   $json_hosts = file_get_contents("db/hosts.json");
   $hosts = json_decode($json_hosts);
-  get_host();
+  ssh_connect();
   ssh_copy_id();
 ?>
 <?php require_once("header.php"); ?>
@@ -51,8 +51,8 @@
     <?php $docker_counter = 0; ?>
 
     <?php foreach ($hosts as $host) { ?>
-    <?php $hosts_counter++; ?>
-    <?php require("hosts.php") ?>
+      <?php $hosts_counter++; ?>
+      <?php require("hosts.php") ?>
     <?php } ?>
 
 

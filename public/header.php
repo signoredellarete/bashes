@@ -28,6 +28,6 @@
       }
     </style>
 
-    <link href="css/offcanvas.css" rel="stylesheet">
+    <link href="css/bashes.css" rel="stylesheet">
   </head>
   <body class="bg-light">

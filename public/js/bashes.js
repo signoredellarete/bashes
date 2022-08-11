@@ -77,3 +77,22 @@ function resetInput(el) {
   document.getElementById(el).dispatchEvent(new Event('keyup'));
 }
 
+
+function callSshApi(func, user, ip, port) {
+  fetch('/api/ssh_api.php', {
+    method: 'POST',
+    headers: {
+        'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      'func': func,
+      'user': user,
+      'ip': ip,
+      'port': port
+    })
+  }).then(response => response.json())
+    // .then(data => {
+    //     // document.querySelector('#result' ).innerText = data.encoded;
+    //     console.log(data);
+    // });
+}
