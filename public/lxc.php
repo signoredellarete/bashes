@@ -29,12 +29,49 @@
           </small>
         </div>
       </div>
+
       <!-- COMMANDS -->
       <div class="ms-auto p-2 pe-3">
-        <a href="/?connect=1&host=<?php echo $lxc->user."@".$lxc->ip ?>&port=<?php echo $lxc->port ?>"><span class="material-icons violet-icon" title="Connect">terminal</span></a>
-        <a href="/?ssh_copy_id=1&host=<?php echo $lxc->user."@".$lxc->ip ?>&port=<?php echo $lxc->port ?>"><span class="material-icons violet-icon" title="Copy SSH Key">vpn_key</span></a>
-        <a href="#" data-bs-toggle="modal" data-bs-target="#modalDel" hostname="<?php echo $lxc->hostname ?>" onclick="deleteHost(this)"><span class="material-icons grey-icon" title="Delete">delete_forever</span></a>
+
+        <!-- Connect SSH -->
+        <a
+          role="button" 
+          onclick="callSshApi(
+            'connect',
+            '<?php echo $lxc->user ?>',
+            '<?php echo $lxc->ip ?>',
+            '<?php echo $lxc->port ?>'
+          )"
+        >
+          <span class="material-icons violet-icon" title="SSH Connect">terminal</span>
+        </a>
+
+        <!-- SSH Copy ID -->
+        <a
+          role="button" 
+          onclick="callSshApi(
+            'ssh_copy_id',
+            '<?php echo $lxc->user ?>',
+            '<?php echo $lxc->ip ?>',
+            '<?php echo $lxc->port ?>'
+          )"
+        >
+          <span class="material-icons violet-icon" title="SSH Copy Key">vpn_key</span>
+        </a>
+
+        <!-- Delete button -->
+        <a
+          href="#" data-bs-toggle="modal"
+          data-bs-target="#modalDel"
+          hostname="<?php echo $lxc->hostname ?>"
+          onclick="deleteHost(this)"
+        >
+          <span class="material-icons grey-icon" title="Delete">delete_forever</span>
+        </a>
+
       </div>
+      <!-- / COMMANDS -->
+
     </div>
   </div>
 

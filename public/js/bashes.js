@@ -16,7 +16,7 @@ function deleteHost(el){
   var hostname = el.getAttribute("hostname");
   document.getElementById("delete_host").value = hostname;
   document.getElementById("label_delete_host").innerHTML = hostname;
-  console.log(hostname);
+  // console.log(hostname); /debug
 }
 
 function displayIsNone(el) {
@@ -54,6 +54,8 @@ for (const el of itemsToSearchIn) {
   });
 }
 
+// console.log(searchStrings); //debug
+
 function search(val) {
 
   if (val.length == 0){
@@ -61,8 +63,12 @@ function search(val) {
       document.getElementById(el.id).style.display = "block";
     }
   } else {
+
+    // console.log(val); //debug
+
     for (const el of searchStrings) {
-      if (!el.text.includes(val)) {
+      if (!el.text.includes(val.toLowerCase())) {
+        // console.log(); //debug
         document.getElementById(el.id).style.display = "none";
       } else {
         document.getElementById(el.id).style.display = "block";

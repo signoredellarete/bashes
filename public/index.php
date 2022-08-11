@@ -1,9 +1,6 @@
 <?php 
-  require_once("lib/func.php");
   $json_hosts = file_get_contents("db/hosts.json");
   $hosts = json_decode($json_hosts);
-  ssh_connect();
-  ssh_copy_id();
 ?>
 <?php require_once("header.php"); ?>
 
