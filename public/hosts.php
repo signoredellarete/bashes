@@ -52,6 +52,19 @@
     >
       <span class="material-icons violet-icon" title="SSH Connect">terminal</span>
     </a>
+
+    <!-- Remote Filesystem -->
+    <a
+      role="button" 
+      onclick="callSshApi(
+        'remotefs',
+        '<?php echo $host->user ?>',
+        '<?php echo $host->ip ?>',
+        '<?php echo $host->port ?>'
+      )"
+    >
+      <span class="material-icons violet-icon" title="Open remote folder">folder_open</span>
+    </a>
     
     <!-- SSH Copy ID -->
     <a

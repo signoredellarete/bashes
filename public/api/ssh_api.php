@@ -18,19 +18,28 @@
     }
   }
 
-  if ($input_data['func'] == 'connect') {
-    $func = '/bin/ssh';
-  }
-
-  if ($input_data['func'] == 'ssh_copy_id') {
-    $func = '/bin/ssh-copy-id';
-  }
-
+  $command = '';
   $user = $input_data['user'];
   $ip = $input_data['ip'];
   $port = $input_data['port'];
 
-  $command='gnome-terminal --tab --title="'.$user.'@'.$ip.'" --working-directory="/home/fabrizio" -- bash -c \''.$func.' -p '.$port.' '.$user.'@'.$ip.'\'';
+  if ($input_data['func'] == 'connect') {
+    $func = '/bin/ssh';
+    $command='gnome-terminal --tab --title="'.$user.'@'.$ip.'" --working-directory="/home/fabrizio" -- bash -c \''.$func.' -p '.$port.' '.$user.'@'.$ip.'\'';
+  }
+
+  if ($input_data['func'] == 'remotefs') {
+    $func = '/bin/ssh';
+    $command = '/usr/bin/nautilus ssh://'.$user.'@'.$ip.':'.$port;
+  }
+
+  if ($input_data['func'] == 'ssh_copy_id') {
+    $func = '/bin/ssh-copy-id';
+    $command='gnome-terminal --tab --title="'.$user.'@'.$ip.'" --working-directory="/home/fabrizio" -- bash -c \''.$func.' -p '.$port.' '.$user.'@'.$ip.'\'';
+  }
+
+
+
   $output=null;
   $retval=null;
   exec($command, $output, $retval);
