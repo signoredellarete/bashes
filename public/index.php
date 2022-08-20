@@ -52,7 +52,10 @@
   <div class="my-3 p-3 bg-body rounded shadow-sm">
     <div class="row">
       <div class="col-12">
-        <h6 class="border-bottom pb-2 mb-0 text-center">Servers, Linux Containers, Virtual Machines, Docker containers </h6>
+        <div class="border-bottom pb-2 mb-0 text-center fw-bold">
+          Servers, Linux Containers, Virtual Machines, Docker containers 
+          <a href="/" class="material-icons violet-icon text-decoration-none align-middle" role="button" title="Refresh">autorenew</a>
+        </div>
       </div>
     </div>
 
@@ -63,7 +66,7 @@
     <?php $docker_counter = 0; ?>
 
     <div class="row">
-      <div class="col-12" style="overflow-y: auto; height: calc(100vh - 260px);">
+      <div class="col-12 list-container overflow-auto pt-3 pb-5">
         <?php foreach ($hosts as $host) { ?>
           <?php $hosts_counter++; ?>
           <?php require("hosts.php") ?>
@@ -79,3 +82,4 @@
 <?php require_once("modal_add_subsystem.php") ?>
 <?php require_once("modal_del.php") ?>
 <?php require_once("footer.php") ?>
+

@@ -67,3 +67,8 @@ body {
 .hidden{
   display: none;
 }
+
+.list-container{
+  height: calc(100vh - 260px);
+  position: relative;
+}
