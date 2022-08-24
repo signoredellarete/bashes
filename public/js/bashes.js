@@ -27,12 +27,6 @@ function displayIsNone(el) {
 
 function showAddSubsystem(el){
   var host_div_id = el.id;
-  //console.log(host_div_id);
-  var host_div_offset = getOffset(el);
-  var host_div_left = host_div_offset['left'];
-  var host_div_top = host_div_offset['top'];
-  //console.log(host_div_left);
-  //console.log(host_div_top);
   var hostname = el.getAttribute("hostname");
   var add_div = document.getElementById("add_subsystem_for_" + host_div_id);
   placeDiv(add_div, host_div_left + 27, host_div_top + 50);

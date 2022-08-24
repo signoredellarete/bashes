@@ -43,6 +43,9 @@ body {
 }
 
 .add-subsystem {
+  position: absolute;
+  left: 27px;
+  top:49px;
   background-color: #fff;
   height: 23.5px;
   width: 23.5px;

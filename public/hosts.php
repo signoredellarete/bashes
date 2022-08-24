@@ -3,7 +3,7 @@
 <div 
   id="host_<?php echo $hosts_counter ?>" 
   hostname="<?php echo $host->hostname ?>" 
-  class="d-flex bd-highlight mb-3 align-items-center rounded shadow-sm div-hover-grey"
+  class="d-flex bd-highlight mb-3 align-items-center rounded shadow-sm div-hover-grey position-relative"
   onmouseover="showAddSubsystem(this)" 
 >
   <div class="p-3 pe-0 bd-highlight">
