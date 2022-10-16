@@ -16,7 +16,8 @@ nohup /usr/bin/php -S 127.0.0.1:${phpws_port} -t ${base_path}/public > ${base_pa
 echo $! > ${base_path}/.pid
 
 # Start new instance of google-chrome in incognito mode
-nohup /usr/bin/google-chrome --incognito --no-first-run --no-gpu --user-data-dir=${base_path}/.tmp/ 127.0.0.1:${phpws_port} > ${base_path}/log/chrome.log 2>&1 &
+#nohup /usr/bin/google-chrome --incognito --no-first-run --no-gpu --user-data-dir=${base_path}/.tmp/ 127.0.0.1:${phpws_port} > ${base_path}/log/chrome.log 2>&1 &
+$browser 127.0.0.1:${phpws_port} > ${base_path}/log/chrome.log 2>&1 &
 echo $! > ${base_path}/.chrome_pid
 
 # Read pids

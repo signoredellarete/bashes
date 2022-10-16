@@ -61,6 +61,40 @@ if [ ! -f ~/Desktop/bashes.desktop ];then
   fi
 fi
 
+# Browser
+browsers="google-chrome-stable google-chrome firefox chromium epiphany epiphany-browser"
+for i in $browsers
+  do
+  which ${i} 2>&1 > /dev/null
+  if [ $? -eq 0 ];then
+    echo browser=`which ${i}` >> ${base_path}/.env
+    break
+  fi
+done
+
+# File explorer
+explorers="nemo nautilus"
+for i in $explorers
+  do
+  which ${i} 2>&1 > /dev/null
+  if [ $? -eq 0 ];then
+    echo explorer=`which ${i}` >> ${base_path}/.env
+    break
+  fi
+done
+
+# Terminal emulator
+terminals="gnome-terminal xterm"
+for i in $terminals
+  do
+  which ${i} 2>&1 > /dev/null
+  if [ $? -eq 0 ];then
+    echo terminal=`which ${i}` >> ${base_path}/.env
+    break
+  fi
+done
+
+
 # .tmp directory
 if [ -d ${base_path}/.tmp ];then
   rm -rf ${base_path}/.tmp
