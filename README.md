@@ -9,6 +9,7 @@ Bashes is a local web application for linux aimed at helping system administrato
 
 ### Prerequisites
 - Linux Operating System (Tested on Linux Mint 21 Vanessa)
+- Desktop environment
 - git
 - php-cli (>= 7.4)
 - google-chrome
