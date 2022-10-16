@@ -12,6 +12,8 @@ Bashes is a local web application for linux aimed at helping system administrato
 - Git (cli)
 - php-cli (>= 7.4)
 - google-chrome
+- gnome-terminal
+- nemo (File manager)
 
 ### Installation
 - Clone this git repository
