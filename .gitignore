@@ -1,4 +1,5 @@
 public/db/*
+.env
 .chrome_pid
 .pid
 .tmp/
