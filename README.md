@@ -33,4 +33,5 @@ bash install.sh
 ```
 bash start_bashes.sh &
 ```
+If you have chosen to create a the desktop lancher during installation it will be possible to launch the application by double-clicking on the icon.
 
