@@ -34,10 +34,16 @@ do
 
   if [ ${chrome_procs} -eq 0 ];then
     kill -9 ${pid}
+    rm -rf ${base_path}/.tmp/*
+    rm ${base_path}/.chrome_pid
+    rm ${base_path}/.pid
   fi
 
   if [ ${bashes_procs} -eq 0 ];then
     kill -9 ${chrome_pid}
+    rm -rf ${base_path}/.tmp/*
+    rm ${base_path}/.chrome_pid
+    rm ${base_path}/.pid
   fi
 
   sleep 3
