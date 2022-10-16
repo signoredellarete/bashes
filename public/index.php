@@ -73,7 +73,6 @@
         <?php } ?>
       </div>
     </div>
-
   </div>
 
 </main>
@@ -81,5 +80,6 @@
 <?php require_once("modal_add_host.php") ?>
 <?php require_once("modal_add_subsystem.php") ?>
 <?php require_once("modal_del.php") ?>
+
 <?php require_once("footer.php") ?>
 

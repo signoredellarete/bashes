@@ -25,17 +25,17 @@
 
   if ($input_data['func'] == 'connect') {
     $func = '/bin/ssh';
-    $command='gnome-terminal --tab --title="'.$user.'@'.$ip.'" --working-directory="/home/fabrizio" -- bash -c \''.$func.' -p '.$port.' '.$user.'@'.$ip.'\'';
+    $command='gnome-terminal --title="'.$user.'@'.$ip.'" --working-directory="/home/sid" -- bash -c \''.$func.' -p '.$port.' '.$user.'@'.$ip.'\'';
   }
 
   if ($input_data['func'] == 'remotefs') {
     $func = '/bin/ssh';
-    $command = '/usr/bin/nautilus ssh://'.$user.'@'.$ip.':'.$port;
+    $command = '/usr/bin/nemo ssh://'.$user.'@'.$ip.':'.$port;
   }
 
   if ($input_data['func'] == 'ssh_copy_id') {
     $func = '/bin/ssh-copy-id';
-    $command='gnome-terminal --tab --title="'.$user.'@'.$ip.'" --working-directory="/home/fabrizio" -- bash -c \''.$func.' -p '.$port.' '.$user.'@'.$ip.'\'';
+    $command='gnome-terminal --title="'.$user.'@'.$ip.'" --working-directory="/home/sid" -- bash -c \''.$func.' -p '.$port.' '.$user.'@'.$ip.'\'';
   }
 
 

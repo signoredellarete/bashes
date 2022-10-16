@@ -6,11 +6,6 @@ function getOffset(el) {
   };
 }
 
-function placeDiv(el, x_pos, y_pos) {
-  el.style.position = "absolute";
-  el.style.left = x_pos+'px';
-  el.style.top = y_pos+'px';
-}
 
 function deleteHost(el){
   var hostname = el.getAttribute("hostname");
@@ -29,7 +24,6 @@ function showAddSubsystem(el){
   var host_div_id = el.id;
   var hostname = el.getAttribute("hostname");
   var add_div = document.getElementById("add_subsystem_for_" + host_div_id);
-  placeDiv(add_div, host_div_left + 27, host_div_top + 50);
 }
 
 function addSubsystem(el) {
@@ -91,8 +85,4 @@ function callSshApi(func, user, ip, port) {
       'port': port
     })
   }).then(response => response.json())
-    // .then(data => {
-    //     // document.querySelector('#result' ).innerText = data.encoded;
-    //     console.log(data);
-    // });
 }

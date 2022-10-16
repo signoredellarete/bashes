@@ -80,12 +80,7 @@
     </a>
     
     <!-- Proxmox link -->
-    <a
-      href="https://<?php echo $host->ip ?>:8006"
-      target="_blank"
-    >
-        <span class="material-icons violet-icon" title="Proxmox">filter_drama</span>
-    </a>
+    <a href="https://<?php echo $host->ip ?>:8006" target="_blank"><span class="material-icons violet-icon" title="Proxmox">filter_drama</span></a>
 
     <!-- Delete button -->
     <a

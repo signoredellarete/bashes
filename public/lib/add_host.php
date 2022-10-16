@@ -3,7 +3,12 @@ function add_host() {
   if (isset($_REQUEST['add_host'])) {
     unset($_REQUEST['add_host']);
     $json_hosts = file_get_contents("../db/hosts.json");
+
     $hosts = json_decode($json_hosts, true);
+
+    if (is_null($hosts)) {
+      $hosts = array();
+    }
 
     $hostname = $_REQUEST['hostname'];
     $ip = $_REQUEST['ip'];
