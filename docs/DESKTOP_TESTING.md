@@ -108,6 +108,21 @@ wails dev -tags desktop
 
 Stop the development process with `Ctrl+C` when done.
 
+## Downloading A GitHub Actions Build
+
+The repository includes a GitHub Actions workflow at `.github/workflows/build-desktop.yml`.
+
+It runs automatically on pushes to `main` and can also be started manually from GitHub:
+
+1. Open the repository on GitHub.
+2. Go to `Actions`.
+3. Select `Build Desktop App`.
+4. Click `Run workflow`.
+5. Wait for the `Linux desktop build` job to finish.
+6. Download the `bashes-linux-amd64` artifact from the workflow run page.
+
+The workflow uses `ubuntu-22.04` because Wails v2.12 expects `libwebkit2gtk-4.0-dev`, which is available there but may be missing on newer Ubuntu releases.
+
 ## Data Testing
 
 Validate the current JSON data file:
@@ -151,4 +166,3 @@ npm install --prefix frontend
 ```
 
 Do not remove project source files or legacy data files.
-
