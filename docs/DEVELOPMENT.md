@@ -36,6 +36,14 @@ GOMODCACHE=/home/ubuntu/git/bashes/.cache/go-mod \
 /home/ubuntu/git/bashes/.tools/go/bin/go test ./...
 ```
 
+Validate or migrate JSON data without a desktop:
+
+```bash
+GOCACHE=/home/ubuntu/git/bashes/.cache/go-build \
+GOMODCACHE=/home/ubuntu/git/bashes/.cache/go-mod \
+/home/ubuntu/git/bashes/.tools/go/bin/go run ./cmd/bashes-data validate public/db/hosts.json
+```
+
 Build frontend without starting a server:
 
 ```bash
