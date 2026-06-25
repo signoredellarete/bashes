@@ -11,7 +11,8 @@ For graphical desktop testing, see `docs/DESKTOP_TESTING.md`.
   - `internal/store`: JSON repository with legacy import and atomic save.
   - `internal/application`: host/subsystem service layer.
   - `internal/remotessh`: internal SSH client primitives based on Go, not external `ssh`.
-  - `internal/desktop`: Wails-facing adapter.
+- Wails-facing adapter:
+  - `app.go`: bindable root package `App` used by Wails bindings.
 - Frontend:
   - `frontend`: Vite app with `xterm.js` mounted as the terminal surface.
 - Wails entrypoint:
