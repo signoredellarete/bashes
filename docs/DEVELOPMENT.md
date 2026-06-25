@@ -2,6 +2,8 @@
 
 This repository is being migrated from the legacy local PHP app to a Wails desktop app.
 
+For graphical desktop testing, see `docs/DESKTOP_TESTING.md`.
+
 ## Current Architecture
 
 - Go backend core:
