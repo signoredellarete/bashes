@@ -108,11 +108,23 @@ wails dev -tags desktop
 
 Stop the development process with `Ctrl+C` when done.
 
+## Downloading A Release Build
+
+Tagged builds are published as GitHub Releases.
+
+1. Open the repository on GitHub.
+2. Go to `Releases`.
+3. Open the latest `Bashes v...` release.
+4. Download `bashes-linux-amd64.tar.gz`.
+5. Extract the archive and run the `bashes` binary from a Linux desktop session.
+
+Release builds are created by pushing a tag matching `v*`.
+
 ## Downloading A GitHub Actions Build
 
 The repository includes a GitHub Actions workflow at `.github/workflows/build-desktop.yml`.
 
-It runs automatically on pushes to `main` and can also be started manually from GitHub:
+It runs automatically on pushes to `main`, on tags matching `v*`, and can also be started manually from GitHub:
 
 1. Open the repository on GitHub.
 2. Go to `Actions`.
