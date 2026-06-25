@@ -8,6 +8,7 @@ This repository is being migrated from the legacy local PHP app to a Wails deskt
   - `internal/domain`: JSON schema, validation and stable IDs.
   - `internal/store`: JSON repository with legacy import and atomic save.
   - `internal/application`: host/subsystem service layer.
+  - `internal/remotessh`: internal SSH client primitives based on Go, not external `ssh`.
   - `internal/desktop`: Wails-facing adapter.
 - Frontend:
   - `frontend`: Vite app with `xterm.js` mounted as the terminal surface.
@@ -55,4 +56,3 @@ When building on a Linux desktop environment with Wails dependencies installed, 
 PATH=/home/ubuntu/git/bashes/.tools/node-v24.18.0-linux-x64/bin:/home/ubuntu/git/bashes/.tools/go/bin:/home/ubuntu/git/bashes/.tools/bin:$PATH \
 /home/ubuntu/git/bashes/.tools/bin/wails build -tags desktop
 ```
-
