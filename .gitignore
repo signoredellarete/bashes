@@ -4,3 +4,7 @@ public/db/*
 .pid
 .tmp/
 log/
+.tools/
+.cache/
+dist/
+build/
