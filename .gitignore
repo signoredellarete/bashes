@@ -8,3 +8,7 @@ log/
 .cache/
 dist/
 build/
+bin/
+node_modules/
+frontend/node_modules/
+frontend/wailsjs/
