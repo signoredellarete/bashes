@@ -1,6 +1,5 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { EventsOn } from '../wailsjs/runtime/runtime.js';
 import '@xterm/xterm/css/xterm.css';
 import './styles.css';
 
@@ -493,19 +492,20 @@ function resizeActiveSession() {
 }
 
 function registerSSHEvents() {
-  if (!globalThis.runtime?.EventsOn) return;
+  const eventsOn = globalThis.runtime?.EventsOn;
+  if (!eventsOn) return;
 
-  EventsOn('ssh:output', (event) => {
+  eventsOn('ssh:output', (event) => {
     if (!state.activeSessionId || event.sessionId === state.activeSessionId) {
       terminal.write(event.data ?? '');
     }
   });
-  EventsOn('ssh:status', (event) => {
+  eventsOn('ssh:status', (event) => {
     if (!state.activeSessionId || event.sessionId === state.activeSessionId) {
       terminal.writeln(`\r\n${event.message}`);
     }
   });
-  EventsOn('ssh:closed', (event) => {
+  eventsOn('ssh:closed', (event) => {
     if (!state.activeSessionId || event.sessionId === state.activeSessionId) {
       terminal.writeln(`\r\n${event.message}`);
       state.activeSessionId = null;
