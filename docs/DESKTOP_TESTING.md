@@ -158,11 +158,14 @@ When the desktop shell starts:
 - The left sidebar shows hosts from the bound backend if data exists.
 - The desktop build uses the Wails `go.main.App` binding for host and subsystem data.
 - `Add Host` opens a left slide-out panel.
-- Each host row exposes a small `+` action to add a subsystem under that host.
+- Selecting a host or subsystem exposes contextual actions in the session header: edit, add subsystem, keys, delete, connect.
 - The UI writes host and subsystem changes through the Go backend.
 - Browser-only frontend testing uses an in-memory demo store because Wails bindings are unavailable there.
 - The main panel renders `xterm.js` terminal tabs, one per active SSH session.
 - Clicking a host or subsystem in the sidebar focuses its active SSH tab when one exists.
+- Clicking a host or subsystem without an active session creates a temporary tab; starting SSH turns it into a real session tab.
+- Double-clicking a host or subsystem attempts an SSH connection using automatic credentials, then opens the connect panel if credentials are needed.
+- Selecting terminal text copies it to the clipboard; right-clicking the terminal pastes clipboard text into the session.
 - The Connect action opens an SSH panel and starts a backend-managed shell session.
 - SSH authentication can use a session-only password, `SSH_AUTH_SOCK`, default `~/.ssh` keys, or an explicit key path.
 - The `Keys` panel can generate Ed25519 keys under `data/keys` and install the selected public key on a selected remote resource.

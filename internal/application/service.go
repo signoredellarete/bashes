@@ -106,6 +106,46 @@ func (s *Service) AddSubsystem(hostID string, input EndpointInput) (domain.Endpo
 	return subsystem, nil
 }
 
+func (s *Service) UpdateResource(id string, input EndpointInput) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("resource id is required")
+	}
+
+	data, err := s.store.Load()
+	if err != nil {
+		return err
+	}
+
+	for i := range data.Hosts {
+		if data.Hosts[i].ID == id {
+			data.Hosts[i].Hostname = strings.TrimSpace(input.Hostname)
+			data.Hosts[i].IP = strings.TrimSpace(input.IP)
+			data.Hosts[i].Port = input.Port
+			data.Hosts[i].User = strings.TrimSpace(input.User)
+			return s.store.Save(data)
+		}
+	}
+
+	for i := range data.Hosts {
+		for j := range data.Hosts[i].Subsystems {
+			if data.Hosts[i].Subsystems[j].ID == id {
+				if !domain.ValidResourceType(input.Type) || input.Type == domain.ResourceHost {
+					return fmt.Errorf("invalid subsystem type %q", input.Type)
+				}
+				data.Hosts[i].Subsystems[j].Type = input.Type
+				data.Hosts[i].Subsystems[j].Hostname = strings.TrimSpace(input.Hostname)
+				data.Hosts[i].Subsystems[j].IP = strings.TrimSpace(input.IP)
+				data.Hosts[i].Subsystems[j].Port = input.Port
+				data.Hosts[i].Subsystems[j].User = strings.TrimSpace(input.User)
+				return s.store.Save(data)
+			}
+		}
+	}
+
+	return fmt.Errorf("resource %q not found", id)
+}
+
 func (s *Service) DeleteResource(id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {

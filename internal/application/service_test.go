@@ -129,6 +129,66 @@ func TestServiceDeletesHostAndSubsystemByID(t *testing.T) {
 	}
 }
 
+func TestServiceUpdatesHostAndSubsystemByID(t *testing.T) {
+	store := newMemoryStore()
+	service := NewService(store)
+
+	host, err := service.AddHost(EndpointInput{
+		Hostname: "server-01",
+		IP:       "10.0.0.10",
+		Port:     22,
+		User:     "root",
+	})
+	if err != nil {
+		t.Fatalf("AddHost() error = %v", err)
+	}
+	subsystem, err := service.AddSubsystem(host.ID, EndpointInput{
+		Type:     domain.ResourceVM,
+		Hostname: "vm-app",
+		IP:       "10.0.0.30",
+		Port:     22,
+		User:     "ubuntu",
+	})
+	if err != nil {
+		t.Fatalf("AddSubsystem() error = %v", err)
+	}
+
+	if err := service.UpdateResource(host.ID, EndpointInput{
+		Hostname: "server-renamed",
+		IP:       "10.0.0.11",
+		Port:     2200,
+		User:     "admin",
+	}); err != nil {
+		t.Fatalf("UpdateResource(host) error = %v", err)
+	}
+	if err := service.UpdateResource(subsystem.ID, EndpointInput{
+		Type:     domain.ResourceLXC,
+		Hostname: "lxc-app",
+		IP:       "10.0.0.31",
+		Port:     2222,
+		User:     "deploy",
+	}); err != nil {
+		t.Fatalf("UpdateResource(subsystem) error = %v", err)
+	}
+
+	hosts, err := service.ListHosts()
+	if err != nil {
+		t.Fatalf("ListHosts() error = %v", err)
+	}
+	if hosts[0].ID != host.ID {
+		t.Fatalf("Host ID changed = %q, want %q", hosts[0].ID, host.ID)
+	}
+	if hosts[0].Hostname != "server-renamed" || hosts[0].Port != 2200 {
+		t.Fatalf("Host was not updated: %+v", hosts[0])
+	}
+	if hosts[0].Subsystems[0].ID != subsystem.ID {
+		t.Fatalf("Subsystem ID changed = %q, want %q", hosts[0].Subsystems[0].ID, subsystem.ID)
+	}
+	if hosts[0].Subsystems[0].Type != domain.ResourceLXC || hosts[0].Subsystems[0].User != "deploy" {
+		t.Fatalf("Subsystem was not updated: %+v", hosts[0].Subsystems[0])
+	}
+}
+
 func TestServicePropagatesValidationErrors(t *testing.T) {
 	store := newMemoryStore()
 	service := NewService(store)

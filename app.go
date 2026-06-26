@@ -61,6 +61,10 @@ func (a *App) AddSubsystem(hostID string, input application.EndpointInput) (doma
 	return a.service.AddSubsystem(hostID, input)
 }
 
+func (a *App) UpdateResource(id string, input application.EndpointInput) error {
+	return a.service.UpdateResource(id, input)
+}
+
 func (a *App) DeleteResource(id string) error {
 	return a.service.DeleteResource(id)
 }

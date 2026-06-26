@@ -27,6 +27,7 @@ const state = {
   busy: false,
   drawerMode: null,
   drawerHostId: null,
+  editResourceId: null,
   sessions: new Map(),
 };
 
@@ -44,9 +45,7 @@ app.innerHTML = `
 
     <div class="toolbar">
       <input id="search" type="search" placeholder="Search hosts" autocomplete="off" />
-      <button id="refresh" class="secondary" type="button" title="Refresh hosts">Refresh</button>
       <button id="open-host-panel" type="button" title="Add host">Add Host</button>
-      <button id="open-keys-panel" class="secondary" type="button" title="Manage SSH keys">Keys</button>
     </div>
 
     <section id="hosts" class="hosts" aria-label="Hosts"></section>
@@ -59,6 +58,9 @@ app.innerHTML = `
         <h2 id="session-title">No session selected</h2>
       </div>
       <div class="session-actions">
+        <button id="edit-resource" class="secondary" type="button" disabled>Edit</button>
+        <button id="header-add-subsystem" class="secondary" type="button" disabled>Add Subsystem</button>
+        <button id="open-keys-panel" class="secondary" type="button" disabled>Keys</button>
         <button id="delete-resource" class="secondary" type="button" disabled>Delete</button>
         <button id="disconnect" class="secondary" type="button" disabled>Disconnect</button>
         <button id="connect" type="button" disabled>Connect</button>
@@ -217,10 +219,16 @@ window.addEventListener('resize', () => {
 
 registerSSHEvents();
 
-document.querySelector('#refresh').addEventListener('click', () => loadHosts());
 document.querySelector('#search').addEventListener('input', (event) => renderHosts(event.target.value));
+document.querySelector('#search').addEventListener('keydown', (event) => event.stopPropagation());
 document.querySelector('#open-host-panel').addEventListener('click', () => openResourcePanel('host'));
 document.querySelector('#open-keys-panel').addEventListener('click', () => openKeysPanel());
+document.querySelector('#edit-resource').addEventListener('click', () => openEditPanel());
+document.querySelector('#header-add-subsystem').addEventListener('click', () => {
+  const selected = findResource(state.selectedId);
+  const hostID = selected?.type === 'host' ? selected.resource.id : selected?.parent?.id;
+  if (hostID) openResourcePanel('subsystem', hostID);
+});
 document.querySelector('#connect').addEventListener('click', () => openConnectPanel());
 document.querySelector('#disconnect').addEventListener('click', () => disconnectActiveSession());
 document.querySelector('#delete-resource').addEventListener('click', () => deleteSelectedResource());
@@ -268,10 +276,20 @@ async function loadKeys() {
 async function submitResource(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  const input = endpointInput(form, state.drawerMode === 'subsystem' ? form.elements.type.value : '');
+  const editing = state.drawerMode === 'edit' ? findResource(state.editResourceId) : null;
+  const type = state.drawerMode === 'subsystem' || editing?.type !== 'host' ? form.elements.type.value : '';
+  const input = endpointInput(form, type);
 
   await withBusy(async () => {
-    if (state.drawerMode === 'subsystem') {
+    if (state.drawerMode === 'edit') {
+      const resource = findResource(state.editResourceId)?.resource;
+      await apiUpdateResource(state.editResourceId, input);
+      for (const session of sessionsForResource(state.editResourceId)) {
+        session.title = input.hostname;
+        session.target = `${input.user}@${input.ip || input.hostname}:${input.port}`;
+      }
+      writeNotice(`Updated ${resource?.hostname ?? 'resource'}.`);
+    } else if (state.drawerMode === 'subsystem') {
       const subsystem = await apiAddSubsystem(state.drawerHostId, input);
       state.selectedId = subsystem.id;
       writeNotice(`Added ${subsystem.type} ${subsystem.hostname}.`);
@@ -282,6 +300,7 @@ async function submitResource(event) {
     }
     closeResourcePanel();
     await refreshHosts();
+    renderTabs();
   });
 }
 
@@ -291,7 +310,7 @@ async function submitConnect(event) {
   if (!selected) return;
 
   const existing = sessionForResource(selected.id);
-  if (existing) {
+  if (existing && !existing.pending) {
     focusSession(existing.id);
     closeConnectPanel();
     return;
@@ -314,6 +333,25 @@ async function submitConnect(event) {
     createSession(sessionID, selected);
     closeConnectPanel();
     resizeActiveSession();
+  });
+}
+
+async function quickConnect(resource) {
+  await withBusy(async () => {
+    try {
+      writeNotice(`Connecting to ${resource.user}@${resource.ip || resource.hostname}:${resource.port} ...`);
+      const sessionID = await apiStartSSHSession({
+        resourceId: resource.id,
+        trustHostKey: true,
+        cols: 120,
+        rows: 32,
+      });
+      createSession(sessionID, resource);
+      resizeActiveSession();
+    } catch (error) {
+      writeNotice(`Connection needs credentials: ${error?.message ?? error}`);
+      await openConnectPanel();
+    }
   });
 }
 
@@ -431,23 +469,25 @@ function resourceRow(resource, type, child = false) {
   selectButton.addEventListener('click', () => {
     state.selectedId = resource.id;
     const session = sessionForResource(resource.id);
-    state.activeSessionId = session?.id ?? null;
+    state.activeSessionId = session?.id ?? createPendingTab(resource);
     renderTabs();
     renderSelection();
     fitActiveTerminal();
   });
+  selectButton.addEventListener('dblclick', () => {
+    state.selectedId = resource.id;
+    const session = sessionForResource(resource.id);
+    if (session && !session.pending) {
+      state.activeSessionId = session.id;
+      renderTabs();
+      renderSelection();
+      fitActiveTerminal();
+      return;
+    }
+    createPendingTab(resource);
+    quickConnect(resource);
+  });
   row.append(selectButton);
-
-  if (!child) {
-    const addSubsystem = document.createElement('button');
-    addSubsystem.type = 'button';
-    addSubsystem.className = 'row-action';
-    addSubsystem.title = 'Add subsystem';
-    addSubsystem.setAttribute('aria-label', `Add subsystem to ${resource.hostname}`);
-    addSubsystem.textContent = '+';
-    addSubsystem.addEventListener('click', () => openResourcePanel('subsystem', resource.id));
-    row.append(addSubsystem);
-  }
 
   return {
     element: row,
@@ -455,7 +495,40 @@ function resourceRow(resource, type, child = false) {
   };
 }
 
+function createPendingTab(resource) {
+  const existing = sessionForResource(resource.id);
+  if (existing) {
+    state.activeSessionId = existing.id;
+    return existing.id;
+  }
+
+  const sessionID = `pending-${resource.id}`;
+  const pane = document.createElement('section');
+  pane.className = 'terminal-pane pending-pane';
+  pane.dataset.sessionId = sessionID;
+  pane.textContent = `Ready to connect to ${resource.user}@${resource.ip || resource.hostname}:${resource.port}`;
+  stack.append(pane);
+
+  state.sessions.set(sessionID, {
+    id: sessionID,
+    resourceId: resource.id,
+    title: resource.hostname,
+    target: `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`,
+    element: pane,
+    pending: true,
+    closed: false,
+  });
+  state.activeSessionId = sessionID;
+  return sessionID;
+}
+
 function createSession(sessionID, resource) {
+  const pending = sessionForResource(resource.id);
+  if (pending?.pending) {
+    pending.element.remove();
+    state.sessions.delete(pending.id);
+  }
+
   const pane = document.createElement('section');
   pane.className = 'terminal-pane';
   pane.dataset.sessionId = sessionID;
@@ -480,6 +553,19 @@ function createSession(sessionID, resource) {
     apiWriteSSHSession(sessionID, data).catch((error) => {
       terminal.writeln(`\r\nError: ${error?.message ?? error}`);
     });
+  });
+  terminal.onSelectionChange(() => {
+    const selected = terminal.getSelection();
+    if (!selected) return;
+    writeClipboard(selected).catch(() => {});
+  });
+  pane.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    readClipboard()
+      .then((text) => {
+        if (text) return apiWriteSSHSession(sessionID, text);
+      })
+      .catch(() => {});
   });
 
   state.sessions.set(sessionID, {
@@ -510,9 +596,9 @@ function renderTabs() {
   tabs.replaceChildren(...sessions.map((session) => {
     const tab = document.createElement('button');
     tab.type = 'button';
-    tab.className = `session-tab ${session.id === state.activeSessionId ? 'active' : ''} ${session.closed ? 'closed' : ''}`;
+    tab.className = `session-tab ${session.id === state.activeSessionId ? 'active' : ''} ${session.closed ? 'closed' : ''} ${session.pending ? 'pending' : ''}`;
     tab.innerHTML = '<span></span><strong></strong>';
-    tab.querySelector('span').textContent = session.closed ? 'closed' : 'ssh';
+    tab.querySelector('span').textContent = session.closed ? 'closed' : session.pending ? 'new' : 'ssh';
     tab.querySelector('strong').textContent = session.title;
     tab.addEventListener('click', () => {
       state.activeSessionId = session.id;
@@ -554,6 +640,7 @@ function openResourcePanel(mode, hostID = '') {
 
   state.drawerMode = mode;
   state.drawerHostId = hostID;
+  state.editResourceId = null;
   form.reset();
   form.elements.port.value = '22';
 
@@ -578,12 +665,58 @@ function openResourcePanel(mode, hostID = '') {
   form.elements.hostname.focus();
 }
 
+function openEditPanel() {
+  const selected = findResource(state.selectedId);
+  if (!selected) return;
+
+  const panel = document.querySelector('#resource-panel');
+  const form = document.querySelector('#resource-form');
+  const typeField = document.querySelector('#subsystem-type-field');
+  const parentSummary = document.querySelector('#parent-host-summary');
+  const title = document.querySelector('#resource-panel-title');
+  const kicker = document.querySelector('#resource-panel-kicker');
+  const submit = document.querySelector('#resource-submit');
+  const resource = selected.resource;
+  const subsystemMode = selected.type !== 'host';
+
+  state.drawerMode = 'edit';
+  state.drawerHostId = selected.parent?.id ?? '';
+  state.editResourceId = resource.id;
+
+  form.reset();
+  form.elements.hostname.value = resource.hostname;
+  form.elements.ip.value = resource.ip;
+  form.elements.port.value = String(resource.port);
+  form.elements.user.value = resource.user;
+  typeField.hidden = !subsystemMode;
+  parentSummary.hidden = !subsystemMode;
+  if (subsystemMode) {
+    form.elements.type.value = resource.type;
+    kicker.textContent = 'Subsystem';
+    title.textContent = 'Edit Subsystem';
+    submit.textContent = 'Save Changes';
+    parentSummary.textContent = selected.parent
+      ? `Parent host: ${selected.parent.hostname} (${selected.parent.user}@${selected.parent.ip || selected.parent.hostname})`
+      : '';
+  } else {
+    kicker.textContent = 'Host';
+    title.textContent = 'Edit Host';
+    submit.textContent = 'Save Changes';
+    parentSummary.textContent = '';
+  }
+
+  panel.hidden = false;
+  requestAnimationFrame(() => panel.classList.add('open'));
+  form.elements.hostname.focus();
+}
+
 function closeResourcePanel() {
   const panel = document.querySelector('#resource-panel');
   panel.classList.remove('open');
   panel.hidden = true;
   state.drawerMode = null;
   state.drawerHostId = null;
+  state.editResourceId = null;
 }
 
 async function openConnectPanel() {
@@ -631,6 +764,9 @@ function renderSelection() {
   const selected = findResource(state.selectedId);
   const activeSession = state.sessions.get(state.activeSessionId);
   const title = document.querySelector('#session-title');
+  const edit = document.querySelector('#edit-resource');
+  const addSubsystem = document.querySelector('#header-add-subsystem');
+  const keys = document.querySelector('#open-keys-panel');
   const connect = document.querySelector('#connect');
   const disconnect = document.querySelector('#disconnect');
   const remove = document.querySelector('#delete-resource');
@@ -643,6 +779,19 @@ function renderSelection() {
     title.textContent = 'No session selected';
   }
 
+  if (!selected) {
+    edit.disabled = true;
+    addSubsystem.disabled = true;
+    keys.disabled = true;
+    connect.disabled = true;
+    disconnect.disabled = true;
+    remove.disabled = true;
+    return;
+  }
+
+  edit.disabled = state.busy || !selected;
+  addSubsystem.disabled = state.busy || !selected;
+  keys.disabled = state.busy || !selected;
   connect.disabled = state.busy || !selected;
   disconnect.disabled = state.busy || !activeSession;
   remove.disabled = state.busy || !selected;
@@ -706,6 +855,16 @@ function sessionsForResource(resourceId) {
   return [...state.sessions.values()].filter((session) => session.resourceId === resourceId);
 }
 
+function focusSession(sessionID) {
+  const session = state.sessions.get(sessionID);
+  if (!session) return;
+  state.activeSessionId = session.id;
+  state.selectedId = session.resourceId;
+  renderTabs();
+  renderSelection();
+  fitActiveTerminal();
+}
+
 function firstSessionID() {
   return state.sessions.keys().next().value ?? null;
 }
@@ -734,13 +893,13 @@ function setDisabledState(disabled) {
 
 function fitActiveTerminal() {
   const session = state.sessions.get(state.activeSessionId);
-  if (!session) return;
+  if (!session?.fitAddon) return;
   session.fitAddon.fit();
 }
 
 function resizeActiveSession() {
   const session = state.sessions.get(state.activeSessionId);
-  if (!session) return;
+  if (!session?.terminal || session.pending) return;
   apiResizeSSHSession(session.id, session.terminal.cols, session.terminal.rows).catch(() => {});
 }
 
@@ -752,6 +911,19 @@ function writeNotice(message) {
   }
   const empty = document.querySelector('#empty-terminal');
   empty.textContent = message;
+}
+
+async function writeClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+  }
+}
+
+async function readClipboard() {
+  if (navigator.clipboard?.readText) {
+    return await navigator.clipboard.readText();
+  }
+  return '';
 }
 
 function registerSSHEvents() {
@@ -802,6 +974,30 @@ async function apiAddSubsystem(hostID, input) {
   const subsystem = { id: `${input.type}-${Date.now()}`, type: input.type, hostname: input.hostname, ip: input.ip, port: input.port, user: input.user };
   host.subsystems.push(subsystem);
   return clone(subsystem);
+}
+
+async function apiUpdateResource(id, input) {
+  const api = wailsAPI();
+  if (api?.UpdateResource) return await api.UpdateResource(id, input);
+  for (const host of demoStore.hosts) {
+    if (host.id === id) {
+      host.hostname = input.hostname;
+      host.ip = input.ip;
+      host.port = input.port;
+      host.user = input.user;
+      return;
+    }
+    const subsystem = host.subsystems.find((candidate) => candidate.id === id);
+    if (subsystem) {
+      subsystem.type = input.type;
+      subsystem.hostname = input.hostname;
+      subsystem.ip = input.ip;
+      subsystem.port = input.port;
+      subsystem.user = input.user;
+      return;
+    }
+  }
+  throw new Error(`Resource ${id} not found`);
 }
 
 async function apiDeleteResource(id) {
