@@ -156,7 +156,9 @@ The migrated file remains plain JSON and can be copied between Bashes installati
 When the desktop shell starts:
 
 - The left sidebar shows hosts from the bound backend if data exists.
-- If no backend data is available in the frontend fallback path, demo data may be shown during browser-only frontend testing.
+- The desktop build uses the Wails `go.main.App` binding for host and subsystem data.
+- The UI provides forms to add hosts and subsystems through the Go backend.
+- Browser-only frontend testing uses an in-memory demo store because Wails bindings are unavailable there.
 - The main panel renders an `xterm.js` terminal surface.
 - The Connect button currently writes a placeholder line; real SSH streaming is not yet connected to the UI.
 
