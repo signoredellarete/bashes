@@ -337,6 +337,7 @@ async function submitConnect(event) {
     });
     createSession(sessionID, selected);
     closeConnectPanel();
+    await refreshHosts();
     resizeActiveSession();
   });
 }
@@ -347,11 +348,13 @@ async function quickConnect(resource) {
       writeNotice(`Connecting to ${resource.user}@${resource.ip || resource.hostname}:${resource.port} ...`);
       const sessionID = await apiStartSSHSession({
         resourceId: resource.id,
+        ...authInputFromPreference(resource),
         trustHostKey: true,
         cols: 120,
         rows: 32,
       });
       createSession(sessionID, resource);
+      await refreshHosts();
       resizeActiveSession();
     } catch (error) {
       writeNotice(`Connection needs credentials: ${error?.message ?? error}`);
@@ -390,6 +393,7 @@ async function submitInstallKey(event) {
     });
     form.reset();
     form.elements.trustHostKey.checked = true;
+    await refreshHosts();
     writeNotice(`Installed key ${keyName} on ${selected.hostname}.`);
   });
 }
@@ -757,6 +761,7 @@ async function openConnectPanel() {
   form.reset();
   form.elements.trustHostKey.checked = true;
   renderKeyOptions(form.elements.keyName, true);
+  applyConnectDefaults(form, selected);
   document.querySelector('#connect-summary').textContent =
     `${selected.user}@${selected.ip || selected.hostname}:${selected.port}`;
   panel.hidden = false;
@@ -843,6 +848,35 @@ function renderKeyOptions(select = document.querySelector('#key-select'), includ
   }
   select.replaceChildren(...options);
   renderSelectedPublicKey();
+}
+
+function applyConnectDefaults(form, resource) {
+  const auth = resource?.auth;
+  if (!auth) return;
+
+  if (auth.trustHostKey) {
+    form.elements.trustHostKey.checked = true;
+  }
+  if (auth.method === 'key' && auth.keyName) {
+    const hasKey = [...form.elements.keyName.options].some((option) => option.value === auth.keyName);
+    if (hasKey) form.elements.keyName.value = auth.keyName;
+  }
+  if (auth.method === 'path' && auth.privateKeyPath) {
+    form.elements.privateKeyPath.value = auth.privateKeyPath;
+  }
+}
+
+function authInputFromPreference(resource) {
+  const auth = resource?.auth;
+  if (!auth) return {};
+
+  if (auth.method === 'key' && auth.keyName) {
+    return { keyName: auth.keyName };
+  }
+  if (auth.method === 'path' && auth.privateKeyPath) {
+    return { privateKeyPath: auth.privateKeyPath };
+  }
+  return {};
 }
 
 async function renderSelectedPublicKey() {

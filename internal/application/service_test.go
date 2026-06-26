@@ -189,6 +189,56 @@ func TestServiceUpdatesHostAndSubsystemByID(t *testing.T) {
 	}
 }
 
+func TestServiceSetsResourceAuth(t *testing.T) {
+	store := newMemoryStore()
+	service := NewService(store)
+
+	host, err := service.AddHost(EndpointInput{
+		Hostname: "server-01",
+		IP:       "10.0.0.10",
+		Port:     22,
+		User:     "root",
+	})
+	if err != nil {
+		t.Fatalf("AddHost() error = %v", err)
+	}
+	subsystem, err := service.AddSubsystem(host.ID, EndpointInput{
+		Type:     domain.ResourceVM,
+		Hostname: "vm-app",
+		IP:       "10.0.0.30",
+		Port:     22,
+		User:     "ubuntu",
+	})
+	if err != nil {
+		t.Fatalf("AddSubsystem() error = %v", err)
+	}
+
+	if err := service.SetResourceAuth(host.ID, domain.Auth{
+		Method:       domain.AuthMethodKey,
+		KeyName:      " bashes-main ",
+		TrustHostKey: true,
+	}); err != nil {
+		t.Fatalf("SetResourceAuth(host) error = %v", err)
+	}
+	if err := service.SetResourceAuth(subsystem.ID, domain.Auth{
+		Method:         domain.AuthMethodPath,
+		PrivateKeyPath: " ~/.ssh/custom ",
+	}); err != nil {
+		t.Fatalf("SetResourceAuth(subsystem) error = %v", err)
+	}
+
+	hosts, err := service.ListHosts()
+	if err != nil {
+		t.Fatalf("ListHosts() error = %v", err)
+	}
+	if hosts[0].Auth == nil || hosts[0].Auth.Method != domain.AuthMethodKey || hosts[0].Auth.KeyName != "bashes-main" {
+		t.Fatalf("Host auth was not saved: %+v", hosts[0].Auth)
+	}
+	if hosts[0].Subsystems[0].Auth == nil || hosts[0].Subsystems[0].Auth.Method != domain.AuthMethodPath || hosts[0].Subsystems[0].Auth.PrivateKeyPath != "~/.ssh/custom" {
+		t.Fatalf("Subsystem auth was not saved: %+v", hosts[0].Subsystems[0].Auth)
+	}
+}
+
 func TestServicePropagatesValidationErrors(t *testing.T) {
 	store := newMemoryStore()
 	service := NewService(store)

@@ -176,3 +176,63 @@ func (s *Service) DeleteResource(id string) error {
 
 	return fmt.Errorf("resource %q not found", id)
 }
+
+func (s *Service) SetResourceAuth(id string, auth domain.Auth) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("resource id is required")
+	}
+
+	normalized, err := normalizeAuth(auth)
+	if err != nil {
+		return err
+	}
+
+	data, err := s.store.Load()
+	if err != nil {
+		return err
+	}
+
+	for i := range data.Hosts {
+		if data.Hosts[i].ID == id {
+			data.Hosts[i].Auth = &normalized
+			return s.store.Save(data)
+		}
+	}
+
+	for i := range data.Hosts {
+		for j := range data.Hosts[i].Subsystems {
+			if data.Hosts[i].Subsystems[j].ID == id {
+				data.Hosts[i].Subsystems[j].Auth = &normalized
+				return s.store.Save(data)
+			}
+		}
+	}
+
+	return fmt.Errorf("resource %q not found", id)
+}
+
+func normalizeAuth(auth domain.Auth) (domain.Auth, error) {
+	auth.Method = domain.AuthMethod(strings.TrimSpace(string(auth.Method)))
+	auth.KeyName = strings.TrimSpace(auth.KeyName)
+	auth.PrivateKeyPath = strings.TrimSpace(auth.PrivateKeyPath)
+	if !domain.ValidAuthMethod(auth.Method) {
+		return domain.Auth{}, fmt.Errorf("invalid auth method %q", auth.Method)
+	}
+	switch auth.Method {
+	case domain.AuthMethodKey:
+		if auth.KeyName == "" {
+			return domain.Auth{}, errors.New("key name is required for key auth")
+		}
+		auth.PrivateKeyPath = ""
+	case domain.AuthMethodPath:
+		if auth.PrivateKeyPath == "" {
+			return domain.Auth{}, errors.New("private key path is required for path auth")
+		}
+		auth.KeyName = ""
+	case domain.AuthMethodPassword, domain.AuthMethodAgent:
+		auth.KeyName = ""
+		auth.PrivateKeyPath = ""
+	}
+	return auth, nil
+}

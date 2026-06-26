@@ -3,6 +3,7 @@ package domain
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -32,6 +33,7 @@ type Host struct {
 	IP         string     `json:"ip"`
 	Port       int        `json:"port"`
 	User       string     `json:"user"`
+	Auth       *Auth      `json:"auth,omitempty"`
 	Subsystems []Endpoint `json:"subsystems"`
 }
 
@@ -42,6 +44,23 @@ type Endpoint struct {
 	IP       string       `json:"ip"`
 	Port     int          `json:"port"`
 	User     string       `json:"user"`
+	Auth     *Auth        `json:"auth,omitempty"`
+}
+
+type AuthMethod string
+
+const (
+	AuthMethodPassword AuthMethod = "password"
+	AuthMethodKey      AuthMethod = "key"
+	AuthMethodPath     AuthMethod = "path"
+	AuthMethodAgent    AuthMethod = "agent"
+)
+
+type Auth struct {
+	Method         AuthMethod `json:"method"`
+	KeyName        string     `json:"keyName,omitempty"`
+	PrivateKeyPath string     `json:"privateKeyPath,omitempty"`
+	TrustHostKey   bool       `json:"trustHostKey,omitempty"`
 }
 
 func NewStore() Store {
@@ -58,6 +77,9 @@ func (s Store) Validate() error {
 		if err := validateEndpointFields("host", host.ID, host.Hostname, host.IP, host.Port, host.User); err != nil {
 			return fmt.Errorf("hosts[%d]: %w", i, err)
 		}
+		if err := validateAuth(host.Auth); err != nil {
+			return fmt.Errorf("hosts[%d].auth: %w", i, err)
+		}
 		if _, exists := seen[host.ID]; exists {
 			return fmt.Errorf("hosts[%d]: duplicate id %q", i, host.ID)
 		}
@@ -70,6 +92,9 @@ func (s Store) Validate() error {
 			if err := validateEndpointFields(string(sub.Type), sub.ID, sub.Hostname, sub.IP, sub.Port, sub.User); err != nil {
 				return fmt.Errorf("hosts[%d].subsystems[%d]: %w", i, j, err)
 			}
+			if err := validateAuth(sub.Auth); err != nil {
+				return fmt.Errorf("hosts[%d].subsystems[%d].auth: %w", i, j, err)
+			}
 			if _, exists := seen[sub.ID]; exists {
 				return fmt.Errorf("hosts[%d].subsystems[%d]: duplicate id %q", i, j, sub.ID)
 			}
@@ -78,6 +103,15 @@ func (s Store) Validate() error {
 	}
 
 	return nil
+}
+
+func ValidAuthMethod(method AuthMethod) bool {
+	switch method {
+	case AuthMethodPassword, AuthMethodKey, AuthMethodPath, AuthMethodAgent:
+		return true
+	default:
+		return false
+	}
 }
 
 func NormalizeStore(store Store) Store {
@@ -163,6 +197,35 @@ func validateEndpointFields(kind, id, hostname, ip string, port int, user string
 	}
 	if hasControl(user) || strings.ContainsFunc(user, unicode.IsSpace) {
 		return fmt.Errorf("%s user contains invalid characters", kind)
+	}
+	return nil
+}
+
+func validateAuth(auth *Auth) error {
+	if auth == nil {
+		return nil
+	}
+	if !ValidAuthMethod(auth.Method) {
+		return fmt.Errorf("invalid method %q", auth.Method)
+	}
+	if hasControl(string(auth.Method)) {
+		return errors.New("method contains control characters")
+	}
+	if hasControl(auth.KeyName) {
+		return errors.New("key name contains control characters")
+	}
+	if hasControl(auth.PrivateKeyPath) {
+		return errors.New("private key path contains control characters")
+	}
+	switch auth.Method {
+	case AuthMethodKey:
+		if strings.TrimSpace(auth.KeyName) == "" {
+			return errors.New("key name is required for key auth")
+		}
+	case AuthMethodPath:
+		if strings.TrimSpace(auth.PrivateKeyPath) == "" {
+			return errors.New("private key path is required for path auth")
+		}
 	}
 	return nil
 }

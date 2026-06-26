@@ -162,6 +162,13 @@ func (a *App) ReadSSHPublicKey(name string) (string, error) {
 	return string(key), nil
 }
 
+func (a *App) resolveSessionKeyPath(input SSHSessionInput) SSHSessionInput {
+	if strings.TrimSpace(input.PrivateKeyPath) == "" && strings.TrimSpace(input.KeyName) != "" {
+		input.PrivateKeyPath = filepath.Join(a.keysDir(), sanitizeKeyName(input.KeyName))
+	}
+	return input
+}
+
 func (a *App) InstallSSHKey(input InstallSSHKeyInput) error {
 	publicKey, err := a.ReadSSHPublicKey(input.KeyName)
 	if err != nil {
@@ -199,7 +206,11 @@ func (a *App) InstallSSHKey(input InstallSSHKeyInput) error {
 	if err != nil {
 		return fmt.Errorf("install ssh key: %w: %s", err, strings.TrimSpace(string(output)))
 	}
-	return nil
+	return a.service.SetResourceAuth(input.ResourceID, domain.Auth{
+		Method:       domain.AuthMethodKey,
+		KeyName:      sanitizeKeyName(input.KeyName),
+		TrustHostKey: input.TrustHostKey,
+	})
 }
 
 type SSHSessionInput struct {
@@ -232,8 +243,10 @@ func (a *App) StartSSHSession(input SSHSessionInput) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	input = applyAuthPreference(resource, input)
+	dialInput := a.resolveSessionKeyPath(input)
 
-	client, err := dialResource(resource, input, remotessh.DefaultTimeout)
+	client, err := dialResource(resource, dialInput, remotessh.DefaultTimeout)
 	if err != nil {
 		return "", err
 	}
@@ -269,6 +282,14 @@ func (a *App) StartSSHSession(input SSHSessionInput) (string, error) {
 		SessionID: sessionID,
 		Message:   fmt.Sprintf("Connected to %s@%s:%d", resource.User, sshHost(resource), resource.Port),
 	})
+	if auth := authPreferenceFromSessionInput(input); auth != nil {
+		if err := a.service.SetResourceAuth(resource.ID, *auth); err != nil {
+			a.emit("ssh:status", SSHEvent{
+				SessionID: sessionID,
+				Message:   fmt.Sprintf("Could not save SSH auth preference: %v", err),
+			})
+		}
+	}
 
 	go a.waitForShell(runtimeCtx, session)
 
@@ -367,6 +388,7 @@ func (a *App) resourceByID(id string) (domain.Endpoint, error) {
 				IP:       host.IP,
 				Port:     host.Port,
 				User:     host.User,
+				Auth:     host.Auth,
 			}, nil
 		}
 		for _, subsystem := range host.Subsystems {
@@ -394,6 +416,48 @@ type eventWriter struct {
 func (w eventWriter) Write(data []byte) (int, error) {
 	w.app.emit("ssh:output", SSHEvent{SessionID: w.sessionID, Data: string(data)})
 	return len(data), nil
+}
+
+func applyAuthPreference(resource domain.Endpoint, input SSHSessionInput) SSHSessionInput {
+	if hasExplicitAuth(input) || resource.Auth == nil {
+		return input
+	}
+
+	auth := resource.Auth
+	if auth.TrustHostKey {
+		input.TrustHostKey = true
+	}
+	switch auth.Method {
+	case domain.AuthMethodKey:
+		input.KeyName = auth.KeyName
+	case domain.AuthMethodPath:
+		input.PrivateKeyPath = auth.PrivateKeyPath
+	case domain.AuthMethodPassword, domain.AuthMethodAgent:
+	}
+	return input
+}
+
+func hasExplicitAuth(input SSHSessionInput) bool {
+	return strings.TrimSpace(input.Password) != "" ||
+		strings.TrimSpace(input.KeyName) != "" ||
+		strings.TrimSpace(input.PrivateKeyPath) != ""
+}
+
+func authPreferenceFromSessionInput(input SSHSessionInput) *domain.Auth {
+	auth := domain.Auth{TrustHostKey: input.TrustHostKey}
+	switch {
+	case strings.TrimSpace(input.KeyName) != "":
+		auth.Method = domain.AuthMethodKey
+		auth.KeyName = sanitizeKeyName(input.KeyName)
+	case strings.TrimSpace(input.PrivateKeyPath) != "":
+		auth.Method = domain.AuthMethodPath
+		auth.PrivateKeyPath = strings.TrimSpace(input.PrivateKeyPath)
+	case strings.TrimSpace(input.Password) != "":
+		auth.Method = domain.AuthMethodPassword
+	default:
+		auth.Method = domain.AuthMethodAgent
+	}
+	return &auth
 }
 
 func dialResource(resource domain.Endpoint, input SSHSessionInput, timeout time.Duration) (*ssh.Client, error) {

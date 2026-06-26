@@ -126,6 +126,49 @@ func TestSaveWritesReadableVersionedJSONAndBackup(t *testing.T) {
 	}
 }
 
+func TestSaveAndLoadPreservesAuthPreference(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hosts.json")
+	repo := NewRepository(path)
+
+	store := domain.Store{
+		Version: domain.CurrentSchemaVersion,
+		Hosts: []domain.Host{
+			{
+				ID:       "host-server-01",
+				Hostname: "server-01",
+				IP:       "192.168.1.10",
+				Port:     22,
+				User:     "admin",
+				Auth: &domain.Auth{
+					Method:       domain.AuthMethodKey,
+					KeyName:      "bashes-main",
+					TrustHostKey: true,
+				},
+				Subsystems: []domain.Endpoint{},
+			},
+		},
+	}
+	if err := repo.Save(store); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"auth"`) || !strings.Contains(string(data), `"keyName": "bashes-main"`) {
+		t.Fatalf("Saved JSON does not include auth preference:\n%s", data)
+	}
+
+	loaded, err := repo.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.Hosts[0].Auth == nil || loaded.Hosts[0].Auth.Method != domain.AuthMethodKey || loaded.Hosts[0].Auth.KeyName != "bashes-main" {
+		t.Fatalf("Loaded auth preference = %+v", loaded.Hosts[0].Auth)
+	}
+}
+
 func TestLoadRejectsInvalidLegacyPort(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hosts.json")
 	legacy := `[{"hostname":"bad","ip":"127.0.0.1","port":"nope","user":"root","lxc":[],"vm":[],"docker":[]}]`
