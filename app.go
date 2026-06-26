@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +28,7 @@ import (
 type App struct {
 	ctx      context.Context
 	service  *application.Service
+	dataPath string
 	mu       sync.Mutex
 	sessions map[string]*sshSession
 }
@@ -34,6 +39,7 @@ func NewApp(dataPath string) *App {
 	}
 
 	return &App{
+		dataPath: dataPath,
 		service:  application.NewService(store.NewRepository(dataPath)),
 		sessions: make(map[string]*sshSession),
 	}
@@ -59,10 +65,144 @@ func (a *App) DeleteResource(id string) error {
 	return a.service.DeleteResource(id)
 }
 
+type SSHKeyInfo struct {
+	Name       string `json:"name"`
+	PrivateKey string `json:"privateKey"`
+	PublicKey  string `json:"publicKey"`
+}
+
+type GenerateSSHKeyInput struct {
+	Name string `json:"name"`
+}
+
+type InstallSSHKeyInput struct {
+	ResourceID           string `json:"resourceId"`
+	KeyName              string `json:"keyName"`
+	Password             string `json:"password,omitempty"`
+	PrivateKeyPath       string `json:"privateKeyPath,omitempty"`
+	PrivateKeyPassphrase string `json:"privateKeyPassphrase,omitempty"`
+	TrustHostKey         bool   `json:"trustHostKey"`
+}
+
+func (a *App) ListSSHKeys() ([]SSHKeyInfo, error) {
+	dir := a.keysDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return []SSHKeyInfo{}, nil
+		}
+		return nil, err
+	}
+
+	keys := []SSHKeyInfo{}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".pub") {
+			continue
+		}
+		name := strings.TrimSuffix(entry.Name(), ".pub")
+		keys = append(keys, SSHKeyInfo{
+			Name:       name,
+			PrivateKey: filepath.Join(dir, name),
+			PublicKey:  filepath.Join(dir, entry.Name()),
+		})
+	}
+	return keys, nil
+}
+
+func (a *App) GenerateSSHKey(input GenerateSSHKeyInput) (SSHKeyInfo, error) {
+	name := sanitizeKeyName(input.Name)
+	if name == "" {
+		name = "bashes"
+	}
+
+	dir := a.keysDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return SSHKeyInfo{}, err
+	}
+
+	privatePath := filepath.Join(dir, name)
+	publicPath := privatePath + ".pub"
+	if _, err := os.Stat(privatePath); err == nil {
+		return SSHKeyInfo{}, fmt.Errorf("ssh key %q already exists", name)
+	}
+
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return SSHKeyInfo{}, fmt.Errorf("generate ed25519 key: %w", err)
+	}
+
+	block, err := ssh.MarshalPrivateKey(privateKey, fmt.Sprintf("bashes:%s", name))
+	if err != nil {
+		return SSHKeyInfo{}, fmt.Errorf("marshal private key: %w", err)
+	}
+	if err := os.WriteFile(privatePath, pem.EncodeToMemory(block), 0o600); err != nil {
+		return SSHKeyInfo{}, err
+	}
+
+	sshPublicKey, err := ssh.NewPublicKey(publicKey)
+	if err != nil {
+		return SSHKeyInfo{}, fmt.Errorf("marshal public key: %w", err)
+	}
+	if err := os.WriteFile(publicPath, ssh.MarshalAuthorizedKey(sshPublicKey), 0o644); err != nil {
+		return SSHKeyInfo{}, err
+	}
+
+	return SSHKeyInfo{Name: name, PrivateKey: privatePath, PublicKey: publicPath}, nil
+}
+
+func (a *App) ReadSSHPublicKey(name string) (string, error) {
+	key, err := os.ReadFile(a.publicKeyPath(name))
+	if err != nil {
+		return "", err
+	}
+	return string(key), nil
+}
+
+func (a *App) InstallSSHKey(input InstallSSHKeyInput) error {
+	publicKey, err := a.ReadSSHPublicKey(input.KeyName)
+	if err != nil {
+		return err
+	}
+	resource, err := a.resourceByID(input.ResourceID)
+	if err != nil {
+		return err
+	}
+
+	client, err := dialResource(resource, SSHSessionInput{
+		Password:             input.Password,
+		PrivateKeyPath:       input.PrivateKeyPath,
+		PrivateKeyPassphrase: input.PrivateKeyPassphrase,
+		TrustHostKey:         input.TrustHostKey,
+	}, remotessh.DefaultTimeout)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	session, err := client.NewSession()
+	if err != nil {
+		return fmt.Errorf("create ssh session: %w", err)
+	}
+	defer session.Close()
+
+	authorizedKey := strings.TrimSpace(publicKey)
+	command := fmt.Sprintf(
+		"mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && grep -qxF %s ~/.ssh/authorized_keys || printf '%%s\\n' %s >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys",
+		shellQuote(authorizedKey),
+		shellQuote(authorizedKey),
+	)
+	output, err := session.CombinedOutput(command)
+	if err != nil {
+		return fmt.Errorf("install ssh key: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
 type SSHSessionInput struct {
 	ResourceID           string `json:"resourceId"`
 	Password             string `json:"password,omitempty"`
 	PrivateKeyPath       string `json:"privateKeyPath,omitempty"`
+	KeyName              string `json:"keyName,omitempty"`
 	PrivateKeyPassphrase string `json:"privateKeyPassphrase,omitempty"`
 	TrustHostKey         bool   `json:"trustHostKey"`
 	Cols                 int    `json:"cols"`
@@ -89,33 +229,7 @@ func (a *App) StartSSHSession(input SSHSessionInput) (string, error) {
 		return "", err
 	}
 
-	targetHost := strings.TrimSpace(resource.IP)
-	if targetHost == "" {
-		targetHost = strings.TrimSpace(resource.Hostname)
-	}
-
-	authMethods, agentConn, err := authMethods(input)
-	if err != nil {
-		return "", err
-	}
-	if agentConn != nil {
-		defer agentConn.Close()
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), remotessh.DefaultTimeout)
-	client, err := remotessh.Dial(ctx, remotessh.ClientOptions{
-		Target: remotessh.Target{
-			Host: targetHost,
-			Port: resource.Port,
-			User: resource.User,
-		},
-		Credentials: remotessh.Credentials{
-			Password:    input.Password,
-			AuthMethods: authMethods,
-		},
-		HostKeyPolicy: hostKeyPolicy(input.TrustHostKey),
-	})
-	cancel()
+	client, err := dialResource(resource, input, remotessh.DefaultTimeout)
 	if err != nil {
 		return "", err
 	}
@@ -149,7 +263,7 @@ func (a *App) StartSSHSession(input SSHSessionInput) (string, error) {
 
 	a.emit("ssh:status", SSHEvent{
 		SessionID: sessionID,
-		Message:   fmt.Sprintf("Connected to %s@%s:%d", resource.User, targetHost, resource.Port),
+		Message:   fmt.Sprintf("Connected to %s@%s:%d", resource.User, sshHost(resource), resource.Port),
 	})
 
 	go a.waitForShell(runtimeCtx, session)
@@ -278,11 +392,50 @@ func (w eventWriter) Write(data []byte) (int, error) {
 	return len(data), nil
 }
 
+func dialResource(resource domain.Endpoint, input SSHSessionInput, timeout time.Duration) (*ssh.Client, error) {
+	authMethods, agentConn, err := authMethods(input)
+	if err != nil {
+		return nil, err
+	}
+	if agentConn != nil {
+		defer agentConn.Close()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	return remotessh.Dial(ctx, remotessh.ClientOptions{
+		Target: remotessh.Target{
+			Host: sshHost(resource),
+			Port: resource.Port,
+			User: resource.User,
+		},
+		Credentials: remotessh.Credentials{
+			Password:    input.Password,
+			AuthMethods: authMethods,
+		},
+		HostKeyPolicy: hostKeyPolicy(input.TrustHostKey),
+	})
+}
+
+func sshHost(resource domain.Endpoint) string {
+	host := strings.TrimSpace(resource.IP)
+	if host == "" {
+		host = strings.TrimSpace(resource.Hostname)
+	}
+	return host
+}
+
 func authMethods(input SSHSessionInput) ([]ssh.AuthMethod, net.Conn, error) {
 	var methods []ssh.AuthMethod
 
-	if strings.TrimSpace(input.PrivateKeyPath) != "" {
-		method, err := privateKeyAuth(input.PrivateKeyPath, input.PrivateKeyPassphrase)
+	keyPath := strings.TrimSpace(input.PrivateKeyPath)
+	if keyPath == "" && strings.TrimSpace(input.KeyName) != "" {
+		keyPath = filepath.Join("data", "keys", sanitizeKeyName(input.KeyName))
+	}
+
+	if keyPath != "" {
+		method, err := privateKeyAuth(keyPath, input.PrivateKeyPassphrase)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -398,4 +551,22 @@ func userHomeDir() string {
 		return ""
 	}
 	return home
+}
+
+func (a *App) keysDir() string {
+	return filepath.Join(filepath.Dir(a.dataPath), "keys")
+}
+
+func (a *App) publicKeyPath(name string) string {
+	return filepath.Join(a.keysDir(), sanitizeKeyName(name)+".pub")
+}
+
+func sanitizeKeyName(name string) string {
+	name = strings.TrimSpace(name)
+	name = regexp.MustCompile(`[^A-Za-z0-9_.-]+`).ReplaceAllString(name, "-")
+	return strings.Trim(name, ".-")
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }

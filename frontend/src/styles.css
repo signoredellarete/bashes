@@ -10,6 +10,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html,
 body,
 #app {
@@ -20,7 +24,8 @@ body,
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -34,10 +39,10 @@ select {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   border-right: 1px solid #d3d9df;
   background: #f9fafb;
-  padding: 18px;
+  padding: 14px;
 }
 
 .brand {
@@ -47,8 +52,8 @@ select {
 }
 
 .brand img {
-  width: 42px;
-  height: 42px;
+  width: 36px;
+  height: 36px;
 }
 
 .brand h1 {
@@ -65,8 +70,8 @@ select {
 
 .toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 6px;
 }
 
 .toolbar input {
@@ -74,7 +79,7 @@ select {
   min-width: 0;
   border: 1px solid #c7cfd8;
   border-radius: 6px;
-  padding: 9px 10px;
+  padding: 7px 9px;
 }
 
 .toolbar button,
@@ -86,8 +91,9 @@ select {
   border-radius: 6px;
   background: #2f6f73;
   color: #fff;
-  padding: 9px 12px;
+  padding: 7px 10px;
   cursor: pointer;
+  font-size: 13px;
 }
 
 .toolbar button:hover,
@@ -132,31 +138,31 @@ select {
 .host-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 34px;
-  gap: 6px;
+  gap: 5px;
   width: 100%;
-  min-height: 58px;
+  min-height: 48px;
   align-items: center;
 }
 
 .host-select {
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 8px;
   width: 100%;
-  min-height: 58px;
+  min-height: 48px;
   align-items: center;
   border: 1px solid #dce1e6;
   border-radius: 6px;
   background: #fff;
-  padding: 9px;
+  padding: 7px;
   color: inherit;
   cursor: pointer;
   text-align: left;
 }
 
 .host-row.child {
-  margin-left: 22px;
-  width: calc(100% - 22px);
+  margin-left: 18px;
+  width: calc(100% - 18px);
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -168,10 +174,10 @@ select {
 .row-action {
   display: grid;
   width: 34px;
-  height: 34px;
+  height: 30px;
   place-items: center;
   padding: 0;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 700;
   line-height: 1;
 }
@@ -179,12 +185,12 @@ select {
 .type {
   display: grid;
   min-width: 0;
-  height: 34px;
+  height: 30px;
   place-items: center;
   border-radius: 5px;
   background: #e5eef0;
   color: #2f6f73;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -202,13 +208,13 @@ select {
 }
 
 .details strong {
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .details small {
   margin-top: 3px;
   color: #66717f;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .workspace {
@@ -226,7 +232,7 @@ select {
   gap: 16px;
   border-bottom: 1px solid #d3d9df;
   background: #fff;
-  padding: 16px 20px;
+  padding: 11px 16px;
 }
 
 .session-header h2,
@@ -236,14 +242,98 @@ select {
 
 .session-header h2 {
   margin-top: 4px;
-  font-size: 18px;
+  font-size: 16px;
 }
 
-.terminal {
+.terminal-shell {
+  display: grid;
   min-width: 0;
   min-height: 0;
-  padding: 14px;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.session-tabs {
+  display: flex;
+  min-width: 0;
+  gap: 6px;
+  overflow-x: auto;
+  border-bottom: 1px solid #232b33;
+  background: #151a20;
+  padding: 6px 8px 0;
+}
+
+.session-tab-wrap {
+  display: inline-grid;
+  grid-template-columns: minmax(96px, 150px) 26px;
+  align-items: center;
+}
+
+.session-tab,
+.tab-close {
+  min-height: 30px;
+  border: 1px solid #2c3844;
+  background: #1d252e;
+  color: #d7dde5;
+  cursor: pointer;
+}
+
+.session-tab {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  border-radius: 6px 0 0 0;
+  padding: 5px 7px;
+  text-align: left;
+}
+
+.session-tab span {
+  color: #91a3b5;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.session-tab strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-tab.active {
+  border-color: #2f6f73;
   background: #101418;
+}
+
+.session-tab.closed {
+  color: #91a3b5;
+}
+
+.tab-close {
+  border-left: 0;
+  border-radius: 0 6px 0 0;
+  padding: 0;
+  font-size: 12px;
+}
+
+.terminal-stack {
+  min-width: 0;
+  min-height: 0;
+  background: #101418;
+}
+
+.terminal-pane {
+  width: 100%;
+  height: 100%;
+  padding: 12px;
+}
+
+.empty-terminal {
+  display: grid;
+  height: 100%;
+  place-items: center;
+  color: #91a3b5;
+  font-size: 13px;
 }
 
 .workbench {
@@ -286,20 +376,22 @@ select {
 .resource-form input,
 .resource-form select,
 .panel-card input,
-.panel-card select {
+.panel-card select,
+.panel-card textarea {
   width: 100%;
   min-width: 0;
   border: 1px solid #c7cfd8;
   border-radius: 6px;
   background: #fff;
   color: #1f2933;
-  padding: 8px 9px;
+  padding: 7px 8px;
 }
 
 .resource-form input:disabled,
 .resource-form select:disabled,
 .panel-card input:disabled,
-.panel-card select:disabled {
+.panel-card select:disabled,
+.panel-card textarea:disabled {
   background: #eef1f4;
   color: #66717f;
 }
@@ -319,7 +411,7 @@ select {
   inset: 0;
   z-index: 20;
   display: grid;
-  justify-content: end;
+  justify-content: start;
 }
 
 .panel-scrim {
@@ -335,10 +427,10 @@ select {
   min-height: 100vh;
   align-content: start;
   border: 0;
-  border-left: 1px solid #c7cfd8;
+  border-right: 1px solid #c7cfd8;
   border-radius: 0;
-  box-shadow: -12px 0 28px rgba(31, 41, 51, 0.18);
-  transform: translateX(100%);
+  box-shadow: 12px 0 28px rgba(31, 41, 51, 0.18);
+  transform: translateX(-100%);
   transition: transform 160ms ease;
 }
 
@@ -359,10 +451,18 @@ select {
   margin-top: 6px;
 }
 
-.icon-only {
-  width: 34px;
-  height: 34px;
-  padding: 0;
+.close-panel {
+  border: 0 !important;
+  background: transparent !important;
+  color: #2f3945 !important;
+  padding: 0 2px !important;
+  font-size: 24px !important;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.close-panel:hover {
+  color: #2f6f73 !important;
 }
 
 .parent-summary {
@@ -373,6 +473,15 @@ select {
   color: #2f3945;
   padding: 9px;
   font-size: 13px;
+}
+
+.compact-form {
+  display: grid;
+  gap: 9px;
+  border: 1px solid #dce1e6;
+  border-radius: 6px;
+  background: #f9fafb;
+  padding: 10px;
 }
 
 .checkbox-row {

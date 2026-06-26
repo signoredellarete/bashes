@@ -16,15 +16,18 @@ const demoStore = {
       ],
     },
   ],
+  keys: [],
 };
 
 const state = {
   hosts: [],
+  keys: [],
   selectedId: null,
   activeSessionId: null,
   busy: false,
   drawerMode: null,
   drawerHostId: null,
+  sessions: new Map(),
 };
 
 const app = document.querySelector('#app');
@@ -43,6 +46,7 @@ app.innerHTML = `
       <input id="search" type="search" placeholder="Search hosts" autocomplete="off" />
       <button id="refresh" class="secondary" type="button" title="Refresh hosts">Refresh</button>
       <button id="open-host-panel" type="button" title="Add host">Add Host</button>
+      <button id="open-keys-panel" class="secondary" type="button" title="Manage SSH keys">Keys</button>
     </div>
 
     <section id="hosts" class="hosts" aria-label="Hosts"></section>
@@ -62,7 +66,12 @@ app.innerHTML = `
     </section>
 
     <section class="workbench">
-      <section id="terminal" class="terminal" aria-label="Terminal"></section>
+      <section class="terminal-shell" aria-label="Terminal sessions">
+        <div id="session-tabs" class="session-tabs" hidden></div>
+        <div id="terminal-stack" class="terminal-stack">
+          <div id="empty-terminal" class="empty-terminal">No active terminal session</div>
+        </div>
+      </section>
     </section>
   </main>
 
@@ -71,10 +80,10 @@ app.innerHTML = `
     <form id="resource-form" class="panel-card">
       <header class="panel-header">
         <div>
-          <p class="eyebrow" id="resource-panel-kicker">Resource</p>
+          <p class="eyebrow" id="resource-panel-kicker">Host</p>
           <h3 id="resource-panel-title">Add Host</h3>
         </div>
-        <button class="icon-only secondary" type="button" data-close-panel title="Close">x</button>
+        <button class="close-panel" type="button" data-close-panel title="Close">X</button>
       </header>
 
       <p id="parent-host-summary" class="parent-summary" hidden></p>
@@ -122,18 +131,22 @@ app.innerHTML = `
           <p class="eyebrow">SSH</p>
           <h3>Connect</h3>
         </div>
-        <button class="icon-only secondary" type="button" data-close-connect title="Close">x</button>
+        <button class="close-panel" type="button" data-close-connect title="Close">X</button>
       </header>
 
       <p id="connect-summary" class="parent-summary"></p>
 
+      <label>
+        <span>Bashes Key</span>
+        <select name="keyName"></select>
+      </label>
       <label>
         <span>Password</span>
         <input name="password" type="password" autocomplete="current-password" />
       </label>
       <label>
         <span>Private Key Path</span>
-        <input name="privateKeyPath" autocomplete="off" placeholder="optional, defaults to ~/.ssh keys" />
+        <input name="privateKeyPath" autocomplete="off" placeholder="optional path on this machine" />
       </label>
       <label>
         <span>Key Passphrase</span>
@@ -150,37 +163,56 @@ app.innerHTML = `
       </footer>
     </form>
   </section>
+
+  <section id="keys-panel" class="slide-panel" hidden>
+    <div class="panel-scrim" data-close-keys></div>
+    <section class="panel-card">
+      <header class="panel-header">
+        <div>
+          <p class="eyebrow">SSH Keys</p>
+          <h3>Manage Keys</h3>
+        </div>
+        <button class="close-panel" type="button" data-close-keys title="Close">X</button>
+      </header>
+
+      <form id="key-generate-form" class="compact-form">
+        <label>
+          <span>New Key Name</span>
+          <input name="name" autocomplete="off" placeholder="bashes-main" />
+        </label>
+        <button type="submit">Generate</button>
+      </form>
+
+      <label>
+        <span>Existing Key</span>
+        <select id="key-select"></select>
+      </label>
+      <label>
+        <span>Public Key</span>
+        <textarea id="public-key" rows="5" readonly></textarea>
+      </label>
+
+      <form id="key-install-form" class="compact-form">
+        <p class="parent-summary" id="key-install-summary">Select a host or subsystem to install the key.</p>
+        <label>
+          <span>Remote Password</span>
+          <input name="password" type="password" autocomplete="current-password" />
+        </label>
+        <label class="checkbox-row">
+          <input name="trustHostKey" type="checkbox" checked />
+          <span>Trust host key for this install</span>
+        </label>
+        <button type="submit">Install On Selected</button>
+      </form>
+    </section>
+  </section>
 `;
 
-const terminalElement = document.querySelector('#terminal');
-const terminal = new Terminal({
-  cursorBlink: true,
-  convertEol: true,
-  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-  fontSize: 13,
-  theme: {
-    background: '#101418',
-    foreground: '#d7dde5',
-    cursor: '#f5c542',
-    selectionBackground: '#3d4a58',
-  },
-});
-const fitAddon = new FitAddon();
-terminal.loadAddon(fitAddon);
-terminal.open(terminalElement);
-fitTerminal();
-terminal.writeln('Bashes terminal ready.');
+const stack = document.querySelector('#terminal-stack');
 
 window.addEventListener('resize', () => {
-  fitTerminal();
+  fitActiveTerminal();
   resizeActiveSession();
-});
-
-terminal.onData((data) => {
-  if (!state.activeSessionId) return;
-  apiWriteSSHSession(state.activeSessionId, data).catch((error) => {
-    terminal.writeln(`\r\nError: ${error?.message ?? error}`);
-  });
 });
 
 registerSSHEvents();
@@ -188,19 +220,27 @@ registerSSHEvents();
 document.querySelector('#refresh').addEventListener('click', () => loadHosts());
 document.querySelector('#search').addEventListener('input', (event) => renderHosts(event.target.value));
 document.querySelector('#open-host-panel').addEventListener('click', () => openResourcePanel('host'));
+document.querySelector('#open-keys-panel').addEventListener('click', () => openKeysPanel());
 document.querySelector('#connect').addEventListener('click', () => openConnectPanel());
 document.querySelector('#disconnect').addEventListener('click', () => disconnectActiveSession());
 document.querySelector('#delete-resource').addEventListener('click', () => deleteSelectedResource());
 document.querySelector('#resource-form').addEventListener('submit', (event) => submitResource(event));
 document.querySelector('#connect-form').addEventListener('submit', (event) => submitConnect(event));
+document.querySelector('#key-generate-form').addEventListener('submit', (event) => submitGenerateKey(event));
+document.querySelector('#key-install-form').addEventListener('submit', (event) => submitInstallKey(event));
+document.querySelector('#key-select').addEventListener('change', () => renderSelectedPublicKey());
 document.querySelectorAll('[data-close-panel]').forEach((element) => {
   element.addEventListener('click', () => closeResourcePanel());
 });
 document.querySelectorAll('[data-close-connect]').forEach((element) => {
   element.addEventListener('click', () => closeConnectPanel());
 });
+document.querySelectorAll('[data-close-keys]').forEach((element) => {
+  element.addEventListener('click', () => closeKeysPanel());
+});
 
 await loadHosts();
+await loadKeys();
 
 async function loadHosts() {
   await withBusy(async () => {
@@ -220,6 +260,11 @@ async function refreshHosts() {
   renderSelection();
 }
 
+async function loadKeys() {
+  state.keys = await apiListSSHKeys();
+  renderKeyOptions();
+}
+
 async function submitResource(event) {
   event.preventDefault();
   const form = event.currentTarget;
@@ -229,11 +274,11 @@ async function submitResource(event) {
     if (state.drawerMode === 'subsystem') {
       const subsystem = await apiAddSubsystem(state.drawerHostId, input);
       state.selectedId = subsystem.id;
-      terminal.writeln(`Added ${subsystem.type} ${subsystem.hostname}.`);
+      writeNotice(`Added ${subsystem.type} ${subsystem.hostname}.`);
     } else {
       const host = await apiAddHost(input);
       state.selectedId = host.id;
-      terminal.writeln(`Added host ${host.hostname}.`);
+      writeNotice(`Added host ${host.hostname}.`);
     }
     closeResourcePanel();
     await refreshHosts();
@@ -245,28 +290,64 @@ async function submitConnect(event) {
   const selected = findResource(state.selectedId)?.resource;
   if (!selected) return;
 
+  const existing = sessionForResource(selected.id);
+  if (existing) {
+    focusSession(existing.id);
+    closeConnectPanel();
+    return;
+  }
+
   const form = event.currentTarget;
   await withBusy(async () => {
-    if (state.activeSessionId) {
-      await apiStopSSHSession(state.activeSessionId);
-      state.activeSessionId = null;
-    }
-
-    terminal.clear();
-    terminal.writeln(`Connecting to ${selected.user}@${selected.ip || selected.hostname}:${selected.port} ...`);
+    const target = `${selected.user}@${selected.ip || selected.hostname}:${selected.port}`;
+    writeNotice(`Connecting to ${target} ...`);
     const sessionID = await apiStartSSHSession({
       resourceId: selected.id,
+      keyName: form.elements.keyName.value,
       password: form.elements.password.value,
       privateKeyPath: form.elements.privateKeyPath.value.trim(),
       privateKeyPassphrase: form.elements.privateKeyPassphrase.value,
       trustHostKey: form.elements.trustHostKey.checked,
-      cols: terminal.cols,
-      rows: terminal.rows,
+      cols: 120,
+      rows: 32,
     });
-    state.activeSessionId = sessionID;
+    createSession(sessionID, selected);
     closeConnectPanel();
     resizeActiveSession();
-    renderSelection();
+  });
+}
+
+async function submitGenerateKey(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+
+  await withBusy(async () => {
+    const key = await apiGenerateSSHKey({ name: form.elements.name.value.trim() });
+    form.reset();
+    await loadKeys();
+    document.querySelector('#key-select').value = key.name;
+    await renderSelectedPublicKey();
+    writeNotice(`Generated SSH key ${key.name}.`);
+  });
+}
+
+async function submitInstallKey(event) {
+  event.preventDefault();
+  const selected = findResource(state.selectedId)?.resource;
+  const keyName = document.querySelector('#key-select').value;
+  if (!selected || !keyName) return;
+
+  const form = event.currentTarget;
+  await withBusy(async () => {
+    await apiInstallSSHKey({
+      resourceId: selected.id,
+      keyName,
+      password: form.elements.password.value,
+      trustHostKey: form.elements.trustHostKey.checked,
+    });
+    form.reset();
+    form.elements.trustHostKey.checked = true;
+    writeNotice(`Installed key ${keyName} on ${selected.hostname}.`);
   });
 }
 
@@ -275,12 +356,11 @@ async function deleteSelectedResource() {
   if (!selected) return;
 
   await withBusy(async () => {
-    if (state.activeSessionId && selected.resource.id === state.selectedId) {
-      await apiStopSSHSession(state.activeSessionId);
-      state.activeSessionId = null;
+    for (const session of sessionsForResource(selected.resource.id)) {
+      await stopSession(session.id);
     }
     await apiDeleteResource(selected.resource.id);
-    terminal.writeln(`Deleted ${selected.resource.hostname}.`);
+    writeNotice(`Deleted ${selected.resource.hostname}.`);
     state.selectedId = selected.parent?.id ?? null;
     await refreshHosts();
   });
@@ -288,10 +368,20 @@ async function deleteSelectedResource() {
 
 async function disconnectActiveSession() {
   if (!state.activeSessionId) return;
-  const sessionID = state.activeSessionId;
-  state.activeSessionId = null;
+  await stopSession(state.activeSessionId);
+}
+
+async function stopSession(sessionID) {
+  const session = state.sessions.get(sessionID);
+  state.sessions.delete(sessionID);
+  if (session?.element) session.element.remove();
   await apiStopSSHSession(sessionID);
+  if (state.activeSessionId === sessionID) {
+    state.activeSessionId = firstSessionID();
+  }
+  renderTabs();
   renderSelection();
+  fitActiveTerminal();
 }
 
 function endpointInput(form, type) {
@@ -340,7 +430,11 @@ function resourceRow(resource, type, child = false) {
   selectButton.querySelector('small').textContent = `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`;
   selectButton.addEventListener('click', () => {
     state.selectedId = resource.id;
+    const session = sessionForResource(resource.id);
+    state.activeSessionId = session?.id ?? null;
+    renderTabs();
     renderSelection();
+    fitActiveTerminal();
   });
   row.append(selectButton);
 
@@ -359,6 +453,94 @@ function resourceRow(resource, type, child = false) {
     element: row,
     search: `${resource.hostname} ${resource.ip} ${resource.user} ${type}`.toLowerCase(),
   };
+}
+
+function createSession(sessionID, resource) {
+  const pane = document.createElement('section');
+  pane.className = 'terminal-pane';
+  pane.dataset.sessionId = sessionID;
+  stack.append(pane);
+
+  const terminal = new Terminal({
+    cursorBlink: true,
+    convertEol: true,
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+    fontSize: 13,
+    theme: {
+      background: '#101418',
+      foreground: '#d7dde5',
+      cursor: '#f5c542',
+      selectionBackground: '#3d4a58',
+    },
+  });
+  const fitAddon = new FitAddon();
+  terminal.loadAddon(fitAddon);
+  terminal.open(pane);
+  terminal.onData((data) => {
+    apiWriteSSHSession(sessionID, data).catch((error) => {
+      terminal.writeln(`\r\nError: ${error?.message ?? error}`);
+    });
+  });
+
+  state.sessions.set(sessionID, {
+    id: sessionID,
+    resourceId: resource.id,
+    title: resource.hostname,
+    target: `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`,
+    terminal,
+    fitAddon,
+    element: pane,
+    closed: false,
+  });
+  state.activeSessionId = sessionID;
+  state.selectedId = resource.id;
+  terminal.writeln(`Connected to ${resource.user}@${resource.ip || resource.hostname}:${resource.port}`);
+  renderTabs();
+  renderSelection();
+  fitActiveTerminal();
+}
+
+function renderTabs() {
+  const tabs = document.querySelector('#session-tabs');
+  const empty = document.querySelector('#empty-terminal');
+  const sessions = [...state.sessions.values()];
+  tabs.hidden = sessions.length === 0;
+  empty.hidden = Boolean(state.activeSessionId);
+
+  tabs.replaceChildren(...sessions.map((session) => {
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = `session-tab ${session.id === state.activeSessionId ? 'active' : ''} ${session.closed ? 'closed' : ''}`;
+    tab.innerHTML = '<span></span><strong></strong>';
+    tab.querySelector('span').textContent = session.closed ? 'closed' : 'ssh';
+    tab.querySelector('strong').textContent = session.title;
+    tab.addEventListener('click', () => {
+      state.activeSessionId = session.id;
+      state.selectedId = session.resourceId;
+      renderTabs();
+      renderSelection();
+      fitActiveTerminal();
+    });
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'tab-close';
+    close.textContent = 'X';
+    close.title = `Close ${session.title}`;
+    close.addEventListener('click', (event) => {
+      event.stopPropagation();
+      stopSession(session.id);
+    });
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'session-tab-wrap';
+    wrapper.append(tab, close);
+    return wrapper;
+  }));
+
+  document.querySelectorAll('.terminal-pane').forEach((pane) => {
+    pane.hidden = pane.dataset.sessionId !== state.activeSessionId;
+  });
 }
 
 function openResourcePanel(mode, hostID = '') {
@@ -404,14 +586,16 @@ function closeResourcePanel() {
   state.drawerHostId = null;
 }
 
-function openConnectPanel() {
+async function openConnectPanel() {
   const selected = findResource(state.selectedId)?.resource;
   if (!selected) return;
 
+  await loadKeys();
   const panel = document.querySelector('#connect-panel');
   const form = document.querySelector('#connect-form');
   form.reset();
   form.elements.trustHostKey.checked = true;
+  renderKeyOptions(form.elements.keyName, true);
   document.querySelector('#connect-summary').textContent =
     `${selected.user}@${selected.ip || selected.hostname}:${selected.port}`;
   panel.hidden = false;
@@ -425,29 +609,83 @@ function closeConnectPanel() {
   panel.hidden = true;
 }
 
+async function openKeysPanel() {
+  await loadKeys();
+  renderKeyInstallSummary();
+  const panel = document.querySelector('#keys-panel');
+  panel.hidden = false;
+  requestAnimationFrame(() => panel.classList.add('open'));
+}
+
+function closeKeysPanel() {
+  const panel = document.querySelector('#keys-panel');
+  panel.classList.remove('open');
+  panel.hidden = true;
+}
+
 function renderSelection() {
   document.querySelectorAll('.host-row').forEach((row) => {
     row.classList.toggle('selected', row.dataset.id === state.selectedId);
   });
 
   const selected = findResource(state.selectedId);
+  const activeSession = state.sessions.get(state.activeSessionId);
   const title = document.querySelector('#session-title');
   const connect = document.querySelector('#connect');
   const disconnect = document.querySelector('#disconnect');
   const remove = document.querySelector('#delete-resource');
 
-  if (!selected) {
+  if (activeSession) {
+    title.textContent = activeSession.target;
+  } else if (selected) {
+    title.textContent = `${selected.resource.user}@${selected.resource.hostname}`;
+  } else {
     title.textContent = 'No session selected';
-    connect.disabled = true;
-    disconnect.disabled = true;
-    remove.disabled = true;
-    return;
   }
 
-  title.textContent = `${selected.resource.user}@${selected.resource.hostname}`;
-  connect.disabled = state.busy;
-  disconnect.disabled = state.busy || !state.activeSessionId;
-  remove.disabled = state.busy;
+  connect.disabled = state.busy || !selected;
+  disconnect.disabled = state.busy || !activeSession;
+  remove.disabled = state.busy || !selected;
+  renderKeyInstallSummary();
+}
+
+function renderKeyOptions(select = document.querySelector('#key-select'), includeEmpty = false) {
+  if (!select) return;
+  const options = [];
+  if (includeEmpty) {
+    const empty = document.createElement('option');
+    empty.value = '';
+    empty.textContent = 'Use agent/default/path';
+    options.push(empty);
+  }
+  for (const key of state.keys) {
+    const option = document.createElement('option');
+    option.value = key.name;
+    option.textContent = key.name;
+    options.push(option);
+  }
+  select.replaceChildren(...options);
+  renderSelectedPublicKey();
+}
+
+async function renderSelectedPublicKey() {
+  const select = document.querySelector('#key-select');
+  const output = document.querySelector('#public-key');
+  if (!select || !output) return;
+  if (!select.value) {
+    output.value = '';
+    return;
+  }
+  output.value = await apiReadSSHPublicKey(select.value);
+}
+
+function renderKeyInstallSummary() {
+  const summary = document.querySelector('#key-install-summary');
+  if (!summary) return;
+  const selected = findResource(state.selectedId)?.resource;
+  summary.textContent = selected
+    ? `Install selected key on ${selected.user}@${selected.ip || selected.hostname}:${selected.port}`
+    : 'Select a host or subsystem to install the key.';
 }
 
 function findResource(id) {
@@ -460,6 +698,18 @@ function findResource(id) {
   return null;
 }
 
+function sessionForResource(resourceId) {
+  return [...state.sessions.values()].find((session) => session.resourceId === resourceId && !session.closed);
+}
+
+function sessionsForResource(resourceId) {
+  return [...state.sessions.values()].filter((session) => session.resourceId === resourceId);
+}
+
+function firstSessionID() {
+  return state.sessions.keys().next().value ?? null;
+}
+
 async function withBusy(task) {
   if (state.busy) return;
 
@@ -468,7 +718,7 @@ async function withBusy(task) {
   try {
     await task();
   } catch (error) {
-    terminal.writeln(`\r\nError: ${error?.message ?? error}`);
+    writeNotice(`Error: ${error?.message ?? error}`);
   } finally {
     state.busy = false;
     setDisabledState(false);
@@ -477,18 +727,31 @@ async function withBusy(task) {
 }
 
 function setDisabledState(disabled) {
-  document.querySelectorAll('button, input, select').forEach((element) => {
+  document.querySelectorAll('button, input, select, textarea').forEach((element) => {
     element.disabled = disabled;
   });
 }
 
-function fitTerminal() {
-  fitAddon.fit();
+function fitActiveTerminal() {
+  const session = state.sessions.get(state.activeSessionId);
+  if (!session) return;
+  session.fitAddon.fit();
 }
 
 function resizeActiveSession() {
-  if (!state.activeSessionId) return;
-  apiResizeSSHSession(state.activeSessionId, terminal.cols, terminal.rows).catch(() => {});
+  const session = state.sessions.get(state.activeSessionId);
+  if (!session) return;
+  apiResizeSSHSession(session.id, session.terminal.cols, session.terminal.rows).catch(() => {});
+}
+
+function writeNotice(message) {
+  const session = state.sessions.get(state.activeSessionId);
+  if (session) {
+    session.terminal.writeln(`\r\n${message}`);
+    return;
+  }
+  const empty = document.querySelector('#empty-terminal');
+  empty.textContent = message;
 }
 
 function registerSSHEvents() {
@@ -496,21 +759,20 @@ function registerSSHEvents() {
   if (!eventsOn) return;
 
   eventsOn('ssh:output', (event) => {
-    if (!state.activeSessionId || event.sessionId === state.activeSessionId) {
-      terminal.write(event.data ?? '');
-    }
+    const session = state.sessions.get(event.sessionId);
+    if (session) session.terminal.write(event.data ?? '');
   });
   eventsOn('ssh:status', (event) => {
-    if (!state.activeSessionId || event.sessionId === state.activeSessionId) {
-      terminal.writeln(`\r\n${event.message}`);
-    }
+    const session = state.sessions.get(event.sessionId);
+    if (session) session.terminal.writeln(`\r\n${event.message}`);
   });
   eventsOn('ssh:closed', (event) => {
-    if (!state.activeSessionId || event.sessionId === state.activeSessionId) {
-      terminal.writeln(`\r\n${event.message}`);
-      state.activeSessionId = null;
-      renderSelection();
-    }
+    const session = state.sessions.get(event.sessionId);
+    if (!session) return;
+    session.closed = true;
+    session.terminal.writeln(`\r\n${event.message}`);
+    renderTabs();
+    renderSelection();
   });
 }
 
@@ -520,62 +782,36 @@ function wailsAPI() {
 
 async function apiListHosts() {
   const api = wailsAPI();
-  if (api?.ListHosts) {
-    return (await api.ListHosts()) ?? [];
-  }
+  if (api?.ListHosts) return (await api.ListHosts()) ?? [];
   return clone(demoStore.hosts);
 }
 
 async function apiAddHost(input) {
   const api = wailsAPI();
-  if (api?.AddHost) {
-    return await api.AddHost(input);
-  }
-
-  const host = {
-    id: `host-${Date.now()}`,
-    hostname: input.hostname,
-    ip: input.ip,
-    port: input.port,
-    user: input.user,
-    subsystems: [],
-  };
+  if (api?.AddHost) return await api.AddHost(input);
+  const host = { id: `host-${Date.now()}`, hostname: input.hostname, ip: input.ip, port: input.port, user: input.user, subsystems: [] };
   demoStore.hosts.push(host);
   return clone(host);
 }
 
 async function apiAddSubsystem(hostID, input) {
   const api = wailsAPI();
-  if (api?.AddSubsystem) {
-    return await api.AddSubsystem(hostID, input);
-  }
-
+  if (api?.AddSubsystem) return await api.AddSubsystem(hostID, input);
   const host = demoStore.hosts.find((candidate) => candidate.id === hostID);
   if (!host) throw new Error(`Host ${hostID} not found`);
-  const subsystem = {
-    id: `${input.type}-${Date.now()}`,
-    type: input.type,
-    hostname: input.hostname,
-    ip: input.ip,
-    port: input.port,
-    user: input.user,
-  };
+  const subsystem = { id: `${input.type}-${Date.now()}`, type: input.type, hostname: input.hostname, ip: input.ip, port: input.port, user: input.user };
   host.subsystems.push(subsystem);
   return clone(subsystem);
 }
 
 async function apiDeleteResource(id) {
   const api = wailsAPI();
-  if (api?.DeleteResource) {
-    return await api.DeleteResource(id);
-  }
-
+  if (api?.DeleteResource) return await api.DeleteResource(id);
   const hostIndex = demoStore.hosts.findIndex((host) => host.id === id);
   if (hostIndex >= 0) {
     demoStore.hosts.splice(hostIndex, 1);
     return;
   }
-
   for (const host of demoStore.hosts) {
     const index = host.subsystems.findIndex((subsystem) => subsystem.id === id);
     if (index >= 0) {
@@ -583,39 +819,54 @@ async function apiDeleteResource(id) {
       return;
     }
   }
-
   throw new Error(`Resource ${id} not found`);
 }
 
 async function apiStartSSHSession(input) {
   const api = wailsAPI();
-  if (api?.StartSSHSession) {
-    return await api.StartSSHSession(input);
-  }
-  terminal.writeln('Browser fallback: SSH is available only in the Wails desktop build.');
+  if (api?.StartSSHSession) return await api.StartSSHSession(input);
   return `demo-session-${Date.now()}`;
 }
 
 async function apiWriteSSHSession(sessionID, data) {
   const api = wailsAPI();
-  if (api?.WriteSSHSession) {
-    return await api.WriteSSHSession(sessionID, data);
-  }
-  terminal.write(data);
+  if (api?.WriteSSHSession) return await api.WriteSSHSession(sessionID, data);
+  state.sessions.get(sessionID)?.terminal.write(data);
 }
 
 async function apiResizeSSHSession(sessionID, cols, rows) {
   const api = wailsAPI();
-  if (api?.ResizeSSHSession) {
-    return await api.ResizeSSHSession(sessionID, cols, rows);
-  }
+  if (api?.ResizeSSHSession) return await api.ResizeSSHSession(sessionID, cols, rows);
 }
 
 async function apiStopSSHSession(sessionID) {
   const api = wailsAPI();
-  if (api?.StopSSHSession) {
-    return await api.StopSSHSession(sessionID);
-  }
+  if (api?.StopSSHSession) return await api.StopSSHSession(sessionID);
+}
+
+async function apiListSSHKeys() {
+  const api = wailsAPI();
+  if (api?.ListSSHKeys) return (await api.ListSSHKeys()) ?? [];
+  return clone(demoStore.keys);
+}
+
+async function apiGenerateSSHKey(input) {
+  const api = wailsAPI();
+  if (api?.GenerateSSHKey) return await api.GenerateSSHKey(input);
+  const key = { name: input.name || `bashes-${Date.now()}`, privateKey: '', publicKey: '' };
+  demoStore.keys.push(key);
+  return clone(key);
+}
+
+async function apiReadSSHPublicKey(name) {
+  const api = wailsAPI();
+  if (api?.ReadSSHPublicKey) return await api.ReadSSHPublicKey(name);
+  return `ssh-ed25519 demo ${name}`;
+}
+
+async function apiInstallSSHKey(input) {
+  const api = wailsAPI();
+  if (api?.InstallSSHKey) return await api.InstallSSHKey(input);
 }
 
 function clone(value) {
