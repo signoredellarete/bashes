@@ -503,7 +503,7 @@ function resourceRow(resource, type, child = false) {
       return;
     }
     createPendingTab(resource);
-    openConnectPanel();
+    quickConnect(resource);
   });
   row.append(selectButton);
 
