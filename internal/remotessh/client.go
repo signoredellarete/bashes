@@ -25,6 +25,7 @@ type Credentials struct {
 	Password             string
 	PrivateKeyPEM        []byte
 	PrivateKeyPassphrase []byte
+	AuthMethods          []ssh.AuthMethod
 }
 
 type HostKeyPolicy struct {
@@ -126,6 +127,8 @@ func AuthMethods(credentials Credentials) ([]ssh.AuthMethod, error) {
 		}
 		methods = append(methods, ssh.PublicKeys(signer))
 	}
+
+	methods = append(methods, credentials.AuthMethods...)
 
 	if len(methods) == 0 {
 		return nil, errors.New("at least one ssh authentication method is required")

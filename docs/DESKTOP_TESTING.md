@@ -157,10 +157,14 @@ When the desktop shell starts:
 
 - The left sidebar shows hosts from the bound backend if data exists.
 - The desktop build uses the Wails `go.main.App` binding for host and subsystem data.
-- The UI provides forms to add hosts and subsystems through the Go backend.
+- `Add Host` opens a slide-out panel.
+- Each host row exposes a small `+` action to add a subsystem under that host.
+- The UI writes host and subsystem changes through the Go backend.
 - Browser-only frontend testing uses an in-memory demo store because Wails bindings are unavailable there.
 - The main panel renders an `xterm.js` terminal surface.
-- The Connect button currently writes a placeholder line; real SSH streaming is not yet connected to the UI.
+- The Connect action opens an SSH panel and starts a backend-managed shell session.
+- SSH authentication can use a session-only password, `SSH_AUTH_SOCK`, default `~/.ssh` keys, or an explicit key path.
+- Passwords and key passphrases are not saved in the JSON datastore.
 
 ## Troubleshooting
 

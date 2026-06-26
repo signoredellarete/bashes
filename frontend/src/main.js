@@ -1,5 +1,6 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { EventsOn } from '../wailsjs/runtime/runtime.js';
 import '@xterm/xterm/css/xterm.css';
 import './styles.css';
 
@@ -21,7 +22,10 @@ const demoStore = {
 const state = {
   hosts: [],
   selectedId: null,
+  activeSessionId: null,
   busy: false,
+  drawerMode: null,
+  drawerHostId: null,
 };
 
 const app = document.querySelector('#app');
@@ -38,7 +42,8 @@ app.innerHTML = `
 
     <div class="toolbar">
       <input id="search" type="search" placeholder="Search hosts" autocomplete="off" />
-      <button id="refresh" class="icon-button wide" type="button" title="Refresh hosts">Refresh</button>
+      <button id="refresh" class="secondary" type="button" title="Refresh hosts">Refresh</button>
+      <button id="open-host-panel" type="button" title="Add host">Add Host</button>
     </div>
 
     <section id="hosts" class="hosts" aria-label="Hosts"></section>
@@ -52,74 +57,100 @@ app.innerHTML = `
       </div>
       <div class="session-actions">
         <button id="delete-resource" class="secondary" type="button" disabled>Delete</button>
+        <button id="disconnect" class="secondary" type="button" disabled>Disconnect</button>
         <button id="connect" type="button" disabled>Connect</button>
       </div>
     </section>
 
     <section class="workbench">
-      <section class="forms" aria-label="Resource forms">
-        <form id="host-form" class="resource-form">
-          <h3>Add Host</h3>
-          <label>
-            <span>Hostname</span>
-            <input name="hostname" autocomplete="off" required />
-          </label>
-          <label>
-            <span>IP / DNS</span>
-            <input name="ip" autocomplete="off" required />
-          </label>
-          <div class="form-grid">
-            <label>
-              <span>Port</span>
-              <input name="port" type="number" min="1" max="65535" value="22" required />
-            </label>
-            <label>
-              <span>User</span>
-              <input name="user" autocomplete="username" required />
-            </label>
-          </div>
-          <button type="submit">Add Host</button>
-        </form>
-
-        <form id="subsystem-form" class="resource-form">
-          <h3>Add Subsystem</h3>
-          <label>
-            <span>Parent Host</span>
-            <select name="hostId" required></select>
-          </label>
-          <label>
-            <span>Type</span>
-            <select name="type" required>
-              <option value="vm">VM</option>
-              <option value="lxc">LXC</option>
-              <option value="docker">Docker</option>
-            </select>
-          </label>
-          <label>
-            <span>Hostname</span>
-            <input name="hostname" autocomplete="off" required />
-          </label>
-          <label>
-            <span>IP / DNS</span>
-            <input name="ip" autocomplete="off" required />
-          </label>
-          <div class="form-grid">
-            <label>
-              <span>Port</span>
-              <input name="port" type="number" min="1" max="65535" value="22" required />
-            </label>
-            <label>
-              <span>User</span>
-              <input name="user" autocomplete="username" required />
-            </label>
-          </div>
-          <button type="submit">Add Subsystem</button>
-        </form>
-      </section>
-
       <section id="terminal" class="terminal" aria-label="Terminal"></section>
     </section>
   </main>
+
+  <section id="resource-panel" class="slide-panel" hidden>
+    <div class="panel-scrim" data-close-panel></div>
+    <form id="resource-form" class="panel-card">
+      <header class="panel-header">
+        <div>
+          <p class="eyebrow" id="resource-panel-kicker">Resource</p>
+          <h3 id="resource-panel-title">Add Host</h3>
+        </div>
+        <button class="icon-only secondary" type="button" data-close-panel title="Close">x</button>
+      </header>
+
+      <p id="parent-host-summary" class="parent-summary" hidden></p>
+
+      <label id="subsystem-type-field" hidden>
+        <span>Type</span>
+        <select name="type">
+          <option value="vm">VM</option>
+          <option value="lxc">LXC</option>
+          <option value="docker">Docker</option>
+        </select>
+      </label>
+
+      <label>
+        <span>Hostname</span>
+        <input name="hostname" autocomplete="off" required />
+      </label>
+      <label>
+        <span>IP / DNS</span>
+        <input name="ip" autocomplete="off" required />
+      </label>
+      <div class="form-grid">
+        <label>
+          <span>Port</span>
+          <input name="port" type="number" min="1" max="65535" value="22" required />
+        </label>
+        <label>
+          <span>User</span>
+          <input name="user" autocomplete="username" required />
+        </label>
+      </div>
+
+      <footer class="panel-actions">
+        <button class="secondary" type="button" data-close-panel>Cancel</button>
+        <button id="resource-submit" type="submit">Add Host</button>
+      </footer>
+    </form>
+  </section>
+
+  <section id="connect-panel" class="slide-panel" hidden>
+    <div class="panel-scrim" data-close-connect></div>
+    <form id="connect-form" class="panel-card">
+      <header class="panel-header">
+        <div>
+          <p class="eyebrow">SSH</p>
+          <h3>Connect</h3>
+        </div>
+        <button class="icon-only secondary" type="button" data-close-connect title="Close">x</button>
+      </header>
+
+      <p id="connect-summary" class="parent-summary"></p>
+
+      <label>
+        <span>Password</span>
+        <input name="password" type="password" autocomplete="current-password" />
+      </label>
+      <label>
+        <span>Private Key Path</span>
+        <input name="privateKeyPath" autocomplete="off" placeholder="optional, defaults to ~/.ssh keys" />
+      </label>
+      <label>
+        <span>Key Passphrase</span>
+        <input name="privateKeyPassphrase" type="password" autocomplete="off" />
+      </label>
+      <label class="checkbox-row">
+        <input name="trustHostKey" type="checkbox" checked />
+        <span>Trust host key for this session</span>
+      </label>
+
+      <footer class="panel-actions">
+        <button class="secondary" type="button" data-close-connect>Cancel</button>
+        <button type="submit">Connect</button>
+      </footer>
+    </form>
+  </section>
 `;
 
 const terminalElement = document.querySelector('#terminal');
@@ -138,23 +169,37 @@ const terminal = new Terminal({
 const fitAddon = new FitAddon();
 terminal.loadAddon(fitAddon);
 terminal.open(terminalElement);
-fitAddon.fit();
+fitTerminal();
 terminal.writeln('Bashes terminal ready.');
-terminal.writeln('SSH transport will be attached in the next backend milestone.');
 
-window.addEventListener('resize', () => fitAddon.fit());
+window.addEventListener('resize', () => {
+  fitTerminal();
+  resizeActiveSession();
+});
+
+terminal.onData((data) => {
+  if (!state.activeSessionId) return;
+  apiWriteSSHSession(state.activeSessionId, data).catch((error) => {
+    terminal.writeln(`\r\nError: ${error?.message ?? error}`);
+  });
+});
+
+registerSSHEvents();
 
 document.querySelector('#refresh').addEventListener('click', () => loadHosts());
 document.querySelector('#search').addEventListener('input', (event) => renderHosts(event.target.value));
-document.querySelector('#connect').addEventListener('click', () => {
-  const selected = findResource(state.selectedId)?.resource;
-  if (!selected) return;
-  terminal.writeln('');
-  terminal.writeln(`Preparing SSH session for ${selected.user}@${selected.ip}:${selected.port}`);
-});
+document.querySelector('#open-host-panel').addEventListener('click', () => openResourcePanel('host'));
+document.querySelector('#connect').addEventListener('click', () => openConnectPanel());
+document.querySelector('#disconnect').addEventListener('click', () => disconnectActiveSession());
 document.querySelector('#delete-resource').addEventListener('click', () => deleteSelectedResource());
-document.querySelector('#host-form').addEventListener('submit', (event) => submitHost(event));
-document.querySelector('#subsystem-form').addEventListener('submit', (event) => submitSubsystem(event));
+document.querySelector('#resource-form').addEventListener('submit', (event) => submitResource(event));
+document.querySelector('#connect-form').addEventListener('submit', (event) => submitConnect(event));
+document.querySelectorAll('[data-close-panel]').forEach((element) => {
+  element.addEventListener('click', () => closeResourcePanel());
+});
+document.querySelectorAll('[data-close-connect]').forEach((element) => {
+  element.addEventListener('click', () => closeConnectPanel());
+});
 
 await loadHosts();
 
@@ -173,39 +218,56 @@ async function refreshHosts() {
     state.selectedId = state.hosts[0].id;
   }
   renderHosts(document.querySelector('#search').value);
-  renderHostOptions();
   renderSelection();
 }
 
-async function submitHost(event) {
+async function submitResource(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  const input = endpointInput(form);
+  const input = endpointInput(form, state.drawerMode === 'subsystem' ? form.elements.type.value : '');
 
   await withBusy(async () => {
-    const host = await apiAddHost(input);
-    form.reset();
-    form.elements.port.value = '22';
-    state.selectedId = host.id;
+    if (state.drawerMode === 'subsystem') {
+      const subsystem = await apiAddSubsystem(state.drawerHostId, input);
+      state.selectedId = subsystem.id;
+      terminal.writeln(`Added ${subsystem.type} ${subsystem.hostname}.`);
+    } else {
+      const host = await apiAddHost(input);
+      state.selectedId = host.id;
+      terminal.writeln(`Added host ${host.hostname}.`);
+    }
+    closeResourcePanel();
     await refreshHosts();
-    terminal.writeln(`Added host ${host.hostname}.`);
   });
 }
 
-async function submitSubsystem(event) {
+async function submitConnect(event) {
   event.preventDefault();
-  const form = event.currentTarget;
-  const hostID = form.elements.hostId.value;
-  const input = endpointInput(form, form.elements.type.value);
+  const selected = findResource(state.selectedId)?.resource;
+  if (!selected) return;
 
+  const form = event.currentTarget;
   await withBusy(async () => {
-    const subsystem = await apiAddSubsystem(hostID, input);
-    form.reset();
-    form.elements.port.value = '22';
-    form.elements.type.value = input.type;
-    state.selectedId = subsystem.id;
-    await refreshHosts();
-    terminal.writeln(`Added ${subsystem.type} ${subsystem.hostname}.`);
+    if (state.activeSessionId) {
+      await apiStopSSHSession(state.activeSessionId);
+      state.activeSessionId = null;
+    }
+
+    terminal.clear();
+    terminal.writeln(`Connecting to ${selected.user}@${selected.ip || selected.hostname}:${selected.port} ...`);
+    const sessionID = await apiStartSSHSession({
+      resourceId: selected.id,
+      password: form.elements.password.value,
+      privateKeyPath: form.elements.privateKeyPath.value.trim(),
+      privateKeyPassphrase: form.elements.privateKeyPassphrase.value,
+      trustHostKey: form.elements.trustHostKey.checked,
+      cols: terminal.cols,
+      rows: terminal.rows,
+    });
+    state.activeSessionId = sessionID;
+    closeConnectPanel();
+    resizeActiveSession();
+    renderSelection();
   });
 }
 
@@ -214,11 +276,23 @@ async function deleteSelectedResource() {
   if (!selected) return;
 
   await withBusy(async () => {
+    if (state.activeSessionId && selected.resource.id === state.selectedId) {
+      await apiStopSSHSession(state.activeSessionId);
+      state.activeSessionId = null;
+    }
     await apiDeleteResource(selected.resource.id);
     terminal.writeln(`Deleted ${selected.resource.hostname}.`);
     state.selectedId = selected.parent?.id ?? null;
     await refreshHosts();
   });
+}
+
+async function disconnectActiveSession() {
+  if (!state.activeSessionId) return;
+  const sessionID = state.activeSessionId;
+  state.activeSessionId = null;
+  await apiStopSSHSession(sessionID);
+  renderSelection();
 }
 
 function endpointInput(form, type) {
@@ -248,44 +322,108 @@ function renderHosts(filter = '') {
 }
 
 function resourceRow(resource, type, child = false) {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = `host-row ${child ? 'child' : ''}`;
-  button.dataset.id = resource.id;
-  button.innerHTML = `
+  const row = document.createElement('div');
+  row.className = `host-row ${child ? 'child' : ''}`;
+  row.dataset.id = resource.id;
+
+  const selectButton = document.createElement('button');
+  selectButton.type = 'button';
+  selectButton.className = 'host-select';
+  selectButton.innerHTML = `
     <span class="type"></span>
     <span class="details">
       <strong></strong>
       <small></small>
     </span>
   `;
-  button.querySelector('.type').textContent = type;
-  button.querySelector('strong').textContent = resource.hostname;
-  button.querySelector('small').textContent = `${resource.user}@${resource.ip}:${resource.port}`;
-  button.addEventListener('click', () => {
+  selectButton.querySelector('.type').textContent = type;
+  selectButton.querySelector('strong').textContent = resource.hostname;
+  selectButton.querySelector('small').textContent = `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`;
+  selectButton.addEventListener('click', () => {
     state.selectedId = resource.id;
-    renderHostOptions();
     renderSelection();
   });
+  row.append(selectButton);
+
+  if (!child) {
+    const addSubsystem = document.createElement('button');
+    addSubsystem.type = 'button';
+    addSubsystem.className = 'row-action';
+    addSubsystem.title = 'Add subsystem';
+    addSubsystem.setAttribute('aria-label', `Add subsystem to ${resource.hostname}`);
+    addSubsystem.textContent = '+';
+    addSubsystem.addEventListener('click', () => openResourcePanel('subsystem', resource.id));
+    row.append(addSubsystem);
+  }
 
   return {
-    element: button,
+    element: row,
     search: `${resource.hostname} ${resource.ip} ${resource.user} ${type}`.toLowerCase(),
   };
 }
 
-function renderHostOptions() {
-  const select = document.querySelector('#subsystem-form select[name="hostId"]');
-  const selected = findResource(state.selectedId);
-  const preferredHostID = selected?.parent?.id ?? (selected?.type === 'host' ? selected.resource.id : '');
+function openResourcePanel(mode, hostID = '') {
+  const panel = document.querySelector('#resource-panel');
+  const form = document.querySelector('#resource-form');
+  const typeField = document.querySelector('#subsystem-type-field');
+  const parentSummary = document.querySelector('#parent-host-summary');
+  const title = document.querySelector('#resource-panel-title');
+  const kicker = document.querySelector('#resource-panel-kicker');
+  const submit = document.querySelector('#resource-submit');
 
-  select.replaceChildren(...state.hosts.map((host) => {
-    const option = document.createElement('option');
-    option.value = host.id;
-    option.textContent = `${host.hostname} (${host.user}@${host.ip})`;
-    option.selected = host.id === preferredHostID;
-    return option;
-  }));
+  state.drawerMode = mode;
+  state.drawerHostId = hostID;
+  form.reset();
+  form.elements.port.value = '22';
+
+  const host = state.hosts.find((candidate) => candidate.id === hostID);
+  const subsystemMode = mode === 'subsystem';
+  typeField.hidden = !subsystemMode;
+  parentSummary.hidden = !subsystemMode;
+  if (subsystemMode) {
+    kicker.textContent = 'Subsystem';
+    title.textContent = 'Add Subsystem';
+    submit.textContent = 'Add Subsystem';
+    parentSummary.textContent = host ? `Parent host: ${host.hostname} (${host.user}@${host.ip || host.hostname})` : '';
+  } else {
+    kicker.textContent = 'Host';
+    title.textContent = 'Add Host';
+    submit.textContent = 'Add Host';
+    parentSummary.textContent = '';
+  }
+
+  panel.hidden = false;
+  requestAnimationFrame(() => panel.classList.add('open'));
+  form.elements.hostname.focus();
+}
+
+function closeResourcePanel() {
+  const panel = document.querySelector('#resource-panel');
+  panel.classList.remove('open');
+  panel.hidden = true;
+  state.drawerMode = null;
+  state.drawerHostId = null;
+}
+
+function openConnectPanel() {
+  const selected = findResource(state.selectedId)?.resource;
+  if (!selected) return;
+
+  const panel = document.querySelector('#connect-panel');
+  const form = document.querySelector('#connect-form');
+  form.reset();
+  form.elements.trustHostKey.checked = true;
+  document.querySelector('#connect-summary').textContent =
+    `${selected.user}@${selected.ip || selected.hostname}:${selected.port}`;
+  panel.hidden = false;
+  requestAnimationFrame(() => panel.classList.add('open'));
+  form.elements.password.focus();
+}
+
+function closeConnectPanel() {
+  const panel = document.querySelector('#connect-panel');
+  panel.classList.remove('open');
+  panel.hidden = true;
 }
 
 function renderSelection() {
@@ -296,25 +434,21 @@ function renderSelection() {
   const selected = findResource(state.selectedId);
   const title = document.querySelector('#session-title');
   const connect = document.querySelector('#connect');
+  const disconnect = document.querySelector('#disconnect');
   const remove = document.querySelector('#delete-resource');
-  const subsystemForm = document.querySelector('#subsystem-form');
 
   if (!selected) {
     title.textContent = 'No session selected';
     connect.disabled = true;
+    disconnect.disabled = true;
     remove.disabled = true;
-    subsystemForm.querySelectorAll('input, select, button').forEach((field) => {
-      field.disabled = state.hosts.length === 0 || state.busy;
-    });
     return;
   }
 
   title.textContent = `${selected.resource.user}@${selected.resource.hostname}`;
   connect.disabled = state.busy;
+  disconnect.disabled = state.busy || !state.activeSessionId;
   remove.disabled = state.busy;
-  subsystemForm.querySelectorAll('input, select, button').forEach((field) => {
-    field.disabled = state.hosts.length === 0 || state.busy;
-  });
 }
 
 function findResource(id) {
@@ -335,7 +469,7 @@ async function withBusy(task) {
   try {
     await task();
   } catch (error) {
-    terminal.writeln(`Error: ${error?.message ?? error}`);
+    terminal.writeln(`\r\nError: ${error?.message ?? error}`);
   } finally {
     state.busy = false;
     setDisabledState(false);
@@ -346,6 +480,37 @@ async function withBusy(task) {
 function setDisabledState(disabled) {
   document.querySelectorAll('button, input, select').forEach((element) => {
     element.disabled = disabled;
+  });
+}
+
+function fitTerminal() {
+  fitAddon.fit();
+}
+
+function resizeActiveSession() {
+  if (!state.activeSessionId) return;
+  apiResizeSSHSession(state.activeSessionId, terminal.cols, terminal.rows).catch(() => {});
+}
+
+function registerSSHEvents() {
+  if (!globalThis.runtime?.EventsOn) return;
+
+  EventsOn('ssh:output', (event) => {
+    if (!state.activeSessionId || event.sessionId === state.activeSessionId) {
+      terminal.write(event.data ?? '');
+    }
+  });
+  EventsOn('ssh:status', (event) => {
+    if (!state.activeSessionId || event.sessionId === state.activeSessionId) {
+      terminal.writeln(`\r\n${event.message}`);
+    }
+  });
+  EventsOn('ssh:closed', (event) => {
+    if (!state.activeSessionId || event.sessionId === state.activeSessionId) {
+      terminal.writeln(`\r\n${event.message}`);
+      state.activeSessionId = null;
+      renderSelection();
+    }
   });
 }
 
@@ -420,6 +585,37 @@ async function apiDeleteResource(id) {
   }
 
   throw new Error(`Resource ${id} not found`);
+}
+
+async function apiStartSSHSession(input) {
+  const api = wailsAPI();
+  if (api?.StartSSHSession) {
+    return await api.StartSSHSession(input);
+  }
+  terminal.writeln('Browser fallback: SSH is available only in the Wails desktop build.');
+  return `demo-session-${Date.now()}`;
+}
+
+async function apiWriteSSHSession(sessionID, data) {
+  const api = wailsAPI();
+  if (api?.WriteSSHSession) {
+    return await api.WriteSSHSession(sessionID, data);
+  }
+  terminal.write(data);
+}
+
+async function apiResizeSSHSession(sessionID, cols, rows) {
+  const api = wailsAPI();
+  if (api?.ResizeSSHSession) {
+    return await api.ResizeSSHSession(sessionID, cols, rows);
+  }
+}
+
+async function apiStopSSHSession(sessionID) {
+  const api = wailsAPI();
+  if (api?.StopSSHSession) {
+    return await api.StopSSHSession(sessionID);
+  }
 }
 
 function clone(value) {
