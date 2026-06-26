@@ -129,11 +129,14 @@ textarea {
 .session-actions {
   display: flex;
   flex-wrap: wrap;
-  justify-content: end;
+  justify-content: start;
+  gap: 5px;
 }
 
 .session-actions button {
-  min-height: 30px;
+  min-height: 26px;
+  padding: 4px 7px;
+  font-size: 12px;
 }
 
 .hosts {
@@ -237,11 +240,23 @@ textarea {
 .session-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: start;
   gap: 16px;
   border-bottom: 1px solid #d3d9df;
   background: #fff;
   padding: 11px 16px;
+}
+
+.session-titlebar {
+  min-width: 0;
+}
+
+.session-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .session-header h2,

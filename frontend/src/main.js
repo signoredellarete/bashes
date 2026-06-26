@@ -53,17 +53,19 @@ app.innerHTML = `
 
   <main class="workspace">
     <section class="session-header">
-      <div>
+      <div class="session-titlebar">
         <p class="eyebrow">Session</p>
-        <h2 id="session-title">No session selected</h2>
-      </div>
-      <div class="session-actions">
-        <button id="edit-resource" class="secondary" type="button" disabled>Edit</button>
-        <button id="header-add-subsystem" class="secondary" type="button" disabled>Add Subsystem</button>
-        <button id="open-keys-panel" class="secondary" type="button" disabled>Keys</button>
-        <button id="delete-resource" class="secondary" type="button" disabled>Delete</button>
-        <button id="disconnect" class="secondary" type="button" disabled>Disconnect</button>
-        <button id="connect" type="button" disabled>Connect</button>
+        <div class="session-title-row">
+          <h2 id="session-title">No session selected</h2>
+          <div class="session-actions">
+            <button id="edit-resource" class="secondary" type="button" disabled>Edit</button>
+            <button id="header-add-subsystem" class="secondary" type="button" disabled>Add Subsystem</button>
+            <button id="open-keys-panel" class="secondary" type="button" disabled>Keys</button>
+            <button id="delete-resource" class="secondary" type="button" disabled>Delete</button>
+            <button id="disconnect" class="secondary" type="button" disabled>Disconnect</button>
+            <button id="connect" type="button" disabled>Connect</button>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -219,8 +221,11 @@ window.addEventListener('resize', () => {
 
 registerSSHEvents();
 
-document.querySelector('#search').addEventListener('input', (event) => renderHosts(event.target.value));
-document.querySelector('#search').addEventListener('keydown', (event) => event.stopPropagation());
+const searchInput = document.querySelector('#search');
+searchInput.addEventListener('input', () => scheduleHostRender());
+['beforeinput', 'keydown', 'keyup'].forEach((eventName) => {
+  searchInput.addEventListener(eventName, (event) => event.stopPropagation());
+});
 document.querySelector('#open-host-panel').addEventListener('click', () => openResourcePanel('host'));
 document.querySelector('#open-keys-panel').addEventListener('click', () => openKeysPanel());
 document.querySelector('#edit-resource').addEventListener('click', () => openEditPanel());
@@ -264,7 +269,7 @@ async function refreshHosts() {
   if (!state.selectedId && state.hosts.length > 0) {
     state.selectedId = state.hosts[0].id;
   }
-  renderHosts(document.querySelector('#search').value);
+  renderHosts(searchInput.value);
   renderSelection();
 }
 
@@ -413,7 +418,9 @@ async function stopSession(sessionID) {
   const session = state.sessions.get(sessionID);
   state.sessions.delete(sessionID);
   if (session?.element) session.element.remove();
-  await apiStopSSHSession(sessionID);
+  if (!session?.pending) {
+    await apiStopSSHSession(sessionID);
+  }
   if (state.activeSessionId === sessionID) {
     state.activeSessionId = firstSessionID();
   }
@@ -430,6 +437,17 @@ function endpointInput(form, type) {
     user: form.elements.user.value.trim(),
     ...(type ? { type } : {}),
   };
+}
+
+let searchRenderFrame = 0;
+
+function scheduleHostRender() {
+  if (searchRenderFrame) cancelAnimationFrame(searchRenderFrame);
+  searchRenderFrame = requestAnimationFrame(() => {
+    searchRenderFrame = 0;
+    renderHosts(searchInput.value);
+    renderSelection();
+  });
 }
 
 function renderHosts(filter = '') {
@@ -485,7 +503,7 @@ function resourceRow(resource, type, child = false) {
       return;
     }
     createPendingTab(resource);
-    quickConnect(resource);
+    openConnectPanel();
   });
   row.append(selectButton);
 
@@ -496,6 +514,7 @@ function resourceRow(resource, type, child = false) {
 }
 
 function createPendingTab(resource) {
+  clearPendingTabs(resource.id);
   const existing = sessionForResource(resource.id);
   if (existing) {
     state.activeSessionId = existing.id;
@@ -520,6 +539,15 @@ function createPendingTab(resource) {
   });
   state.activeSessionId = sessionID;
   return sessionID;
+}
+
+function clearPendingTabs(exceptResourceId = '') {
+  for (const session of [...state.sessions.values()]) {
+    if (!session.pending || session.resourceId === exceptResourceId) continue;
+    if (session.element) session.element.remove();
+    state.sessions.delete(session.id);
+    if (state.activeSessionId === session.id) state.activeSessionId = null;
+  }
 }
 
 function createSession(sessionID, resource) {
@@ -905,8 +933,12 @@ function resizeActiveSession() {
 
 function writeNotice(message) {
   const session = state.sessions.get(state.activeSessionId);
-  if (session) {
+  if (session?.terminal) {
     session.terminal.writeln(`\r\n${message}`);
+    return;
+  }
+  if (session?.element) {
+    session.element.textContent = message;
     return;
   }
   const empty = document.querySelector('#empty-terminal');
@@ -932,17 +964,17 @@ function registerSSHEvents() {
 
   eventsOn('ssh:output', (event) => {
     const session = state.sessions.get(event.sessionId);
-    if (session) session.terminal.write(event.data ?? '');
+    if (session?.terminal) session.terminal.write(event.data ?? '');
   });
   eventsOn('ssh:status', (event) => {
     const session = state.sessions.get(event.sessionId);
-    if (session) session.terminal.writeln(`\r\n${event.message}`);
+    if (session?.terminal) session.terminal.writeln(`\r\n${event.message}`);
   });
   eventsOn('ssh:closed', (event) => {
     const session = state.sessions.get(event.sessionId);
     if (!session) return;
     session.closed = true;
-    session.terminal.writeln(`\r\n${event.message}`);
+    if (session.terminal) session.terminal.writeln(`\r\n${event.message}`);
     renderTabs();
     renderSelection();
   });
