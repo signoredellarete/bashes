@@ -124,13 +124,13 @@ jobs:
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Build Wails app
-        run: wails build -platform darwin/universal -tags desktop -clean -nopackage -v 2
+        run: wails build -platform darwin/universal -tags desktop -clean -v 2
 
       - name: Package macOS app
         run: |
           set -euo pipefail
           mkdir -p dist
-          app_path="$(find build/bin -maxdepth 3 -type d -name 'bashes.app' -print -quit)"
+          app_path="$(find build/bin -maxdepth 4 -type d -name '*.app' -print -quit)"
           if [ -z "$app_path" ]; then
             echo "No macOS .app bundle found under build/bin"
             find build -maxdepth 5 -print
