@@ -1,64 +1,182 @@
 # Bashes
 
-Bashes is a lightweight desktop application for managing remote servers, hosts and subsystems from a single local tool.
+Bashes is a fast desktop application for managing remote servers from one local interface.
 
-The project is now a Wails desktop app with a Go backend, a Vite frontend and an embedded `xterm.js` terminal connected to backend-managed SSH sessions.
+It lets you keep an ordered list of hosts and related subsystems, open SSH terminal sessions in tabs, manage connection details, and keep the application data in plain JSON so it remains easy to inspect, back up and move between machines.
 
-**Status:** desktop preview. The app is usable for testing host management, JSON portability, SSH sessions and packaging, but it is still under active refactor.
-
-## Goals
-
-- Keep Bashes fast and practical for repeated server administration work.
-- Run as a local desktop app on Linux, macOS and Windows.
-- Avoid depending on an external terminal application or the system `ssh` command for core SSH sessions.
-- Store hosts and subsystems in plain JSON so data can be backed up, inspected and moved between installations.
-- Keep generated SSH keys and runtime data in user-writable platform application data directories.
+The app is built with Wails, Go and a Vite frontend. The terminal surface uses `xterm.js`; SSH sessions are handled by the Go backend.
 
 ## Features
 
-- Host and subsystem management with stable IDs.
-- Subsystem types for VM, LXC and Docker-like resources.
-- JSON datastore with validation, atomic writes and backup of the previous store file.
-- Import/migration support for legacy Bashes JSON exports.
-- Wails desktop shell.
-- Go backend bindings for CRUD operations and SSH session control.
-- `xterm.js` terminal tabs for SSH sessions.
-- Temporary tabs for selected resources before a connection is started.
-- Double-click connection start from host/subsystem cards.
-- Automatic terminal focus after connection.
-- Terminal text selection copied to clipboard and right-click paste behavior.
-- SSH authentication through password, SSH agent, default keys, explicit key path or generated Bashes keys.
-- Ed25519 SSH key generation and public key installation on remote resources.
-- Release builds for Linux amd64, macOS universal and Windows amd64.
-- Experimental release jobs for Linux arm64 and Windows arm64.
+- Host management with name, address, port and user.
+- Subsystems attached to a host, with VM, LXC and Docker resource types.
+- Fast searchable sidebar for hosts and subsystems.
+- Contextual actions for the selected resource: edit, add subsystem, key management, delete and connect.
+- Tabbed terminal area for multiple SSH sessions.
+- Temporary tabs when selecting a resource before connecting.
+- Double-click a host or subsystem card to start an SSH connection.
+- Terminal text selection copies to the clipboard.
+- Right-click in the terminal pastes from the clipboard.
+- Automatic terminal focus after a connection starts.
+- SSH authentication with password, SSH agent, default keys, explicit key path or Bashes-generated keys.
+- Ed25519 SSH key generation from inside the app.
+- Public key installation on a remote host or subsystem.
+- Plain JSON datastore with validation, backups and atomic writes.
+- Cross-platform release builds for Linux, macOS and Windows.
 
-## Runtime Data
+## Install
 
-Release builds save JSON data and generated keys outside the application bundle:
-
-- Linux: `$XDG_DATA_HOME/bashes/hosts.json` or `~/.local/share/bashes/hosts.json`
-- macOS: `~/Library/Application Support/Bashes/hosts.json`
-- Windows: `%APPDATA%\Bashes\hosts.json`
-
-Generated SSH keys are stored in a `keys` directory next to `hosts.json`.
-
-Passwords and key passphrases are not saved in the JSON datastore.
-
-## Download A Release
-
-Tagged builds are published as GitHub Releases.
-
-Download the package for your operating system:
+Download the latest release from GitHub Releases and choose the package for your operating system:
 
 - Linux amd64: `bashes-linux-amd64.tar.gz`
 - macOS Apple Silicon and Intel: `bashes-darwin-universal.zip`
 - Windows amd64: `bashes-windows-amd64.zip`
-- Linux arm64: `bashes-linux-arm64.tar.gz` when the experimental job succeeds
-- Windows arm64: `bashes-windows-arm64.zip` when the experimental job succeeds
+- Linux arm64: `bashes-linux-arm64.tar.gz` when available
+- Windows arm64: `bashes-windows-arm64.zip` when available
 
-On Linux, a raw ELF binary normally has a generic icon. The Linux archive includes `icons/bashes.png` and `install-desktop-entry.sh`; run that script from the extracted folder to install a user-local launcher with the Bashes icon.
+### Linux
 
-macOS and Windows builds are currently unsigned unless the repository signing secrets are configured. See [docs/DESKTOP_TESTING.md](docs/DESKTOP_TESTING.md) for Gatekeeper, SmartScreen and desktop testing notes.
+Extract the archive into a folder you want to keep, then run:
+
+```bash
+./bashes
+```
+
+To add Bashes to your desktop application launcher, run the included script from the extracted folder:
+
+```bash
+./install-desktop-entry.sh
+```
+
+That script creates a user-local launcher entry pointing to the extracted `bashes` binary and bundled icon.
+
+### macOS
+
+Extract the zip and open `Bashes.app`.
+
+Current release builds are unsigned unless signing secrets are configured in the repository. If macOS blocks the first launch during testing, remove the quarantine attribute:
+
+```bash
+xattr -dr com.apple.quarantine Bashes.app
+open Bashes.app
+```
+
+### Windows
+
+Extract the zip into a normal user-writable folder and run `bashes.exe`.
+
+Current release builds are unsigned unless Windows signing secrets are configured in the repository. Windows SmartScreen may warn on first launch.
+
+## Runtime Files
+
+Bashes writes application data to the current user's application data directory. It does not write hosts, keys or settings beside the executable.
+
+### Linux
+
+If `XDG_DATA_HOME` is set:
+
+```text
+$XDG_DATA_HOME/bashes/
+```
+
+Otherwise:
+
+```text
+~/.local/share/bashes/
+```
+
+Files and folders:
+
+- `hosts.json`: main host/subsystem datastore.
+- `hosts.json.bak`: backup of the previous datastore before the latest successful save.
+- `.hosts.json.*.tmp`: temporary file used during atomic writes; normally it exists only while saving.
+- `keys/`: SSH keys generated by Bashes.
+- `keys/<name>`: generated private key.
+- `keys/<name>.pub`: generated public key.
+
+If `install-desktop-entry.sh` is used, it also writes:
+
+```text
+${XDG_DATA_HOME:-$HOME/.local/share}/applications/bashes.desktop
+```
+
+### macOS
+
+```text
+~/Library/Application Support/Bashes/
+```
+
+Files and folders:
+
+- `hosts.json`
+- `hosts.json.bak`
+- `.hosts.json.*.tmp`
+- `keys/`
+- `keys/<name>`
+- `keys/<name>.pub`
+
+### Windows
+
+```text
+%APPDATA%\Bashes\
+```
+
+Usually this resolves to:
+
+```text
+C:\Users\<user>\AppData\Roaming\Bashes\
+```
+
+Files and folders:
+
+- `hosts.json`
+- `hosts.json.bak`
+- `.hosts.json.*.tmp`
+- `keys\`
+- `keys\<name>`
+- `keys\<name>.pub`
+
+## Backup And Restore
+
+The important portable file is:
+
+```text
+hosts.json
+```
+
+It contains hosts, subsystems, saved connection metadata and authentication preferences that are safe to store in the JSON datastore. Passwords and key passphrases are not saved.
+
+### Manual Backup
+
+Close Bashes, then copy `hosts.json` from the runtime data directory for your operating system.
+
+If you use Bashes-generated SSH keys and want to move them too, also copy the `keys/` directory. Treat private keys as secrets.
+
+### Automatic Backup
+
+Before every successful save, Bashes copies the previous datastore to:
+
+```text
+hosts.json.bak
+```
+
+This backup is overwritten on each save. It is meant as a quick rollback file, not as a full backup history.
+
+### Restore
+
+Close Bashes, then replace the current `hosts.json` with your backup copy.
+
+If restoring Bashes-generated keys, restore the `keys/` directory next to `hosts.json`.
+
+On Linux and macOS, private keys should be readable only by your user:
+
+```bash
+chmod 700 keys
+chmod 600 keys/*
+chmod 644 keys/*.pub
+```
+
+Then start Bashes again. The app loads the JSON file on startup and validates it before use.
 
 ## Build From Source
 
@@ -93,7 +211,7 @@ Build the desktop app:
 wails build -tags desktop
 ```
 
-On Linux, Wails requires GTK/WebKitGTK development packages. Run `wails doctor` on the target desktop machine and install only the packages it reports as missing.
+On Linux, run `wails doctor` and install only the missing GTK/WebKitGTK packages required by Wails for your distribution.
 
 ## Data CLI
 
@@ -103,27 +221,13 @@ Validate a Bashes JSON datastore:
 go run ./cmd/bashes-data validate /path/to/hosts.json
 ```
 
-Migrate an old Bashes JSON export to the current versioned format:
+Write a normalized copy of a datastore to another file:
 
 ```bash
-go run ./cmd/bashes-data migrate old-hosts.json hosts.json
+go run ./cmd/bashes-data migrate input-hosts.json output-hosts.json
 ```
 
-The migrated file remains plain JSON and can be copied between Bashes installations.
+## Documentation
 
-## Development Notes
-
-The current architecture is split into:
-
-- `internal/domain`: JSON schema, validation and stable IDs.
-- `internal/store`: JSON repository, legacy import, backup and atomic save.
-- `internal/application`: host/subsystem service layer.
-- `internal/remotessh`: SSH client and shell session primitives.
-- `app.go`: Wails-bound backend API.
-- `frontend`: Vite UI with `xterm.js`.
-- `main_desktop.go`: Wails desktop entrypoint behind the `desktop` build tag.
-
-More details are in:
-
-- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
-- [docs/DESKTOP_TESTING.md](docs/DESKTOP_TESTING.md)
+- [Development notes](docs/DEVELOPMENT.md)
+- [Desktop testing guide](docs/DESKTOP_TESTING.md)
