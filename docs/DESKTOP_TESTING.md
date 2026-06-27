@@ -115,10 +115,27 @@ Tagged builds are published as GitHub Releases.
 1. Open the repository on GitHub.
 2. Go to `Releases`.
 3. Open the latest `Bashes v...` release.
-4. Download `bashes-linux-amd64.tar.gz`.
-5. Extract the archive and run the `bashes` binary from a Linux desktop session.
+4. Download the package for your OS:
+   - Linux: `bashes-linux-amd64.tar.gz`
+   - macOS: `bashes-darwin-universal.zip`
+5. Extract the archive and run the app from a graphical desktop session.
 
 Release builds are created by pushing a tag matching `v*`.
+
+## macOS Testing
+
+The macOS build is produced on GitHub Actions with `wails build -platform darwin/universal`, so the same archive is intended for Apple Silicon and Intel Macs.
+
+The current macOS package is unsigned and not notarized. On a Mac, Gatekeeper may block the first launch. For testing, extract the zip, then either:
+
+```bash
+xattr -dr com.apple.quarantine Bashes.app
+open Bashes.app
+```
+
+or right-click `Bashes.app`, choose `Open`, and confirm the launch.
+
+For regular distribution outside internal testing, the app should eventually be signed with an Apple Developer ID certificate and notarized. That requires Apple developer credentials and should be added only when we are ready to publish broader macOS builds.
 
 ## Downloading A GitHub Actions Build
 
@@ -130,8 +147,8 @@ It runs automatically on pushes to `main`, on tags matching `v*`, and can also b
 2. Go to `Actions`.
 3. Select `Build Desktop App`.
 4. Click `Run workflow`.
-5. Wait for the `Linux desktop build` job to finish.
-6. Download the `bashes-linux-amd64` artifact from the workflow run page.
+5. Wait for the desktop build jobs to finish.
+6. Download `bashes-linux-amd64` or `bashes-darwin-universal` from the workflow run page.
 
 The workflow uses `ubuntu-22.04` because Wails v2.12 expects `libwebkit2gtk-4.0-dev`, which is available there but may be missing on newer Ubuntu releases.
 
