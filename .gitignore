@@ -1,15 +1,9 @@
-public/db/*
 .env
-.chrome_pid
-.pid
-.tmp/
-log/
 .tools/
 .cache/
 dist/
 build/
 bin/
-data/keys/
 node_modules/
 frontend/node_modules/
 frontend/wailsjs/

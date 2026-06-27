@@ -1,18 +1,19 @@
 # Desktop Testing Guide
 
-This guide is for testing the Wails version of Bashes on a machine with a graphical desktop environment.
+This guide is for testing Bashes on a machine with a graphical desktop environment.
 
 ## What Can Be Tested Today
 
 Current status:
 
-- Go JSON datastore, validation and legacy migration are implemented.
+- Go JSON datastore, validation and legacy JSON migration are implemented.
 - Application service layer for hosts and subsystems is implemented.
-- Wails desktop skeleton is present behind the `desktop` build tag.
+- Wails desktop entrypoint is present behind the `desktop` build tag.
 - Frontend builds with Vite and includes `xterm.js`.
-- Internal SSH client primitives exist, but the interactive SSH session is not yet wired to the frontend terminal.
+- Interactive SSH sessions are wired to `xterm.js` terminal tabs.
+- Generated SSH keys can be installed on remote resources.
 
-The current desktop app is therefore useful to verify packaging, startup, UI rendering and backend bindings. Full terminal SSH interaction is a next milestone.
+The current desktop app is therefore useful to verify packaging, startup, UI rendering, JSON persistence and SSH session behavior.
 
 ## Linux Dependencies
 
@@ -194,7 +195,7 @@ The workflow uses `ubuntu-22.04` because Wails v2.12 expects `libwebkit2gtk-4.0-
 Validate the current JSON data file:
 
 ```bash
-go run ./cmd/bashes-data validate public/db/hosts.json
+go run ./cmd/bashes-data validate /path/to/hosts.json
 ```
 
 Migrate a legacy Bashes JSON export to the new versioned format:
@@ -243,4 +244,4 @@ rm -rf frontend/node_modules frontend/package-lock.json
 npm install --prefix frontend
 ```
 
-Do not remove project source files or legacy data files.
+Do not remove project source files or user data files.

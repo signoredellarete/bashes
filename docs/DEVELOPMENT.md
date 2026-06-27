@@ -1,6 +1,6 @@
 # Development Notes
 
-This repository is being migrated from the legacy local PHP app to a Wails desktop app.
+This repository is a Wails desktop app with a Go backend and a Vite frontend.
 
 For graphical desktop testing, see `docs/DESKTOP_TESTING.md`.
 
@@ -44,7 +44,7 @@ Validate or migrate JSON data without a desktop:
 ```bash
 GOCACHE=/home/ubuntu/git/bashes/.cache/go-build \
 GOMODCACHE=/home/ubuntu/git/bashes/.cache/go-mod \
-/home/ubuntu/git/bashes/.tools/go/bin/go run ./cmd/bashes-data validate public/db/hosts.json
+/home/ubuntu/git/bashes/.tools/go/bin/go run ./cmd/bashes-data validate /path/to/hosts.json
 ```
 
 Build frontend without starting a server:
