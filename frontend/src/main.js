@@ -46,7 +46,7 @@ app.innerHTML = `
     </header>
 
     <div class="toolbar">
-      <input id="search" type="search" placeholder="Search hosts" autocomplete="off" />
+      <input id="search" type="search" placeholder="Search hosts" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" />
       <button id="open-host-panel" type="button" title="Add host">Add Host</button>
     </div>
 
@@ -113,11 +113,11 @@ app.innerHTML = `
 
       <label>
         <span>Hostname</span>
-        <input name="hostname" autocomplete="off" required />
+        <input name="hostname" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required />
       </label>
       <label>
         <span>IP / DNS</span>
-        <input name="ip" autocomplete="off" required />
+        <input name="ip" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required />
       </label>
       <div class="form-grid">
         <label>
@@ -126,7 +126,7 @@ app.innerHTML = `
         </label>
         <label>
           <span>User</span>
-          <input name="user" autocomplete="username" required />
+          <input name="user" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required />
         </label>
       </div>
 
@@ -160,7 +160,7 @@ app.innerHTML = `
       </label>
       <label>
         <span>Private Key Path</span>
-        <input name="privateKeyPath" autocomplete="off" placeholder="optional path on this machine" />
+        <input name="privateKeyPath" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="optional path on this machine" />
       </label>
       <label>
         <span>Key Passphrase</span>
@@ -192,7 +192,7 @@ app.innerHTML = `
       <form id="key-generate-form" class="compact-form">
         <label>
           <span>New Key Name</span>
-          <input name="name" autocomplete="off" placeholder="bashes-main" />
+          <input name="name" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="bashes-main" />
         </label>
         <button type="submit">Generate</button>
       </form>

@@ -126,17 +126,76 @@ jobs:
       - name: Build Wails app
         run: wails build -platform darwin/universal -tags desktop -clean -v 2
 
-      - name: Package macOS app
+      - name: Locate macOS app
+        id: macos-app
         run: |
           set -euo pipefail
-          mkdir -p dist
           app_path="$(find build/bin -maxdepth 4 -type d -name '*.app' -print -quit)"
           if [ -z "$app_path" ]; then
             echo "No macOS .app bundle found under build/bin"
             find build -maxdepth 5 -print
             exit 1
           fi
-          ditto -c -k --sequesterRsrc --keepParent "$app_path" dist/bashes-darwin-universal.zip
+          echo "path=$app_path" >> "$GITHUB_OUTPUT"
+
+      - name: Sign macOS app
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+          RUNNER_TEMP_KEYCHAIN_PASSWORD: bashes-ci-keychain
+        run: |
+          set -euo pipefail
+          if [ -z "$MACOS_CERTIFICATE_P12" ] || [ -z "$MACOS_CERTIFICATE_PASSWORD" ] || [ -z "$MACOS_CODESIGN_IDENTITY" ]; then
+            echo "macOS signing secrets are not configured; producing an unsigned test build."
+            exit 0
+          fi
+          security create-keychain -p "$RUNNER_TEMP_KEYCHAIN_PASSWORD" "$RUNNER_TEMP/bashes-signing.keychain-db"
+          security set-keychain-settings -lut 21600 "$RUNNER_TEMP/bashes-signing.keychain-db"
+          security unlock-keychain -p "$RUNNER_TEMP_KEYCHAIN_PASSWORD" "$RUNNER_TEMP/bashes-signing.keychain-db"
+          python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          Path(os.environ["RUNNER_TEMP"], "macos-certificate.p12").write_bytes(
+              base64.b64decode(os.environ["MACOS_CERTIFICATE_P12"])
+          )
+          PY
+          security import "$RUNNER_TEMP/macos-certificate.p12" \
+            -k "$RUNNER_TEMP/bashes-signing.keychain-db" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security list-keychain -d user -s "$RUNNER_TEMP/bashes-signing.keychain-db"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$RUNNER_TEMP_KEYCHAIN_PASSWORD" "$RUNNER_TEMP/bashes-signing.keychain-db"
+          codesign --force --deep --options runtime --timestamp \
+            --sign "$MACOS_CODESIGN_IDENTITY" "${{ steps.macos-app.outputs.path }}"
+
+      - name: Package macOS app
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc --keepParent "${{ steps.macos-app.outputs.path }}" dist/bashes-darwin-universal.zip
+
+      - name: Notarize macOS app
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$APPLE_ID" ] || [ -z "$APPLE_TEAM_ID" ] || [ -z "$APPLE_APP_SPECIFIC_PASSWORD" ]; then
+            echo "Apple notarization secrets are not configured; producing an unnotarized test build."
+            exit 0
+          fi
+          xcrun notarytool submit dist/bashes-darwin-universal.zip \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --wait
+          xcrun stapler staple "${{ steps.macos-app.outputs.path }}"
+          ditto -c -k --sequesterRsrc --keepParent "${{ steps.macos-app.outputs.path }}" dist/bashes-darwin-universal.zip
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
@@ -178,6 +237,31 @@ jobs:
       - name: Build Wails app
         run: wails build -platform windows/amd64 -tags desktop -clean -nopackage -v 2
 
+      - name: Sign Windows app
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PFX: ${{ secrets.WINDOWS_CERTIFICATE_PFX }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $exe = Get-ChildItem -Path build/bin -Recurse -Filter bashes.exe | Select-Object -First 1
+          if (-not $exe) {
+            Write-Error "No Windows executable found under build/bin"
+          }
+          if (-not $env:WINDOWS_CERTIFICATE_PFX -or -not $env:WINDOWS_CERTIFICATE_PASSWORD) {
+            Write-Host "Windows signing secrets are not configured; producing an unsigned test build."
+            exit 0
+          }
+          $certificatePath = Join-Path $env:RUNNER_TEMP "windows-certificate.pfx"
+          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match "x64" } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $signtool) {
+            Write-Error "signtool.exe not found"
+          }
+          & $signtool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $certificatePath /p $env:WINDOWS_CERTIFICATE_PASSWORD $exe.FullName
+
       - name: Package Windows app
         shell: pwsh
         run: |
@@ -195,6 +279,142 @@ jobs:
           path: dist/bashes-windows-amd64.zip
           if-no-files-found: error
 
+  linux-arm64-desktop:
+    name: Linux ARM64 desktop build
+    runs-on: ubuntu-22.04
+    needs: test
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Wails Linux ARM64 dependencies
+        run: |
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            gcc-aarch64-linux-gnu \
+            pkg-config \
+            libgtk-3-dev:arm64 \
+            libwebkit2gtk-4.0-dev:arm64
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Install Wails CLI
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Build Wails app
+        env:
+          CGO_ENABLED: "1"
+          CC: aarch64-linux-gnu-gcc
+          PKG_CONFIG_PATH: /usr/lib/aarch64-linux-gnu/pkgconfig
+        run: wails build -platform linux/arm64 -tags desktop -clean -nopackage -v 2
+
+      - name: Package Linux ARM64 binary
+        run: |
+          mkdir -p dist
+          tar -C build/bin -czf dist/bashes-linux-arm64.tar.gz .
+
+      - name: Upload Linux ARM64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bashes-linux-arm64
+          path: dist/bashes-linux-arm64.tar.gz
+          if-no-files-found: error
+
+  windows-arm64-desktop:
+    name: Windows ARM64 desktop build
+    runs-on: windows-2022
+    needs: test
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Install Wails CLI
+        shell: pwsh
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          "$env:USERPROFILE\go\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build Wails app
+        run: wails build -platform windows/arm64 -tags desktop -clean -nopackage -v 2
+
+      - name: Sign Windows ARM64 app
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PFX: ${{ secrets.WINDOWS_CERTIFICATE_PFX }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $exe = Get-ChildItem -Path build/bin -Recurse -Filter bashes.exe | Select-Object -First 1
+          if (-not $exe) {
+            Write-Error "No Windows ARM64 executable found under build/bin"
+          }
+          if (-not $env:WINDOWS_CERTIFICATE_PFX -or -not $env:WINDOWS_CERTIFICATE_PASSWORD) {
+            Write-Host "Windows signing secrets are not configured; producing an unsigned ARM64 test build."
+            exit 0
+          }
+          $certificatePath = Join-Path $env:RUNNER_TEMP "windows-certificate.pfx"
+          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match "x64" } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $signtool) {
+            Write-Error "signtool.exe not found"
+          }
+          & $signtool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $certificatePath /p $env:WINDOWS_CERTIFICATE_PASSWORD $exe.FullName
+
+      - name: Package Windows ARM64 app
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $exe = Get-ChildItem -Path build/bin -Recurse -Filter bashes.exe | Select-Object -First 1
+          if (-not $exe) {
+            Write-Error "No Windows ARM64 executable found under build/bin"
+          }
+          Compress-Archive -Path $exe.FullName -DestinationPath dist/bashes-windows-arm64.zip -Force
+
+      - name: Upload Windows ARM64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bashes-windows-arm64
+          path: dist/bashes-windows-arm64.zip
+          if-no-files-found: error
+
   release:
     name: Publish GitHub release
     runs-on: ubuntu-22.04
@@ -202,6 +422,8 @@ jobs:
       - linux-desktop
       - macos-desktop
       - windows-desktop
+      - linux-arm64-desktop
+      - windows-arm64-desktop
     if: startsWith(github.ref, 'refs/tags/')
     steps:
       - name: Download release artifacts
@@ -228,5 +450,5 @@ jobs:
             gh release create "$GITHUB_REF_NAME" $assets \
               --repo "$GITHUB_REPOSITORY" \
               --title "Bashes $GITHUB_REF_NAME" \
-              --notes "Wails desktop preview build for Linux amd64, macOS universal and Windows amd64. This is an early refactor milestone for testing the JSON datastore, SSH/xterm sessions and desktop shell."
+              --notes "Wails desktop preview build for Linux amd64, macOS universal and Windows amd64. Linux arm64 and Windows arm64 artifacts are experimental and are published only when their builds succeed. This is an early refactor milestone for testing the JSON datastore, SSH/xterm sessions and desktop shell."
           fi

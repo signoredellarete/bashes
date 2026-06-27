@@ -119,6 +119,8 @@ Tagged builds are published as GitHub Releases.
    - Linux: `bashes-linux-amd64.tar.gz`
    - macOS: `bashes-darwin-universal.zip`
    - Windows: `bashes-windows-amd64.zip`
+   - Linux ARM64, experimental when available: `bashes-linux-arm64.tar.gz`
+   - Windows ARM64, experimental when available: `bashes-windows-arm64.zip`
 5. Extract the archive and run the app from a graphical desktop session.
 
 Release builds are created by pushing a tag matching `v*`.
@@ -136,15 +138,29 @@ open Bashes.app
 
 or right-click `Bashes.app`, choose `Open`, and confirm the launch.
 
-For regular distribution outside internal testing, the app should eventually be signed with an Apple Developer ID certificate and notarized. That requires Apple developer credentials and should be added only when we are ready to publish broader macOS builds.
+For regular distribution outside internal testing, the app must be signed with an Apple Developer ID certificate and notarized. The GitHub workflow supports this when these repository secrets are configured:
+
+- `MACOS_CERTIFICATE_P12`: base64-encoded Developer ID Application certificate exported as `.p12`
+- `MACOS_CERTIFICATE_PASSWORD`: password for the `.p12`
+- `MACOS_CODESIGN_IDENTITY`: codesign identity, for example `Developer ID Application: ...`
+- `APPLE_ID`: Apple developer account email
+- `APPLE_TEAM_ID`: Apple team id
+- `APPLE_APP_SPECIFIC_PASSWORD`: app-specific password for notarization
+
+Without those secrets, the workflow still produces an unsigned test build.
 
 ## Windows Testing
 
-The Windows build is produced on GitHub Actions with `wails build -platform windows/amd64`.
+The Windows build is produced on GitHub Actions with `wails build -platform windows/amd64`. The workflow also attempts an experimental `windows/arm64` artifact.
 
 The current package is a plain zip containing `bashes.exe`. It is not signed, so Windows SmartScreen may warn on first launch. For testing, extract the zip into a normal user-writable folder and run `bashes.exe`.
 
-For regular distribution, the app should eventually get a signed installer or signed executable. Windows ARM builds are possible in principle, but should be tested separately after the amd64 package is stable.
+For regular distribution, the executable should be Authenticode-signed. The GitHub workflow supports this when these repository secrets are configured:
+
+- `WINDOWS_CERTIFICATE_PFX`: base64-encoded code-signing certificate exported as `.pfx`
+- `WINDOWS_CERTIFICATE_PASSWORD`: password for the `.pfx`
+
+Signing reduces security warnings, but SmartScreen reputation may still require a trusted certificate and download reputation over time.
 
 ## Runtime Data Paths
 
@@ -167,7 +183,7 @@ It runs automatically on pushes to `main`, on tags matching `v*`, and can also b
 3. Select `Build Desktop App`.
 4. Click `Run workflow`.
 5. Wait for the desktop build jobs to finish.
-6. Download `bashes-linux-amd64`, `bashes-darwin-universal` or `bashes-windows-amd64` from the workflow run page.
+6. Download `bashes-linux-amd64`, `bashes-darwin-universal`, `bashes-windows-amd64` or experimental ARM artifacts from the workflow run page.
 
 The workflow uses `ubuntu-22.04` because Wails v2.12 expects `libwebkit2gtk-4.0-dev`, which is available there but may be missing on newer Ubuntu releases.
 
