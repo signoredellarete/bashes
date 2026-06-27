@@ -6,6 +6,13 @@
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "http://localhost:34115",
+  "info": {
+    "companyName": "Bashes",
+    "productName": "Bashes",
+    "productVersion": "0.1.17",
+    "copyright": "Copyright 2026 Fabrizio Verde",
+    "comments": "Remote server session manager"
+  },
   "author": {
     "name": "Fabrizio Verde",
     "email": "signoredellarete@gmail.com"

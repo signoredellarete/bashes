@@ -84,8 +84,7 @@ jobs:
 
       - name: Package Linux binary
         run: |
-          mkdir -p dist
-          tar -C build/bin -czf dist/bashes-linux-amd64.tar.gz .
+          scripts/package-linux-release.sh amd64
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
@@ -329,8 +328,7 @@ jobs:
 
       - name: Package Linux ARM64 binary
         run: |
-          mkdir -p dist
-          tar -C build/bin -czf dist/bashes-linux-arm64.tar.gz .
+          scripts/package-linux-release.sh arm64
 
       - name: Upload Linux ARM64 artifact
         uses: actions/upload-artifact@v4

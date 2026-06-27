@@ -123,6 +123,8 @@ Tagged builds are published as GitHub Releases.
    - Windows ARM64, experimental when available: `bashes-windows-arm64.zip`
 5. Extract the archive and run the app from a graphical desktop session.
 
+On Linux, the executable itself is an ELF binary and desktop environments normally show a generic icon for raw binaries. The release archive includes `icons/bashes.png` and `install-desktop-entry.sh`; run that script from the extracted folder to create a user-local launcher with the Bashes icon under `~/.local/share/applications`.
+
 Release builds are created by pushing a tag matching `v*`.
 
 ## macOS Testing
@@ -151,7 +153,7 @@ Without those secrets, the workflow still produces an unsigned test build.
 
 ## Windows Testing
 
-The Windows build is produced on GitHub Actions with `wails build -platform windows/amd64`. The workflow also attempts an experimental `windows/arm64` artifact.
+The Windows build is produced on GitHub Actions with `wails build -platform windows/amd64`. The workflow also attempts an experimental `windows/arm64` artifact. The executable embeds `build/windows/icon.ico` through the Wails Windows resource step.
 
 The current package is a plain zip containing `bashes.exe`. It is not signed, so Windows SmartScreen may warn on first launch. For testing, extract the zip into a normal user-writable folder and run `bashes.exe`.
 
