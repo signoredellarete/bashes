@@ -25,6 +25,7 @@ const state = {
   keys: [],
   selectedId: null,
   activeSessionId: null,
+  terminalFontSize: 13,
   busy: false,
   drawerMode: null,
   drawerHostId: null,
@@ -76,6 +77,13 @@ app.innerHTML = `
         <div id="terminal-stack" class="terminal-stack">
           <div id="empty-terminal" class="empty-terminal">No active terminal session</div>
         </div>
+        <footer class="terminal-statusbar">
+          <div class="terminal-font-controls" aria-label="Terminal font size">
+            <button id="decrease-terminal-font" type="button" title="Decrease terminal font size">-</button>
+            <span aria-hidden="true">A</span>
+            <button id="increase-terminal-font" type="button" title="Increase terminal font size">+</button>
+          </div>
+        </footer>
       </section>
     </section>
   </main>
@@ -242,6 +250,8 @@ document.querySelector('#header-add-subsystem').addEventListener('click', () => 
 document.querySelector('#connect').addEventListener('click', () => openConnectPanel());
 document.querySelector('#disconnect').addEventListener('click', () => disconnectActiveSession());
 document.querySelector('#delete-resource').addEventListener('click', () => deleteSelectedResource());
+document.querySelector('#decrease-terminal-font').addEventListener('click', () => adjustTerminalFontSize(-1));
+document.querySelector('#increase-terminal-font').addEventListener('click', () => adjustTerminalFontSize(1));
 document.querySelector('#resource-form').addEventListener('submit', (event) => submitResource(event));
 document.querySelector('#connect-form').addEventListener('submit', (event) => submitConnect(event));
 document.querySelector('#key-generate-form').addEventListener('submit', (event) => submitGenerateKey(event));
@@ -575,7 +585,7 @@ function createSession(sessionID, resource) {
     cursorBlink: true,
     convertEol: true,
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-    fontSize: 13,
+    fontSize: state.terminalFontSize,
     theme: {
       background: '#101418',
       foreground: '#d7dde5',
@@ -621,6 +631,7 @@ function createSession(sessionID, resource) {
   renderTabs();
   renderSelection();
   scheduleTerminalFit();
+  focusActiveTerminal();
 }
 
 function renderTabs() {
@@ -958,10 +969,30 @@ function setDisabledState(disabled) {
   });
 }
 
+function adjustTerminalFontSize(delta) {
+  state.terminalFontSize = Math.min(22, Math.max(10, state.terminalFontSize + delta));
+  for (const session of state.sessions.values()) {
+    if (session.terminal) {
+      session.terminal.options.fontSize = state.terminalFontSize;
+    }
+  }
+  scheduleTerminalFit();
+  focusActiveTerminal();
+}
+
+function focusActiveTerminal() {
+  const session = state.sessions.get(state.activeSessionId);
+  if (!session?.terminal) return;
+  requestAnimationFrame(() => session.terminal.focus());
+}
+
 function fitActiveTerminal() {
   const session = state.sessions.get(state.activeSessionId);
-  if (!session?.fitAddon) return;
+  if (!session?.fitAddon || !session.terminal) return;
   session.fitAddon.fit();
+  if (session.terminal.cols > 2) {
+    session.terminal.resize(session.terminal.cols - 1, session.terminal.rows);
+  }
 }
 
 let terminalFitFrame = 0;
