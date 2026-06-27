@@ -1,6 +1,7 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
+import bashesLogo from './assets/bashes.png';
 import './styles.css';
 
 const demoStore = {
@@ -36,7 +37,7 @@ const app = document.querySelector('#app');
 app.innerHTML = `
   <aside class="sidebar">
     <header class="brand">
-      <img src="/src/assets/bashes.png" alt="" />
+      <img src="${bashesLogo}" alt="" />
       <div>
         <h1>Bashes</h1>
         <span>Remote sessions</span>

@@ -5,7 +5,7 @@ start_script=${base_path}/start_bashes.sh
 
 echo base_path=$(dirname "$SCRIPT") > ${base_path}/.env
 echo start_script=${base_path}/start_bashes.sh >> ${base_path}/.env
-echo desktop_icon=${base_path}/icons/bashes4.png >> ${base_path}/.env
+echo desktop_icon=${base_path}/icons/bashes.png >> ${base_path}/.env
 
 source ${base_path}/.env
 
