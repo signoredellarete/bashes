@@ -77,15 +77,16 @@ app.innerHTML = `
         <div id="terminal-stack" class="terminal-stack">
           <div id="empty-terminal" class="empty-terminal">No active terminal session</div>
         </div>
-        <footer class="terminal-statusbar">
-          <div class="terminal-font-controls" aria-label="Terminal font size">
-            <button id="decrease-terminal-font" type="button" title="Decrease terminal font size">-</button>
-            <span aria-hidden="true">A</span>
-            <button id="increase-terminal-font" type="button" title="Increase terminal font size">+</button>
-          </div>
-        </footer>
       </section>
     </section>
+
+    <footer class="workspace-footer">
+      <div class="terminal-font-controls" aria-label="Terminal font size">
+        <button id="decrease-terminal-font" type="button" title="Decrease terminal font size">-</button>
+        <span aria-hidden="true">A</span>
+        <button id="increase-terminal-font" type="button" title="Increase terminal font size">+</button>
+      </div>
+    </footer>
   </main>
 
   <section id="resource-panel" class="slide-panel" hidden>
@@ -990,8 +991,9 @@ function fitActiveTerminal() {
   const session = state.sessions.get(state.activeSessionId);
   if (!session?.fitAddon || !session.terminal) return;
   session.fitAddon.fit();
-  if (session.terminal.cols > 2) {
-    session.terminal.resize(session.terminal.cols - 1, session.terminal.rows);
+  const reserveCols = terminalScrollbarReserveColumns(session);
+  if (session.terminal.cols > reserveCols + 2) {
+    session.terminal.resize(session.terminal.cols - reserveCols, session.terminal.rows);
   }
 }
 
@@ -1004,6 +1006,15 @@ function scheduleTerminalFit() {
     fitActiveTerminal();
     resizeActiveSession();
   });
+}
+
+function terminalScrollbarReserveColumns(session) {
+  const viewport = session.element?.querySelector('.xterm-viewport');
+  const screen = session.element?.querySelector('.xterm-screen');
+  const scrollbarWidth = viewport ? viewport.offsetWidth - viewport.clientWidth : 0;
+  const screenWidth = screen?.getBoundingClientRect().width ?? 0;
+  const cellWidth = screenWidth > 0 && session.terminal.cols > 0 ? screenWidth / session.terminal.cols : 8;
+  return Math.max(3, Math.ceil((scrollbarWidth + 12) / cellWidth));
 }
 
 function resizeActiveSession() {
