@@ -26,6 +26,7 @@ const state = {
   selectedId: null,
   activeSessionId: null,
   terminalFontSize: 13,
+  sidebarCollapsed: localStorage.getItem('bashes.sidebarCollapsed') === 'true',
   busy: false,
   drawerMode: null,
   drawerHostId: null,
@@ -43,6 +44,9 @@ app.innerHTML = `
         <h1>Bashes</h1>
         <span>Remote sessions</span>
       </div>
+      <button id="toggle-sidebar" class="sidebar-toggle" type="button" title="Compact sidebar" aria-label="Compact sidebar">
+        &lt;
+      </button>
     </header>
 
     <div class="toolbar">
@@ -220,6 +224,8 @@ app.innerHTML = `
       </form>
     </section>
   </section>
+
+  <div id="sidebar-tooltip" class="sidebar-tooltip" hidden></div>
 `;
 
 const stack = document.querySelector('#terminal-stack');
@@ -236,6 +242,7 @@ if (globalThis.ResizeObserver) {
 registerSSHEvents();
 
 const searchInput = document.querySelector('#search');
+document.querySelector('#toggle-sidebar').addEventListener('click', () => toggleSidebar());
 searchInput.addEventListener('input', () => scheduleHostRender());
 ['beforeinput', 'keydown', 'keyup'].forEach((eventName) => {
   searchInput.addEventListener(eventName, (event) => event.stopPropagation());
@@ -270,6 +277,7 @@ document.querySelectorAll('[data-close-keys]').forEach((element) => {
 
 await loadHosts();
 await loadKeys();
+applySidebarState();
 
 async function loadHosts() {
   await withBusy(async () => {
@@ -490,20 +498,26 @@ function resourceRow(resource, type, child = false) {
   const row = document.createElement('div');
   row.className = `host-row ${child ? 'child' : ''}`;
   row.dataset.id = resource.id;
+  const target = `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`;
+  const tooltip = `${resource.hostname} - ${target}`;
 
   const selectButton = document.createElement('button');
   selectButton.type = 'button';
   selectButton.className = 'host-select';
+  selectButton.title = tooltip;
+  selectButton.dataset.tooltip = tooltip;
   selectButton.innerHTML = `
     <span class="type"></span>
+    <span class="compact-name" aria-hidden="true"></span>
     <span class="details">
       <strong></strong>
       <small></small>
     </span>
   `;
   selectButton.querySelector('.type').textContent = type;
+  selectButton.querySelector('.compact-name').textContent = compactResourceName(resource.hostname);
   selectButton.querySelector('strong').textContent = resource.hostname;
-  selectButton.querySelector('small').textContent = `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`;
+  selectButton.querySelector('small').textContent = target;
   selectButton.addEventListener('click', () => {
     state.selectedId = resource.id;
     const session = sessionForResource(resource.id);
@@ -525,12 +539,62 @@ function resourceRow(resource, type, child = false) {
     createPendingTab(resource);
     quickConnect(resource);
   });
+  selectButton.addEventListener('mouseenter', () => showSidebarTooltip(selectButton));
+  selectButton.addEventListener('focus', () => showSidebarTooltip(selectButton));
+  selectButton.addEventListener('mouseleave', () => hideSidebarTooltip());
+  selectButton.addEventListener('blur', () => hideSidebarTooltip());
   row.append(selectButton);
 
   return {
     element: row,
     search: `${resource.hostname} ${resource.ip} ${resource.user} ${type}`.toLowerCase(),
   };
+}
+
+function compactResourceName(name) {
+  const clean = String(name ?? '').trim();
+  if (!clean) return '?';
+  const parts = clean.split(/[-_\s.]+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  }
+  return clean.slice(0, 2).toUpperCase();
+}
+
+function toggleSidebar() {
+  state.sidebarCollapsed = !state.sidebarCollapsed;
+  localStorage.setItem('bashes.sidebarCollapsed', String(state.sidebarCollapsed));
+  applySidebarState();
+  scheduleTerminalFit();
+  focusActiveTerminal();
+}
+
+function applySidebarState() {
+  app.classList.toggle('sidebar-collapsed', state.sidebarCollapsed);
+  const toggle = document.querySelector('#toggle-sidebar');
+  toggle.textContent = state.sidebarCollapsed ? '>' : '<';
+  toggle.title = state.sidebarCollapsed ? 'Expand sidebar' : 'Compact sidebar';
+  toggle.setAttribute('aria-label', toggle.title);
+  toggle.setAttribute('aria-expanded', String(!state.sidebarCollapsed));
+  if (!state.sidebarCollapsed) hideSidebarTooltip();
+}
+
+function showSidebarTooltip(anchor) {
+  if (!state.sidebarCollapsed) return;
+  const tooltip = document.querySelector('#sidebar-tooltip');
+  const text = anchor.dataset.tooltip;
+  if (!tooltip || !text) return;
+
+  const rect = anchor.getBoundingClientRect();
+  tooltip.textContent = text;
+  tooltip.style.left = `${Math.round(rect.right + 10)}px`;
+  tooltip.style.top = `${Math.round(rect.top + rect.height / 2)}px`;
+  tooltip.hidden = false;
+}
+
+function hideSidebarTooltip() {
+  const tooltip = document.querySelector('#sidebar-tooltip');
+  if (tooltip) tooltip.hidden = true;
 }
 
 function createPendingTab(resource) {
