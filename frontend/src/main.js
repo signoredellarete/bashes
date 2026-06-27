@@ -992,8 +992,10 @@ function fitActiveTerminal() {
   if (!session?.fitAddon || !session.terminal) return;
   session.fitAddon.fit();
   const reserveCols = terminalScrollbarReserveColumns(session);
-  if (session.terminal.cols > reserveCols + 2) {
-    session.terminal.resize(session.terminal.cols - reserveCols, session.terminal.rows);
+  const cols = session.terminal.cols > reserveCols + 2 ? session.terminal.cols - reserveCols : session.terminal.cols;
+  const rows = session.terminal.rows > 2 ? session.terminal.rows - 1 : session.terminal.rows;
+  if (cols !== session.terminal.cols || rows !== session.terminal.rows) {
+    session.terminal.resize(cols, rows);
   }
 }
 
