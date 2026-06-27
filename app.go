@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"time"
@@ -20,7 +21,7 @@ import (
 	"github.com/signoredellarete/bashes/internal/domain"
 	"github.com/signoredellarete/bashes/internal/remotessh"
 	"github.com/signoredellarete/bashes/internal/store"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 )
@@ -35,7 +36,7 @@ type App struct {
 
 func NewApp(dataPath string) *App {
 	if dataPath == "" {
-		dataPath = filepath.Join("data", "hosts.json")
+		dataPath = defaultDataPath()
 	}
 
 	return &App{
@@ -43,6 +44,43 @@ func NewApp(dataPath string) *App {
 		service:  application.NewService(store.NewRepository(dataPath)),
 		sessions: make(map[string]*sshSession),
 	}
+}
+
+func defaultDataPath() string {
+	return filepath.Join(defaultDataDir(), "hosts.json")
+}
+
+func defaultDataDir() string {
+	return dataDirForOS(goruntime.GOOS, userHomeDir(), getenv)
+}
+
+func dataDirForOS(goos string, home string, env func(string) string) string {
+	switch goos {
+	case "darwin":
+		if home != "" {
+			return filepath.Join(home, "Library", "Application Support", "Bashes")
+		}
+	case "windows":
+		if appData := strings.TrimSpace(env("APPDATA")); appData != "" {
+			return filepath.Join(appData, "Bashes")
+		}
+	default:
+		if xdgData := strings.TrimSpace(env("XDG_DATA_HOME")); xdgData != "" {
+			return filepath.Join(xdgData, "bashes")
+		}
+		if home != "" {
+			return filepath.Join(home, ".local", "share", "bashes")
+		}
+	}
+
+	if configDir, err := os.UserConfigDir(); err == nil && strings.TrimSpace(configDir) != "" {
+		return filepath.Join(configDir, "Bashes")
+	}
+	return filepath.Join("data")
+}
+
+func getenv(name string) string {
+	return os.Getenv(name)
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -405,7 +443,7 @@ func (a *App) emit(name string, event SSHEvent) {
 	if a.ctx == nil {
 		return
 	}
-	runtime.EventsEmit(a.ctx, name, event)
+	wailsruntime.EventsEmit(a.ctx, name, event)
 }
 
 type eventWriter struct {

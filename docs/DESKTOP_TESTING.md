@@ -118,6 +118,7 @@ Tagged builds are published as GitHub Releases.
 4. Download the package for your OS:
    - Linux: `bashes-linux-amd64.tar.gz`
    - macOS: `bashes-darwin-universal.zip`
+   - Windows: `bashes-windows-amd64.zip`
 5. Extract the archive and run the app from a graphical desktop session.
 
 Release builds are created by pushing a tag matching `v*`.
@@ -137,6 +138,24 @@ or right-click `Bashes.app`, choose `Open`, and confirm the launch.
 
 For regular distribution outside internal testing, the app should eventually be signed with an Apple Developer ID certificate and notarized. That requires Apple developer credentials and should be added only when we are ready to publish broader macOS builds.
 
+## Windows Testing
+
+The Windows build is produced on GitHub Actions with `wails build -platform windows/amd64`.
+
+The current package is a plain zip containing `bashes.exe`. It is not signed, so Windows SmartScreen may warn on first launch. For testing, extract the zip into a normal user-writable folder and run `bashes.exe`.
+
+For regular distribution, the app should eventually get a signed installer or signed executable. Windows ARM builds are possible in principle, but should be tested separately after the amd64 package is stable.
+
+## Runtime Data Paths
+
+Release builds save JSON data and generated keys in a user-writable application data directory instead of writing beside the executable:
+
+- macOS: `~/Library/Application Support/Bashes/hosts.json`
+- Linux: `$XDG_DATA_HOME/bashes/hosts.json` or `~/.local/share/bashes/hosts.json`
+- Windows: `%APPDATA%\Bashes\hosts.json`
+
+Generated SSH keys are stored in a `keys` directory next to `hosts.json`. The datastore remains plain JSON and can still be copied or imported between installations.
+
 ## Downloading A GitHub Actions Build
 
 The repository includes a GitHub Actions workflow at `.github/workflows/build-desktop.yml`.
@@ -148,7 +167,7 @@ It runs automatically on pushes to `main`, on tags matching `v*`, and can also b
 3. Select `Build Desktop App`.
 4. Click `Run workflow`.
 5. Wait for the desktop build jobs to finish.
-6. Download `bashes-linux-amd64` or `bashes-darwin-universal` from the workflow run page.
+6. Download `bashes-linux-amd64`, `bashes-darwin-universal` or `bashes-windows-amd64` from the workflow run page.
 
 The workflow uses `ubuntu-22.04` because Wails v2.12 expects `libwebkit2gtk-4.0-dev`, which is available there but may be missing on newer Ubuntu releases.
 
@@ -185,9 +204,9 @@ When the desktop shell starts:
 - Selecting terminal text copies it to the clipboard; right-clicking the terminal pastes clipboard text into the session.
 - The Connect action opens an SSH panel and starts a backend-managed shell session.
 - SSH authentication can use a session-only password, `SSH_AUTH_SOCK`, default `~/.ssh` keys, or an explicit key path.
-- The `Keys` panel can generate Ed25519 keys under `data/keys` and install the selected public key on a selected remote resource.
+- The `Keys` panel can generate Ed25519 keys under the platform data directory and install the selected public key on a selected remote resource.
 - Passwords and key passphrases are not saved in the JSON datastore.
-- Generated private keys under `data/keys` are ignored by Git and must be handled as secrets.
+- Generated private keys under the platform data directory must be handled as secrets.
 
 ## Troubleshooting
 

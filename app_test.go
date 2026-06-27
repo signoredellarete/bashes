@@ -79,3 +79,57 @@ func TestResolveSessionKeyPathUsesAppDataDirectory(t *testing.T) {
 		t.Fatalf("KeyName = %q, want original key name preserved", input.KeyName)
 	}
 }
+
+func TestDataDirForOSUsesPlatformConventions(t *testing.T) {
+	env := func(values map[string]string) func(string) string {
+		return func(name string) string {
+			return values[name]
+		}
+	}
+
+	tests := []struct {
+		name string
+		goos string
+		home string
+		env  map[string]string
+		want string
+	}{
+		{
+			name: "macos application support",
+			goos: "darwin",
+			home: "/Users/alice",
+			env:  map[string]string{},
+			want: filepath.Join("/Users/alice", "Library", "Application Support", "Bashes"),
+		},
+		{
+			name: "windows appdata",
+			goos: "windows",
+			home: `C:\Users\Alice`,
+			env:  map[string]string{"APPDATA": `C:\Users\Alice\AppData\Roaming`},
+			want: filepath.Join(`C:\Users\Alice\AppData\Roaming`, "Bashes"),
+		},
+		{
+			name: "linux xdg data",
+			goos: "linux",
+			home: "/home/alice",
+			env:  map[string]string{"XDG_DATA_HOME": "/home/alice/.local/state"},
+			want: filepath.Join("/home/alice/.local/state", "bashes"),
+		},
+		{
+			name: "linux home fallback",
+			goos: "linux",
+			home: "/home/alice",
+			env:  map[string]string{},
+			want: filepath.Join("/home/alice", ".local", "share", "bashes"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := dataDirForOS(tt.goos, tt.home, env(tt.env))
+			if got != tt.want {
+				t.Fatalf("dataDirForOS() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

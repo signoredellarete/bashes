@@ -145,12 +145,63 @@ jobs:
           path: dist/bashes-darwin-universal.zip
           if-no-files-found: error
 
+  windows-desktop:
+    name: Windows desktop build
+    runs-on: windows-2022
+    needs: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Install Wails CLI
+        shell: pwsh
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          "$env:USERPROFILE\go\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build Wails app
+        run: wails build -platform windows/amd64 -tags desktop -clean -nopackage -v 2
+
+      - name: Package Windows app
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $exe = Get-ChildItem -Path build/bin -Recurse -Filter bashes.exe | Select-Object -First 1
+          if (-not $exe) {
+            Write-Error "No Windows executable found under build/bin"
+          }
+          Compress-Archive -Path $exe.FullName -DestinationPath dist/bashes-windows-amd64.zip -Force
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bashes-windows-amd64
+          path: dist/bashes-windows-amd64.zip
+          if-no-files-found: error
+
   release:
     name: Publish GitHub release
     runs-on: ubuntu-22.04
     needs:
       - linux-desktop
       - macos-desktop
+      - windows-desktop
     if: startsWith(github.ref, 'refs/tags/')
     steps:
       - name: Download release artifacts
@@ -177,5 +228,5 @@ jobs:
             gh release create "$GITHUB_REF_NAME" $assets \
               --repo "$GITHUB_REPOSITORY" \
               --title "Bashes $GITHUB_REF_NAME" \
-              --notes "Wails desktop preview build for Linux amd64 and macOS universal. This is an early refactor milestone for testing the JSON datastore, SSH/xterm sessions and desktop shell."
+              --notes "Wails desktop preview build for Linux amd64, macOS universal and Windows amd64. This is an early refactor milestone for testing the JSON datastore, SSH/xterm sessions and desktop shell."
           fi
