@@ -32,7 +32,7 @@ Download the latest release from GitHub Releases and choose the package for your
 - macOS Apple Silicon and Intel: `bashes-darwin-universal.zip`
 - Windows amd64: `bashes-windows-amd64.zip`
 - Linux arm64: `bashes-linux-arm64.tar.gz` when available
-- Windows arm64: `bashes-windows-arm64.zip` when available
+- Windows arm64: `bashes-windows-arm64.zip`
 
 ### Linux
 

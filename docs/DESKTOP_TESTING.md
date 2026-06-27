@@ -121,7 +121,7 @@ Tagged builds are published as GitHub Releases.
    - macOS: `bashes-darwin-universal.zip`
    - Windows: `bashes-windows-amd64.zip`
    - Linux ARM64, experimental when available: `bashes-linux-arm64.tar.gz`
-   - Windows ARM64, experimental when available: `bashes-windows-arm64.zip`
+   - Windows ARM64: `bashes-windows-arm64.zip`
 5. Extract the archive and run the app from a graphical desktop session.
 
 On Linux, the executable itself is an ELF binary and desktop environments normally show a generic icon for raw binaries. The release archive includes `icons/bashes.png` and `install-desktop-entry.sh`; run that script from the extracted folder to create a user-local launcher with the Bashes icon under `~/.local/share/applications`.
