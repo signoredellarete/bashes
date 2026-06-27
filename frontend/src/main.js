@@ -216,9 +216,13 @@ app.innerHTML = `
 const stack = document.querySelector('#terminal-stack');
 
 window.addEventListener('resize', () => {
-  fitActiveTerminal();
-  resizeActiveSession();
+  scheduleTerminalFit();
 });
+
+if (globalThis.ResizeObserver) {
+  const terminalResizeObserver = new ResizeObserver(() => scheduleTerminalFit());
+  terminalResizeObserver.observe(stack);
+}
 
 registerSSHEvents();
 
@@ -431,7 +435,7 @@ async function stopSession(sessionID) {
   }
   renderTabs();
   renderSelection();
-  fitActiveTerminal();
+  scheduleTerminalFit();
 }
 
 function endpointInput(form, type) {
@@ -495,7 +499,7 @@ function resourceRow(resource, type, child = false) {
     state.activeSessionId = session?.id ?? createPendingTab(resource);
     renderTabs();
     renderSelection();
-    fitActiveTerminal();
+    scheduleTerminalFit();
   });
   selectButton.addEventListener('dblclick', () => {
     state.selectedId = resource.id;
@@ -504,7 +508,7 @@ function resourceRow(resource, type, child = false) {
       state.activeSessionId = session.id;
       renderTabs();
       renderSelection();
-      fitActiveTerminal();
+      scheduleTerminalFit();
       return;
     }
     createPendingTab(resource);
@@ -616,7 +620,7 @@ function createSession(sessionID, resource) {
   terminal.writeln(`Connected to ${resource.user}@${resource.ip || resource.hostname}:${resource.port}`);
   renderTabs();
   renderSelection();
-  fitActiveTerminal();
+  scheduleTerminalFit();
 }
 
 function renderTabs() {
@@ -638,7 +642,7 @@ function renderTabs() {
       state.selectedId = session.resourceId;
       renderTabs();
       renderSelection();
-      fitActiveTerminal();
+      scheduleTerminalFit();
     });
 
     const close = document.createElement('button');
@@ -925,7 +929,7 @@ function focusSession(sessionID) {
   state.selectedId = session.resourceId;
   renderTabs();
   renderSelection();
-  fitActiveTerminal();
+  scheduleTerminalFit();
 }
 
 function firstSessionID() {
@@ -958,6 +962,17 @@ function fitActiveTerminal() {
   const session = state.sessions.get(state.activeSessionId);
   if (!session?.fitAddon) return;
   session.fitAddon.fit();
+}
+
+let terminalFitFrame = 0;
+
+function scheduleTerminalFit() {
+  if (terminalFitFrame) cancelAnimationFrame(terminalFitFrame);
+  terminalFitFrame = requestAnimationFrame(() => {
+    terminalFitFrame = 0;
+    fitActiveTerminal();
+    resizeActiveSession();
+  });
 }
 
 function resizeActiveSession() {
