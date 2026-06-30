@@ -440,7 +440,20 @@ jobs:
             exit 1
           fi
 
+          {
+            printf '%s\n\n' "$GITHUB_REF_NAME"
+            printf '%s\n' "Builds:"
+            printf '%s\n' "- Linux amd64: bashes-linux-amd64.tar.gz"
+            printf '%s\n' "- Linux arm64: bashes-linux-arm64.tar.gz (when available)"
+            printf '%s\n' "- macOS universal: bashes-darwin-universal.zip"
+            printf '%s\n' "- Windows amd64: bashes-windows-amd64.zip"
+            printf '%s\n' "- Windows arm64: bashes-windows-arm64.zip"
+          } > release-notes.md
+
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --notes-file release-notes.md
             gh release upload "$GITHUB_REF_NAME" $assets \
               --repo "$GITHUB_REPOSITORY" \
               --clobber
@@ -448,5 +461,5 @@ jobs:
             gh release create "$GITHUB_REF_NAME" $assets \
               --repo "$GITHUB_REPOSITORY" \
               --title "Bashes $GITHUB_REF_NAME" \
-              --notes "Wails desktop preview build for Linux amd64, macOS universal and Windows amd64. Linux arm64 and Windows arm64 artifacts are experimental and are published only when their builds succeed. This is an early refactor milestone for testing the JSON datastore, SSH/xterm sessions and desktop shell."
+              --notes-file release-notes.md
           fi

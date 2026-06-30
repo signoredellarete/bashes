@@ -276,6 +276,8 @@ type SSHTunnelInput struct {
 	Type                 string `json:"type"`
 	LocalHost            string `json:"localHost"`
 	LocalPort            int    `json:"localPort"`
+	RemoteHost           string `json:"remoteHost"`
+	RemotePort           int    `json:"remotePort"`
 	Password             string `json:"password,omitempty"`
 	PrivateKeyPath       string `json:"privateKeyPath,omitempty"`
 	KeyName              string `json:"keyName,omitempty"`
@@ -284,14 +286,15 @@ type SSHTunnelInput struct {
 }
 
 type SSHTunnelInfo struct {
-	TunnelID     string `json:"tunnelId"`
-	ResourceID   string `json:"resourceId"`
-	Type         string `json:"type"`
-	LocalHost    string `json:"localHost"`
-	LocalPort    int    `json:"localPort"`
-	LocalAddress string `json:"localAddress"`
-	Target       string `json:"target"`
-	StartedAt    string `json:"startedAt"`
+	TunnelID      string `json:"tunnelId"`
+	ResourceID    string `json:"resourceId"`
+	Type          string `json:"type"`
+	LocalHost     string `json:"localHost"`
+	LocalPort     int    `json:"localPort"`
+	LocalAddress  string `json:"localAddress"`
+	Target        string `json:"target"`
+	ForwardTarget string `json:"forwardTarget"`
+	StartedAt     string `json:"startedAt"`
 }
 
 type SSHEvent struct {
@@ -309,11 +312,12 @@ type sshSession struct {
 }
 
 type sshTunnel struct {
-	id       string
-	client   *ssh.Client
-	listener net.Listener
-	cancel   context.CancelFunc
-	info     SSHTunnelInfo
+	id             string
+	client         *ssh.Client
+	listener       net.Listener
+	cancel         context.CancelFunc
+	forwardAddress string
+	info           SSHTunnelInfo
 }
 
 func (a *App) StartSSHSession(input SSHSessionInput) (string, error) {
@@ -399,30 +403,32 @@ func (a *App) StartSSHTunnel(input SSHTunnelInput) (SSHTunnelInfo, error) {
 		return SSHTunnelInfo{}, err
 	}
 
-	listener, err := net.Listen("tcp", net.JoinHostPort(input.LocalHost, fmt.Sprint(input.LocalPort)))
+	listener, forwardAddress, err := a.startTunnelListener(client, input)
 	if err != nil {
 		client.Close()
-		return SSHTunnelInfo{}, fmt.Errorf("start local tunnel listener: %w", err)
+		return SSHTunnelInfo{}, err
 	}
 
 	tunnelID := fmt.Sprintf("tunnel-%d", time.Now().UnixNano())
 	ctx, cancel := context.WithCancel(context.Background())
 	info := SSHTunnelInfo{
-		TunnelID:     tunnelID,
-		ResourceID:   resource.ID,
-		Type:         input.Type,
-		LocalHost:    input.LocalHost,
-		LocalPort:    input.LocalPort,
-		LocalAddress: listener.Addr().String(),
-		Target:       fmt.Sprintf("%s@%s:%d", resource.User, sshHost(resource), resource.Port),
-		StartedAt:    time.Now().Format(time.RFC3339),
+		TunnelID:      tunnelID,
+		ResourceID:    resource.ID,
+		Type:          input.Type,
+		LocalHost:     input.LocalHost,
+		LocalPort:     input.LocalPort,
+		LocalAddress:  listener.Addr().String(),
+		Target:        fmt.Sprintf("%s@%s:%d", resource.User, sshHost(resource), resource.Port),
+		ForwardTarget: tunnelForwardTarget(input, forwardAddress),
+		StartedAt:     time.Now().Format(time.RFC3339),
 	}
 	tunnel := &sshTunnel{
-		id:       tunnelID,
-		client:   client,
-		listener: listener,
-		cancel:   cancel,
-		info:     info,
+		id:             tunnelID,
+		client:         client,
+		listener:       listener,
+		cancel:         cancel,
+		forwardAddress: forwardAddress,
+		info:           info,
 	}
 
 	a.mu.Lock()
@@ -438,6 +444,31 @@ func (a *App) StartSSHTunnel(input SSHTunnelInput) (SSHTunnelInfo, error) {
 	go a.serveTunnel(ctx, tunnel)
 
 	return info, nil
+}
+
+func (a *App) startTunnelListener(client *ssh.Client, input SSHTunnelInput) (net.Listener, string, error) {
+	switch input.Type {
+	case "socks":
+		listener, err := net.Listen("tcp", net.JoinHostPort(input.LocalHost, fmt.Sprint(input.LocalPort)))
+		if err != nil {
+			return nil, "", fmt.Errorf("start SOCKS tunnel listener: %w", err)
+		}
+		return listener, "", nil
+	case "local":
+		listener, err := net.Listen("tcp", net.JoinHostPort(input.LocalHost, fmt.Sprint(input.LocalPort)))
+		if err != nil {
+			return nil, "", fmt.Errorf("start local tunnel listener: %w", err)
+		}
+		return listener, net.JoinHostPort(input.RemoteHost, fmt.Sprint(input.RemotePort)), nil
+	case "remote":
+		listener, err := client.Listen("tcp", net.JoinHostPort(input.LocalHost, fmt.Sprint(input.LocalPort)))
+		if err != nil {
+			return nil, "", fmt.Errorf("start remote tunnel listener: %w", err)
+		}
+		return listener, net.JoinHostPort(input.RemoteHost, fmt.Sprint(input.RemotePort)), nil
+	default:
+		return nil, "", fmt.Errorf("unsupported tunnel type %q", input.Type)
+	}
 }
 
 func (a *App) ListSSHTunnels() []SSHTunnelInfo {
@@ -467,7 +498,17 @@ func (a *App) StopSSHTunnel(tunnelID string) error {
 }
 
 func (a *App) serveTunnel(ctx context.Context, tunnel *sshTunnel) {
-	err := remotessh.ServeSOCKS5(ctx, tunnel.listener, tunnel.client)
+	var err error
+	switch tunnel.info.Type {
+	case "socks":
+		err = remotessh.ServeSOCKS5(ctx, tunnel.listener, tunnel.client)
+	case "local":
+		err = remotessh.ServeLocalForward(ctx, tunnel.listener, tunnel.client, tunnel.forwardAddress)
+	case "remote":
+		err = remotessh.ServeRemoteForward(ctx, tunnel.listener, tunnel.forwardAddress)
+	default:
+		err = fmt.Errorf("unsupported tunnel type %q", tunnel.info.Type)
+	}
 
 	a.mu.Lock()
 	current := a.tunnels[tunnel.id]
@@ -686,7 +727,7 @@ func normalizeTunnelInput(input *SSHTunnelInput) error {
 	if input.Type == "" {
 		input.Type = "socks"
 	}
-	if input.Type != "socks" {
+	if input.Type != "socks" && input.Type != "local" && input.Type != "remote" {
 		return fmt.Errorf("unsupported tunnel type %q", input.Type)
 	}
 
@@ -694,13 +735,44 @@ func normalizeTunnelInput(input *SSHTunnelInput) error {
 	if input.LocalHost == "" {
 		input.LocalHost = "127.0.0.1"
 	}
-	if strings.ContainsAny(input.LocalHost, "\r\n\t ") {
+	if invalidTunnelHost(input.LocalHost) {
 		return errors.New("local bind address contains invalid characters")
 	}
 	if input.LocalPort < 1 || input.LocalPort > 65535 {
 		return errors.New("local port must be between 1 and 65535")
 	}
+	if input.Type == "socks" {
+		return nil
+	}
+
+	input.RemoteHost = strings.TrimSpace(input.RemoteHost)
+	if input.RemoteHost == "" {
+		input.RemoteHost = "127.0.0.1"
+	}
+	if invalidTunnelHost(input.RemoteHost) {
+		return errors.New("forward target address contains invalid characters")
+	}
+	if input.RemotePort < 1 || input.RemotePort > 65535 {
+		return errors.New("forward target port must be between 1 and 65535")
+	}
 	return nil
+}
+
+func invalidTunnelHost(host string) bool {
+	return strings.ContainsAny(host, "\r\n\t ")
+}
+
+func tunnelForwardTarget(input SSHTunnelInput, forwardAddress string) string {
+	switch input.Type {
+	case "socks":
+		return "dynamic"
+	case "local":
+		return forwardAddress
+	case "remote":
+		return forwardAddress
+	default:
+		return ""
+	}
 }
 
 func dialResource(resource domain.Endpoint, input SSHSessionInput, timeout time.Duration) (*ssh.Client, error) {

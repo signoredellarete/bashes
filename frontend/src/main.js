@@ -190,7 +190,7 @@ app.innerHTML = `
       <header class="panel-header">
         <div>
           <p class="eyebrow">SSH Tunnel</p>
-          <h3>SOCKS Proxy</h3>
+          <h3 id="tunnel-title">SOCKS Proxy</h3>
         </div>
         <button class="close-panel" type="button" data-close-tunnel title="Close">X</button>
       </header>
@@ -202,16 +202,28 @@ app.innerHTML = `
         <span>Mode</span>
         <select name="type">
           <option value="socks">SOCKS proxy (-D)</option>
+          <option value="local">Local forward (-L)</option>
+          <option value="remote">Remote forward (-R)</option>
         </select>
       </label>
       <div class="form-grid">
         <label>
-          <span>Bind</span>
+          <span id="tunnel-bind-label">Bind</span>
           <input name="localHost" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" value="127.0.0.1" />
         </label>
         <label>
-          <span>Port</span>
+          <span id="tunnel-port-label">Port</span>
           <input name="localPort" type="number" min="1" max="65535" value="1080" required />
+        </label>
+      </div>
+      <div id="tunnel-target-fields" class="form-grid" hidden>
+        <label>
+          <span id="tunnel-target-host-label">Target Host</span>
+          <input name="remoteHost" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" value="127.0.0.1" />
+        </label>
+        <label>
+          <span id="tunnel-target-port-label">Target Port</span>
+          <input name="remotePort" type="number" min="1" max="65535" value="80" />
         </label>
       </div>
       <label>
@@ -326,6 +338,7 @@ document.querySelector('#resource-form').addEventListener('submit', (event) => s
 document.querySelector('#connect-form').addEventListener('submit', (event) => submitConnect(event));
 document.querySelector('#tunnel-form').addEventListener('submit', (event) => submitTunnel(event));
 document.querySelector('#tunnel-form').addEventListener('input', () => updateTunnelSummary());
+document.querySelector('#tunnel-form').elements.type.addEventListener('change', () => updateTunnelMode());
 document.querySelector('#stop-tunnel').addEventListener('click', () => stopSelectedTunnel());
 document.querySelector('#key-generate-form').addEventListener('submit', (event) => submitGenerateKey(event));
 document.querySelector('#key-install-form').addEventListener('submit', (event) => submitInstallKey(event));
@@ -459,6 +472,8 @@ async function submitTunnel(event) {
       type: form.elements.type.value,
       localHost: form.elements.localHost.value.trim(),
       localPort: Number.parseInt(form.elements.localPort.value, 10),
+      remoteHost: form.elements.remoteHost.value.trim(),
+      remotePort: Number.parseInt(form.elements.remotePort.value, 10),
       keyName: form.elements.keyName.value,
       password: form.elements.password.value,
       privateKeyPath: form.elements.privateKeyPath.value.trim(),
@@ -467,7 +482,7 @@ async function submitTunnel(event) {
     });
     state.tunnels.set(tunnel.tunnelId, tunnel);
     renderTunnelStatus();
-    writeNotice(`SOCKS tunnel active on ${tunnel.localAddress}.`);
+    writeNotice(`${tunnelLabel(tunnel.type)} active on ${tunnel.localAddress}.`);
   });
 }
 
@@ -992,10 +1007,12 @@ async function openTunnelPanel() {
   form.elements.type.value = 'socks';
   form.elements.localHost.value = '127.0.0.1';
   form.elements.localPort.value = '1080';
+  form.elements.remoteHost.value = '127.0.0.1';
+  form.elements.remotePort.value = '80';
   form.elements.trustHostKey.checked = true;
   renderKeyOptions(form.elements.keyName, true);
   applyConnectDefaults(form, selected);
-  updateTunnelSummary();
+  updateTunnelMode();
   renderTunnelStatus();
   panel.hidden = false;
   requestAnimationFrame(() => panel.classList.add('open'));
@@ -1014,9 +1031,60 @@ function updateTunnelSummary() {
   const summary = document.querySelector('#tunnel-summary');
   if (!selected || !form || !summary) return;
 
+  const type = form.elements.type.value || 'socks';
   const bind = form.elements.localHost.value.trim() || '127.0.0.1';
   const port = form.elements.localPort.value || '1080';
-  summary.textContent = `ssh -D ${bind}:${port} ${selected.user}@${selected.ip || selected.hostname}`;
+  const targetHost = form.elements.remoteHost.value.trim() || '127.0.0.1';
+  const targetPort = form.elements.remotePort.value || (type === 'remote' ? '3000' : '80');
+  const login = `${selected.user}@${selected.ip || selected.hostname}`;
+
+  if (type === 'local') {
+    summary.textContent = `ssh -L ${bind}:${port}:${targetHost}:${targetPort} ${login}`;
+    return;
+  }
+  if (type === 'remote') {
+    summary.textContent = `ssh -R ${bind}:${port}:${targetHost}:${targetPort} ${login}`;
+    return;
+  }
+  summary.textContent = `ssh -D ${bind}:${port} ${login}`;
+}
+
+function updateTunnelMode() {
+  const form = document.querySelector('#tunnel-form');
+  if (!form) return;
+
+  const type = form.elements.type.value || 'socks';
+  const title = document.querySelector('#tunnel-title');
+  const bindLabel = document.querySelector('#tunnel-bind-label');
+  const portLabel = document.querySelector('#tunnel-port-label');
+  const targetFields = document.querySelector('#tunnel-target-fields');
+  const targetHostLabel = document.querySelector('#tunnel-target-host-label');
+  const targetPortLabel = document.querySelector('#tunnel-target-port-label');
+
+  targetFields.hidden = type === 'socks';
+  if (type === 'local') {
+    title.textContent = 'Local Forward';
+    bindLabel.textContent = 'Local Bind';
+    portLabel.textContent = 'Local Port';
+    targetHostLabel.textContent = 'Remote Host';
+    targetPortLabel.textContent = 'Remote Port';
+    if (!form.elements.localPort.value || form.elements.localPort.value === '1080') form.elements.localPort.value = '8080';
+    if (!form.elements.remotePort.value) form.elements.remotePort.value = '80';
+  } else if (type === 'remote') {
+    title.textContent = 'Remote Forward';
+    bindLabel.textContent = 'Remote Bind';
+    portLabel.textContent = 'Remote Port';
+    targetHostLabel.textContent = 'Local Host';
+    targetPortLabel.textContent = 'Local Port';
+    if (!form.elements.localPort.value || form.elements.localPort.value === '1080') form.elements.localPort.value = '8080';
+    if (!form.elements.remotePort.value) form.elements.remotePort.value = '3000';
+  } else {
+    title.textContent = 'SOCKS Proxy';
+    bindLabel.textContent = 'Bind';
+    portLabel.textContent = 'Port';
+    if (!form.elements.localPort.value) form.elements.localPort.value = '1080';
+  }
+  updateTunnelSummary();
 }
 
 async function openKeysPanel() {
@@ -1157,10 +1225,16 @@ function renderTunnelStatus() {
   const tunnel = selected ? tunnelForResource(selected.id) : null;
   status.hidden = !tunnel;
   status.textContent = tunnel
-    ? `Active on ${tunnel.localAddress} -> ${tunnel.target}`
+    ? `${tunnelLabel(tunnel.type)} active on ${tunnel.localAddress} -> ${tunnel.forwardTarget || tunnel.target}`
     : '';
   stop.disabled = state.busy || !tunnel;
   start.disabled = state.busy || Boolean(tunnel);
+}
+
+function tunnelLabel(type) {
+  if (type === 'local') return 'Local tunnel';
+  if (type === 'remote') return 'Remote tunnel';
+  return 'SOCKS tunnel';
 }
 
 function findResource(id) {
@@ -1436,8 +1510,11 @@ async function apiStartSSHTunnel(input) {
     type: input.type,
     localHost: input.localHost,
     localPort: input.localPort,
+    remoteHost: input.remoteHost,
+    remotePort: input.remotePort,
     localAddress: `${input.localHost}:${input.localPort}`,
     target: 'demo tunnel',
+    forwardTarget: input.type === 'socks' ? 'dynamic' : `${input.remoteHost}:${input.remotePort}`,
     startedAt: new Date().toISOString(),
   };
 }

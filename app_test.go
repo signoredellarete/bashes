@@ -94,8 +94,45 @@ func TestNormalizeTunnelInputDefaultsToLocalSocks(t *testing.T) {
 	}
 }
 
+func TestNormalizeTunnelInputAcceptsLocalAndRemoteForwarding(t *testing.T) {
+	tests := []struct {
+		name string
+		input SSHTunnelInput
+	}{
+		{
+			name: "local forward",
+			input: SSHTunnelInput{
+				Type:       "local",
+				LocalHost:  "127.0.0.1",
+				LocalPort:  8080,
+				RemoteHost: "127.0.0.1",
+				RemotePort: 80,
+			},
+		},
+		{
+			name: "remote forward",
+			input: SSHTunnelInput{
+				Type:       "remote",
+				LocalHost:  "127.0.0.1",
+				LocalPort:  8080,
+				RemoteHost: "127.0.0.1",
+				RemotePort: 3000,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := tt.input
+			if err := normalizeTunnelInput(&input); err != nil {
+				t.Fatalf("normalizeTunnelInput() error = %v", err)
+			}
+		})
+	}
+}
+
 func TestNormalizeTunnelInputRejectsUnsupportedTypeAndPort(t *testing.T) {
-	input := SSHTunnelInput{Type: "local", LocalPort: 1080}
+	input := SSHTunnelInput{Type: "reverse", LocalPort: 1080}
 	if err := normalizeTunnelInput(&input); err == nil {
 		t.Fatal("normalizeTunnelInput() error = nil, want unsupported type error")
 	}
@@ -103,6 +140,11 @@ func TestNormalizeTunnelInputRejectsUnsupportedTypeAndPort(t *testing.T) {
 	input = SSHTunnelInput{Type: "socks", LocalPort: 70000}
 	if err := normalizeTunnelInput(&input); err == nil {
 		t.Fatal("normalizeTunnelInput() error = nil, want invalid port error")
+	}
+
+	input = SSHTunnelInput{Type: "local", LocalPort: 8080, RemotePort: 0}
+	if err := normalizeTunnelInput(&input); err == nil {
+		t.Fatal("normalizeTunnelInput() error = nil, want invalid forward target port error")
 	}
 }
 
