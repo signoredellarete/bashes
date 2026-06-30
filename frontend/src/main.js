@@ -23,6 +23,7 @@ const demoStore = {
 const state = {
   hosts: [],
   keys: [],
+  tunnels: new Map(),
   selectedId: null,
   activeSessionId: null,
   terminalFontSize: 13,
@@ -68,6 +69,7 @@ app.innerHTML = `
             <button id="header-add-subsystem" class="secondary" type="button" disabled>Add Subsystem</button>
             <button id="open-keys-panel" class="secondary" type="button" disabled>Keys</button>
             <button id="delete-resource" class="secondary" type="button" disabled>Delete</button>
+            <button id="open-tunnel-panel" class="secondary" type="button" disabled>Tunnel</button>
             <button id="disconnect" class="secondary" type="button" disabled>Disconnect</button>
             <button id="connect" type="button" disabled>Connect</button>
           </div>
@@ -182,6 +184,65 @@ app.innerHTML = `
     </form>
   </section>
 
+  <section id="tunnel-panel" class="slide-panel" hidden>
+    <div class="panel-scrim" data-close-tunnel></div>
+    <form id="tunnel-form" class="panel-card">
+      <header class="panel-header">
+        <div>
+          <p class="eyebrow">SSH Tunnel</p>
+          <h3>SOCKS Proxy</h3>
+        </div>
+        <button class="close-panel" type="button" data-close-tunnel title="Close">X</button>
+      </header>
+
+      <p id="tunnel-summary" class="parent-summary"></p>
+      <p id="tunnel-status" class="tunnel-status" hidden></p>
+
+      <label>
+        <span>Mode</span>
+        <select name="type">
+          <option value="socks">SOCKS proxy (-D)</option>
+        </select>
+      </label>
+      <div class="form-grid">
+        <label>
+          <span>Bind</span>
+          <input name="localHost" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" value="127.0.0.1" />
+        </label>
+        <label>
+          <span>Port</span>
+          <input name="localPort" type="number" min="1" max="65535" value="1080" required />
+        </label>
+      </div>
+      <label>
+        <span>Bashes Key</span>
+        <select name="keyName"></select>
+      </label>
+      <label>
+        <span>Password</span>
+        <input name="password" type="password" autocomplete="current-password" />
+      </label>
+      <label>
+        <span>Private Key Path</span>
+        <input name="privateKeyPath" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="optional path on this machine" />
+      </label>
+      <label>
+        <span>Key Passphrase</span>
+        <input name="privateKeyPassphrase" type="password" autocomplete="off" />
+      </label>
+      <label class="checkbox-row">
+        <input name="trustHostKey" type="checkbox" checked />
+        <span>Trust host key for this tunnel</span>
+      </label>
+
+      <footer class="panel-actions">
+        <button class="secondary" type="button" data-close-tunnel>Close</button>
+        <button id="stop-tunnel" class="secondary" type="button" disabled>Stop</button>
+        <button id="start-tunnel" type="submit">Start Tunnel</button>
+      </footer>
+    </form>
+  </section>
+
   <section id="keys-panel" class="slide-panel" hidden>
     <div class="panel-scrim" data-close-keys></div>
     <section class="panel-card">
@@ -249,6 +310,7 @@ searchInput.addEventListener('input', () => scheduleHostRender());
 });
 document.querySelector('#open-host-panel').addEventListener('click', () => openResourcePanel('host'));
 document.querySelector('#open-keys-panel').addEventListener('click', () => openKeysPanel());
+document.querySelector('#open-tunnel-panel').addEventListener('click', () => openTunnelPanel());
 document.querySelector('#edit-resource').addEventListener('click', () => openEditPanel());
 document.querySelector('#header-add-subsystem').addEventListener('click', () => {
   const selected = findResource(state.selectedId);
@@ -262,6 +324,9 @@ document.querySelector('#decrease-terminal-font').addEventListener('click', () =
 document.querySelector('#increase-terminal-font').addEventListener('click', () => adjustTerminalFontSize(1));
 document.querySelector('#resource-form').addEventListener('submit', (event) => submitResource(event));
 document.querySelector('#connect-form').addEventListener('submit', (event) => submitConnect(event));
+document.querySelector('#tunnel-form').addEventListener('submit', (event) => submitTunnel(event));
+document.querySelector('#tunnel-form').addEventListener('input', () => updateTunnelSummary());
+document.querySelector('#stop-tunnel').addEventListener('click', () => stopSelectedTunnel());
 document.querySelector('#key-generate-form').addEventListener('submit', (event) => submitGenerateKey(event));
 document.querySelector('#key-install-form').addEventListener('submit', (event) => submitInstallKey(event));
 document.querySelector('#key-select').addEventListener('change', () => renderSelectedPublicKey());
@@ -271,12 +336,16 @@ document.querySelectorAll('[data-close-panel]').forEach((element) => {
 document.querySelectorAll('[data-close-connect]').forEach((element) => {
   element.addEventListener('click', () => closeConnectPanel());
 });
+document.querySelectorAll('[data-close-tunnel]').forEach((element) => {
+  element.addEventListener('click', () => closeTunnelPanel());
+});
 document.querySelectorAll('[data-close-keys]').forEach((element) => {
   element.addEventListener('click', () => closeKeysPanel());
 });
 
 await loadHosts();
 await loadKeys();
+await loadTunnels();
 applySidebarState();
 
 async function loadHosts() {
@@ -300,6 +369,11 @@ async function refreshHosts() {
 async function loadKeys() {
   state.keys = await apiListSSHKeys();
   renderKeyOptions();
+}
+
+async function loadTunnels() {
+  const tunnels = await apiListSSHTunnels();
+  state.tunnels = new Map(tunnels.map((tunnel) => [tunnel.tunnelId, tunnel]));
 }
 
 async function submitResource(event) {
@@ -363,6 +437,37 @@ async function submitConnect(event) {
     closeConnectPanel();
     await refreshHosts();
     resizeActiveSession();
+  });
+}
+
+async function submitTunnel(event) {
+  event.preventDefault();
+  const selected = findResource(state.selectedId)?.resource;
+  if (!selected) return;
+
+  const active = tunnelForResource(selected.id);
+  if (active) {
+    writeNotice(`Tunnel already active on ${active.localAddress}.`);
+    renderTunnelStatus();
+    return;
+  }
+
+  const form = event.currentTarget;
+  await withBusy(async () => {
+    const tunnel = await apiStartSSHTunnel({
+      resourceId: selected.id,
+      type: form.elements.type.value,
+      localHost: form.elements.localHost.value.trim(),
+      localPort: Number.parseInt(form.elements.localPort.value, 10),
+      keyName: form.elements.keyName.value,
+      password: form.elements.password.value,
+      privateKeyPath: form.elements.privateKeyPath.value.trim(),
+      privateKeyPassphrase: form.elements.privateKeyPassphrase.value,
+      trustHostKey: form.elements.trustHostKey.checked,
+    });
+    state.tunnels.set(tunnel.tunnelId, tunnel);
+    renderTunnelStatus();
+    writeNotice(`SOCKS tunnel active on ${tunnel.localAddress}.`);
   });
 }
 
@@ -430,11 +535,30 @@ async function deleteSelectedResource() {
     for (const session of sessionsForResource(selected.resource.id)) {
       await stopSession(session.id);
     }
+    for (const tunnel of tunnelsForResource(selected.resource.id)) {
+      await stopTunnel(tunnel.tunnelId);
+    }
     await apiDeleteResource(selected.resource.id);
     writeNotice(`Deleted ${selected.resource.hostname}.`);
     state.selectedId = selected.parent?.id ?? null;
     await refreshHosts();
   });
+}
+
+async function stopSelectedTunnel() {
+  const selected = findResource(state.selectedId)?.resource;
+  const tunnel = selected ? tunnelForResource(selected.id) : null;
+  if (!tunnel) return;
+  await withBusy(async () => {
+    await stopTunnel(tunnel.tunnelId);
+    renderTunnelStatus();
+    writeNotice(`Stopped tunnel on ${tunnel.localAddress}.`);
+  });
+}
+
+async function stopTunnel(tunnelID) {
+  await apiStopSSHTunnel(tunnelID);
+  state.tunnels.delete(tunnelID);
 }
 
 async function disconnectActiveSession() {
@@ -856,6 +980,45 @@ function closeConnectPanel() {
   panel.hidden = true;
 }
 
+async function openTunnelPanel() {
+  const selected = findResource(state.selectedId)?.resource;
+  if (!selected) return;
+
+  await loadKeys();
+  await loadTunnels();
+  const panel = document.querySelector('#tunnel-panel');
+  const form = document.querySelector('#tunnel-form');
+  form.reset();
+  form.elements.type.value = 'socks';
+  form.elements.localHost.value = '127.0.0.1';
+  form.elements.localPort.value = '1080';
+  form.elements.trustHostKey.checked = true;
+  renderKeyOptions(form.elements.keyName, true);
+  applyConnectDefaults(form, selected);
+  updateTunnelSummary();
+  renderTunnelStatus();
+  panel.hidden = false;
+  requestAnimationFrame(() => panel.classList.add('open'));
+  form.elements.localPort.focus();
+}
+
+function closeTunnelPanel() {
+  const panel = document.querySelector('#tunnel-panel');
+  panel.classList.remove('open');
+  panel.hidden = true;
+}
+
+function updateTunnelSummary() {
+  const selected = findResource(state.selectedId)?.resource;
+  const form = document.querySelector('#tunnel-form');
+  const summary = document.querySelector('#tunnel-summary');
+  if (!selected || !form || !summary) return;
+
+  const bind = form.elements.localHost.value.trim() || '127.0.0.1';
+  const port = form.elements.localPort.value || '1080';
+  summary.textContent = `ssh -D ${bind}:${port} ${selected.user}@${selected.ip || selected.hostname}`;
+}
+
 async function openKeysPanel() {
   await loadKeys();
   renderKeyInstallSummary();
@@ -881,6 +1044,7 @@ function renderSelection() {
   const edit = document.querySelector('#edit-resource');
   const addSubsystem = document.querySelector('#header-add-subsystem');
   const keys = document.querySelector('#open-keys-panel');
+  const tunnel = document.querySelector('#open-tunnel-panel');
   const connect = document.querySelector('#connect');
   const disconnect = document.querySelector('#disconnect');
   const remove = document.querySelector('#delete-resource');
@@ -897,6 +1061,7 @@ function renderSelection() {
     edit.disabled = true;
     addSubsystem.disabled = true;
     keys.disabled = true;
+    tunnel.disabled = true;
     connect.disabled = true;
     disconnect.disabled = true;
     remove.disabled = true;
@@ -906,10 +1071,12 @@ function renderSelection() {
   edit.disabled = state.busy || !selected;
   addSubsystem.disabled = state.busy || !selected;
   keys.disabled = state.busy || !selected;
+  tunnel.disabled = state.busy || !selected;
   connect.disabled = state.busy || !selected;
   disconnect.disabled = state.busy || !activeSession;
   remove.disabled = state.busy || !selected;
   renderKeyInstallSummary();
+  renderTunnelStatus();
 }
 
 function renderKeyOptions(select = document.querySelector('#key-select'), includeEmpty = false) {
@@ -980,6 +1147,22 @@ function renderKeyInstallSummary() {
     : 'Select a host or subsystem to install the key.';
 }
 
+function renderTunnelStatus() {
+  const status = document.querySelector('#tunnel-status');
+  const stop = document.querySelector('#stop-tunnel');
+  const start = document.querySelector('#start-tunnel');
+  if (!status || !stop || !start) return;
+
+  const selected = findResource(state.selectedId)?.resource;
+  const tunnel = selected ? tunnelForResource(selected.id) : null;
+  status.hidden = !tunnel;
+  status.textContent = tunnel
+    ? `Active on ${tunnel.localAddress} -> ${tunnel.target}`
+    : '';
+  stop.disabled = state.busy || !tunnel;
+  start.disabled = state.busy || Boolean(tunnel);
+}
+
 function findResource(id) {
   for (const host of state.hosts) {
     if (host.id === id) return { type: 'host', resource: host, parent: null };
@@ -996,6 +1179,14 @@ function sessionForResource(resourceId) {
 
 function sessionsForResource(resourceId) {
   return [...state.sessions.values()].filter((session) => session.resourceId === resourceId);
+}
+
+function tunnelForResource(resourceId) {
+  return [...state.tunnels.values()].find((tunnel) => tunnel.resourceId === resourceId);
+}
+
+function tunnelsForResource(resourceId) {
+  return [...state.tunnels.values()].filter((tunnel) => tunnel.resourceId === resourceId);
 }
 
 function focusSession(sessionID) {
@@ -1228,6 +1419,32 @@ async function apiResizeSSHSession(sessionID, cols, rows) {
 async function apiStopSSHSession(sessionID) {
   const api = wailsAPI();
   if (api?.StopSSHSession) return await api.StopSSHSession(sessionID);
+}
+
+async function apiListSSHTunnels() {
+  const api = wailsAPI();
+  if (api?.ListSSHTunnels) return (await api.ListSSHTunnels()) ?? [];
+  return [];
+}
+
+async function apiStartSSHTunnel(input) {
+  const api = wailsAPI();
+  if (api?.StartSSHTunnel) return await api.StartSSHTunnel(input);
+  return {
+    tunnelId: `demo-tunnel-${Date.now()}`,
+    resourceId: input.resourceId,
+    type: input.type,
+    localHost: input.localHost,
+    localPort: input.localPort,
+    localAddress: `${input.localHost}:${input.localPort}`,
+    target: 'demo tunnel',
+    startedAt: new Date().toISOString(),
+  };
+}
+
+async function apiStopSSHTunnel(tunnelID) {
+  const api = wailsAPI();
+  if (api?.StopSSHTunnel) return await api.StopSSHTunnel(tunnelID);
 }
 
 async function apiListSSHKeys() {

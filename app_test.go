@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/signoredellarete/bashes/internal/application"
 	"github.com/signoredellarete/bashes/internal/domain"
 )
 
@@ -80,6 +81,51 @@ func TestResolveSessionKeyPathUsesAppDataDirectory(t *testing.T) {
 	}
 }
 
+func TestNormalizeTunnelInputDefaultsToLocalSocks(t *testing.T) {
+	input := SSHTunnelInput{LocalPort: 1080}
+	if err := normalizeTunnelInput(&input); err != nil {
+		t.Fatalf("normalizeTunnelInput() error = %v", err)
+	}
+	if input.Type != "socks" {
+		t.Fatalf("Type = %q, want socks", input.Type)
+	}
+	if input.LocalHost != "127.0.0.1" {
+		t.Fatalf("LocalHost = %q, want 127.0.0.1", input.LocalHost)
+	}
+}
+
+func TestNormalizeTunnelInputRejectsUnsupportedTypeAndPort(t *testing.T) {
+	input := SSHTunnelInput{Type: "local", LocalPort: 1080}
+	if err := normalizeTunnelInput(&input); err == nil {
+		t.Fatal("normalizeTunnelInput() error = nil, want unsupported type error")
+	}
+
+	input = SSHTunnelInput{Type: "socks", LocalPort: 70000}
+	if err := normalizeTunnelInput(&input); err == nil {
+		t.Fatal("normalizeTunnelInput() error = nil, want invalid port error")
+	}
+}
+
+func TestResourceIDsForDeleteIncludesHostSubsystems(t *testing.T) {
+	app := NewApp(filepath.Join(t.TempDir(), "hosts.json"))
+	host, err := app.AddHost(applicationEndpoint("host", "10.0.0.1"))
+	if err != nil {
+		t.Fatalf("AddHost() error = %v", err)
+	}
+	subsystem, err := app.AddSubsystem(host.ID, applicationEndpoint("vm", "10.0.0.2"))
+	if err != nil {
+		t.Fatalf("AddSubsystem() error = %v", err)
+	}
+
+	ids, err := app.resourceIDsForDelete(host.ID)
+	if err != nil {
+		t.Fatalf("resourceIDsForDelete() error = %v", err)
+	}
+	if len(ids) != 2 || ids[0] != host.ID || ids[1] != subsystem.ID {
+		t.Fatalf("resourceIDsForDelete() = %v, want host and subsystem ids", ids)
+	}
+}
+
 func TestDataDirForOSUsesPlatformConventions(t *testing.T) {
 	env := func(values map[string]string) func(string) string {
 		return func(name string) string {
@@ -131,5 +177,15 @@ func TestDataDirForOSUsesPlatformConventions(t *testing.T) {
 				t.Fatalf("dataDirForOS() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func applicationEndpoint(hostname string, ip string) application.EndpointInput {
+	return application.EndpointInput{
+		Hostname: hostname,
+		IP:       ip,
+		Port:     22,
+		User:     "root",
+		Type:     domain.ResourceVM,
 	}
 }

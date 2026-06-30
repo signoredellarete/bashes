@@ -220,6 +220,7 @@ When the desktop shell starts:
 - Clicking a host or subsystem in the sidebar focuses its active SSH tab when one exists.
 - Clicking a host or subsystem without an active session creates a temporary tab; starting SSH turns it into a real session tab.
 - Double-clicking a host or subsystem attempts an SSH connection using automatic credentials, then opens the connect panel if credentials are needed.
+- The Tunnel action opens a panel for a SOCKS proxy tunnel using the selected resource and keeps the tunnel active from that panel without opening a terminal tab.
 - Selecting terminal text copies it to the clipboard; right-clicking the terminal pastes clipboard text into the session.
 - The Connect action opens an SSH panel and starts a backend-managed shell session.
 - SSH authentication can use a session-only password, `SSH_AUTH_SOCK`, default `~/.ssh` keys, or an explicit key path.

@@ -32,6 +32,7 @@ type App struct {
 	dataPath string
 	mu       sync.Mutex
 	sessions map[string]*sshSession
+	tunnels  map[string]*sshTunnel
 }
 
 func NewApp(dataPath string) *App {
@@ -43,6 +44,7 @@ func NewApp(dataPath string) *App {
 		dataPath: dataPath,
 		service:  application.NewService(store.NewRepository(dataPath)),
 		sessions: make(map[string]*sshSession),
+		tunnels:  make(map[string]*sshTunnel),
 	}
 }
 
@@ -104,6 +106,13 @@ func (a *App) UpdateResource(id string, input application.EndpointInput) error {
 }
 
 func (a *App) DeleteResource(id string) error {
+	resourceIDs, err := a.resourceIDsForDelete(id)
+	if err != nil {
+		return err
+	}
+	for _, resourceID := range resourceIDs {
+		a.stopTunnelsForResource(resourceID)
+	}
 	return a.service.DeleteResource(id)
 }
 
@@ -262,6 +271,29 @@ type SSHSessionInput struct {
 	Rows                 int    `json:"rows"`
 }
 
+type SSHTunnelInput struct {
+	ResourceID           string `json:"resourceId"`
+	Type                 string `json:"type"`
+	LocalHost            string `json:"localHost"`
+	LocalPort            int    `json:"localPort"`
+	Password             string `json:"password,omitempty"`
+	PrivateKeyPath       string `json:"privateKeyPath,omitempty"`
+	KeyName              string `json:"keyName,omitempty"`
+	PrivateKeyPassphrase string `json:"privateKeyPassphrase,omitempty"`
+	TrustHostKey         bool   `json:"trustHostKey"`
+}
+
+type SSHTunnelInfo struct {
+	TunnelID     string `json:"tunnelId"`
+	ResourceID   string `json:"resourceId"`
+	Type         string `json:"type"`
+	LocalHost    string `json:"localHost"`
+	LocalPort    int    `json:"localPort"`
+	LocalAddress string `json:"localAddress"`
+	Target       string `json:"target"`
+	StartedAt    string `json:"startedAt"`
+}
+
 type SSHEvent struct {
 	SessionID string `json:"sessionId"`
 	Data      string `json:"data,omitempty"`
@@ -274,6 +306,14 @@ type sshSession struct {
 	shell  *remotessh.Shell
 	stdin  *io.PipeWriter
 	cancel context.CancelFunc
+}
+
+type sshTunnel struct {
+	id       string
+	client   *ssh.Client
+	listener net.Listener
+	cancel   context.CancelFunc
+	info     SSHTunnelInfo
 }
 
 func (a *App) StartSSHSession(input SSHSessionInput) (string, error) {
@@ -334,6 +374,116 @@ func (a *App) StartSSHSession(input SSHSessionInput) (string, error) {
 	return sessionID, nil
 }
 
+func (a *App) StartSSHTunnel(input SSHTunnelInput) (SSHTunnelInfo, error) {
+	resource, err := a.resourceByID(input.ResourceID)
+	if err != nil {
+		return SSHTunnelInfo{}, err
+	}
+	if err := normalizeTunnelInput(&input); err != nil {
+		return SSHTunnelInfo{}, err
+	}
+
+	sessionInput := SSHSessionInput{
+		ResourceID:           input.ResourceID,
+		Password:             input.Password,
+		PrivateKeyPath:       input.PrivateKeyPath,
+		KeyName:              input.KeyName,
+		PrivateKeyPassphrase: input.PrivateKeyPassphrase,
+		TrustHostKey:         input.TrustHostKey,
+	}
+	sessionInput = applyAuthPreference(resource, sessionInput)
+	dialInput := a.resolveSessionKeyPath(sessionInput)
+
+	client, err := dialResource(resource, dialInput, remotessh.DefaultTimeout)
+	if err != nil {
+		return SSHTunnelInfo{}, err
+	}
+
+	listener, err := net.Listen("tcp", net.JoinHostPort(input.LocalHost, fmt.Sprint(input.LocalPort)))
+	if err != nil {
+		client.Close()
+		return SSHTunnelInfo{}, fmt.Errorf("start local tunnel listener: %w", err)
+	}
+
+	tunnelID := fmt.Sprintf("tunnel-%d", time.Now().UnixNano())
+	ctx, cancel := context.WithCancel(context.Background())
+	info := SSHTunnelInfo{
+		TunnelID:     tunnelID,
+		ResourceID:   resource.ID,
+		Type:         input.Type,
+		LocalHost:    input.LocalHost,
+		LocalPort:    input.LocalPort,
+		LocalAddress: listener.Addr().String(),
+		Target:       fmt.Sprintf("%s@%s:%d", resource.User, sshHost(resource), resource.Port),
+		StartedAt:    time.Now().Format(time.RFC3339),
+	}
+	tunnel := &sshTunnel{
+		id:       tunnelID,
+		client:   client,
+		listener: listener,
+		cancel:   cancel,
+		info:     info,
+	}
+
+	a.mu.Lock()
+	a.tunnels[tunnelID] = tunnel
+	a.mu.Unlock()
+
+	if auth := authPreferenceFromSessionInput(sessionInput); auth != nil {
+		if err := a.service.SetResourceAuth(resource.ID, *auth); err != nil {
+			a.emit("ssh:status", SSHEvent{SessionID: tunnelID, Message: fmt.Sprintf("Could not save SSH auth preference: %v", err)})
+		}
+	}
+
+	go a.serveTunnel(ctx, tunnel)
+
+	return info, nil
+}
+
+func (a *App) ListSSHTunnels() []SSHTunnelInfo {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	tunnels := make([]SSHTunnelInfo, 0, len(a.tunnels))
+	for _, tunnel := range a.tunnels {
+		tunnels = append(tunnels, tunnel.info)
+	}
+	return tunnels
+}
+
+func (a *App) StopSSHTunnel(tunnelID string) error {
+	a.mu.Lock()
+	tunnel := a.tunnels[strings.TrimSpace(tunnelID)]
+	delete(a.tunnels, strings.TrimSpace(tunnelID))
+	a.mu.Unlock()
+
+	if tunnel == nil {
+		return nil
+	}
+	tunnel.cancel()
+	tunnel.listener.Close()
+	tunnel.client.Close()
+	return nil
+}
+
+func (a *App) serveTunnel(ctx context.Context, tunnel *sshTunnel) {
+	err := remotessh.ServeSOCKS5(ctx, tunnel.listener, tunnel.client)
+
+	a.mu.Lock()
+	current := a.tunnels[tunnel.id]
+	if current == tunnel {
+		delete(a.tunnels, tunnel.id)
+	}
+	a.mu.Unlock()
+
+	tunnel.cancel()
+	tunnel.client.Close()
+
+	if err != nil && a.ctx != nil {
+		a.emit("ssh:status", SSHEvent{SessionID: tunnel.id, Message: fmt.Sprintf("Tunnel closed: %v", err)})
+	}
+}
+
 func (a *App) WriteSSHSession(sessionID string, data string) error {
 	session, err := a.session(sessionID)
 	if err != nil {
@@ -366,6 +516,39 @@ func (a *App) StopSSHSession(sessionID string) error {
 	session.client.Close()
 	a.emit("ssh:closed", SSHEvent{SessionID: sessionID, Message: "SSH session closed"})
 	return nil
+}
+
+func (a *App) stopTunnelsForResource(resourceID string) {
+	var tunnelIDs []string
+	a.mu.Lock()
+	for id, tunnel := range a.tunnels {
+		if tunnel.info.ResourceID == resourceID {
+			tunnelIDs = append(tunnelIDs, id)
+		}
+	}
+	a.mu.Unlock()
+
+	for _, id := range tunnelIDs {
+		_ = a.StopSSHTunnel(id)
+	}
+}
+
+func (a *App) resourceIDsForDelete(id string) ([]string, error) {
+	id = strings.TrimSpace(id)
+	hosts, err := a.service.ListHosts()
+	if err != nil {
+		return nil, err
+	}
+	for _, host := range hosts {
+		if host.ID == id {
+			ids := []string{host.ID}
+			for _, subsystem := range host.Subsystems {
+				ids = append(ids, subsystem.ID)
+			}
+			return ids, nil
+		}
+	}
+	return []string{id}, nil
 }
 
 func (a *App) waitForShell(ctx context.Context, session *sshSession) {
@@ -496,6 +679,28 @@ func authPreferenceFromSessionInput(input SSHSessionInput) *domain.Auth {
 		auth.Method = domain.AuthMethodAgent
 	}
 	return &auth
+}
+
+func normalizeTunnelInput(input *SSHTunnelInput) error {
+	input.Type = strings.ToLower(strings.TrimSpace(input.Type))
+	if input.Type == "" {
+		input.Type = "socks"
+	}
+	if input.Type != "socks" {
+		return fmt.Errorf("unsupported tunnel type %q", input.Type)
+	}
+
+	input.LocalHost = strings.TrimSpace(input.LocalHost)
+	if input.LocalHost == "" {
+		input.LocalHost = "127.0.0.1"
+	}
+	if strings.ContainsAny(input.LocalHost, "\r\n\t ") {
+		return errors.New("local bind address contains invalid characters")
+	}
+	if input.LocalPort < 1 || input.LocalPort > 65535 {
+		return errors.New("local port must be between 1 and 65535")
+	}
+	return nil
 }
 
 func dialResource(resource domain.Endpoint, input SSHSessionInput, timeout time.Duration) (*ssh.Client, error) {

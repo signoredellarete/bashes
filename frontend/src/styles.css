@@ -668,6 +668,16 @@ textarea {
   font-size: 13px;
 }
 
+.tunnel-status {
+  margin: 0;
+  border: 1px solid #96d0a7;
+  border-radius: 6px;
+  background: #edf8f0;
+  color: #1f6f3d;
+  padding: 9px;
+  font-size: 13px;
+}
+
 .compact-form {
   display: grid;
   gap: 9px;
