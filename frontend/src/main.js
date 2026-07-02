@@ -38,6 +38,9 @@ const state = {
   sessions: new Map(),
 };
 
+const FILE_TRANSFER_ENABLED = true;
+let unmountFileTransfer = null;
+
 const app = document.querySelector('#app');
 
 app.innerHTML = `
@@ -72,6 +75,7 @@ app.innerHTML = `
             <button id="header-add-subsystem" class="secondary" type="button" disabled>Add Subsystem</button>
             <button id="open-keys-panel" class="secondary" type="button" disabled>Keys</button>
             <button id="delete-resource" class="secondary" type="button" disabled>Delete</button>
+            <button id="open-file-transfer" class="secondary" type="button" disabled>Files</button>
             <button id="open-tunnel-panel" class="secondary" type="button" disabled>Tunnel</button>
             <button id="disconnect" class="secondary" type="button" disabled>Disconnect</button>
             <button id="connect" type="button" disabled>Connect</button>
@@ -259,6 +263,20 @@ app.innerHTML = `
     </form>
   </section>
 
+  <section id="file-transfer-modal" class="file-transfer-modal" hidden>
+    <div class="file-transfer-scrim" data-close-file-transfer></div>
+    <section class="file-transfer-card">
+      <header class="file-transfer-header">
+        <div>
+          <p class="eyebrow">File Transfer</p>
+          <h3 id="file-transfer-title">Files</h3>
+        </div>
+        <button class="close-panel" type="button" data-close-file-transfer title="Close">X</button>
+      </header>
+      <div id="file-transfer-root" class="file-transfer-root"></div>
+    </section>
+  </section>
+
   <section id="keys-panel" class="slide-panel" hidden>
     <div class="panel-scrim" data-close-keys></div>
     <section class="panel-card">
@@ -342,6 +360,7 @@ searchInput.addEventListener('input', () => scheduleHostRender());
 document.querySelector('#open-host-panel').addEventListener('click', () => openResourcePanel('host'));
 document.querySelector('#open-keys-panel').addEventListener('click', () => openKeysPanel());
 document.querySelector('#open-tunnel-panel').addEventListener('click', () => openTunnelPanel());
+document.querySelector('#open-file-transfer').addEventListener('click', () => openFileTransferModal());
 document.querySelector('#edit-resource').addEventListener('click', () => openEditPanel());
 document.querySelector('#header-add-subsystem').addEventListener('click', () => {
   const selected = findResource(state.selectedId);
@@ -372,6 +391,9 @@ document.querySelectorAll('[data-close-tunnel]').forEach((element) => {
 });
 document.querySelectorAll('[data-close-keys]').forEach((element) => {
   element.addEventListener('click', () => closeKeysPanel());
+});
+document.querySelectorAll('[data-close-file-transfer]').forEach((element) => {
+  element.addEventListener('click', () => closeFileTransferModal());
 });
 document.querySelectorAll('[data-confirm-cancel]').forEach((element) => {
   element.addEventListener('click', () => resolveConfirmModal(false));
@@ -1206,6 +1228,35 @@ function closeKeysPanel() {
   panel.hidden = true;
 }
 
+async function openFileTransferModal() {
+  if (!FILE_TRANSFER_ENABLED) return;
+  const selected = findResource(state.selectedId)?.resource;
+  if (!selected) return;
+
+  const panel = document.querySelector('#file-transfer-modal');
+  const title = document.querySelector('#file-transfer-title');
+  const root = document.querySelector('#file-transfer-root');
+  title.textContent = `${selected.user}@${selected.ip || selected.hostname}:${selected.port}`;
+  panel.hidden = false;
+  requestAnimationFrame(() => panel.classList.add('open'));
+
+  if (unmountFileTransfer) unmountFileTransfer();
+  const { mountFileTransfer } = await import('./file-transfer/mount.js');
+  unmountFileTransfer = mountFileTransfer(root, {
+    resource: selected,
+  });
+}
+
+function closeFileTransferModal() {
+  if (unmountFileTransfer) {
+    unmountFileTransfer();
+    unmountFileTransfer = null;
+  }
+  const panel = document.querySelector('#file-transfer-modal');
+  panel.classList.remove('open');
+  panel.hidden = true;
+}
+
 function renderSelection() {
   document.querySelectorAll('.host-row').forEach((row) => {
     row.classList.toggle('selected', row.dataset.id === state.selectedId);
@@ -1217,6 +1268,7 @@ function renderSelection() {
   const edit = document.querySelector('#edit-resource');
   const addSubsystem = document.querySelector('#header-add-subsystem');
   const keys = document.querySelector('#open-keys-panel');
+  const fileTransfer = document.querySelector('#open-file-transfer');
   const tunnel = document.querySelector('#open-tunnel-panel');
   const connect = document.querySelector('#connect');
   const disconnect = document.querySelector('#disconnect');
@@ -1235,6 +1287,8 @@ function renderSelection() {
     addSubsystem.disabled = true;
     addSubsystem.hidden = false;
     keys.disabled = true;
+    fileTransfer.disabled = true;
+    fileTransfer.hidden = !FILE_TRANSFER_ENABLED;
     tunnel.disabled = true;
     connect.disabled = true;
     disconnect.disabled = true;
@@ -1246,6 +1300,8 @@ function renderSelection() {
   edit.disabled = state.busy || !selected;
   addSubsystem.disabled = state.busy || !selected;
   keys.disabled = state.busy || !selected;
+  fileTransfer.hidden = !FILE_TRANSFER_ENABLED;
+  fileTransfer.disabled = state.busy || !selected || !FILE_TRANSFER_ENABLED;
   tunnel.disabled = state.busy || !selected;
   connect.textContent = realSessionsForResource(selected.resource.id).length > 0 ? 'New Session' : 'Connect';
   connect.disabled = state.busy || !selected;

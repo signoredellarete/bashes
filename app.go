@@ -27,12 +27,13 @@ import (
 )
 
 type App struct {
-	ctx      context.Context
-	service  *application.Service
-	dataPath string
-	mu       sync.Mutex
-	sessions map[string]*sshSession
-	tunnels  map[string]*sshTunnel
+	ctx       context.Context
+	service   *application.Service
+	dataPath  string
+	mu        sync.Mutex
+	sessions  map[string]*sshSession
+	tunnels   map[string]*sshTunnel
+	transfers map[string]*fileTransferSession
 }
 
 func NewApp(dataPath string) *App {
@@ -41,10 +42,11 @@ func NewApp(dataPath string) *App {
 	}
 
 	return &App{
-		dataPath: dataPath,
-		service:  application.NewService(store.NewRepository(dataPath)),
-		sessions: make(map[string]*sshSession),
-		tunnels:  make(map[string]*sshTunnel),
+		dataPath:  dataPath,
+		service:   application.NewService(store.NewRepository(dataPath)),
+		sessions:  make(map[string]*sshSession),
+		tunnels:   make(map[string]*sshTunnel),
+		transfers: make(map[string]*fileTransferSession),
 	}
 }
 
