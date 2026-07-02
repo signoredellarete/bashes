@@ -343,8 +343,7 @@ document.querySelector('#open-tunnel-panel').addEventListener('click', () => ope
 document.querySelector('#edit-resource').addEventListener('click', () => openEditPanel());
 document.querySelector('#header-add-subsystem').addEventListener('click', () => {
   const selected = findResource(state.selectedId);
-  const hostID = selected?.type === 'host' ? selected.resource.id : selected?.parent?.id;
-  if (hostID) openResourcePanel('subsystem', hostID);
+  if (selected?.type === 'host') openResourcePanel('subsystem', selected.resource.id);
 });
 document.querySelector('#connect').addEventListener('click', () => openConnectPanel());
 document.querySelector('#disconnect').addEventListener('click', () => disconnectActiveSession());
@@ -395,10 +394,13 @@ async function loadHosts() {
 
 async function refreshHosts() {
   state.hosts = await apiListHosts();
-  if (state.selectedId && !findResource(state.selectedId)) {
+  const activeSession = state.sessions.get(state.activeSessionId);
+  if (activeSession && findResource(activeSession.resourceId)) {
+    state.selectedId = activeSession.resourceId;
+  } else if (state.selectedId && !findResource(state.selectedId)) {
     state.selectedId = null;
   }
-  if (!state.selectedId && state.hosts.length > 0) {
+  if (!state.selectedId && !activeSession && state.hosts.length > 0) {
     state.selectedId = state.hosts[0].id;
   }
   renderHosts(searchInput.value);
@@ -572,17 +574,30 @@ async function deleteSelectedResource() {
   if (!(await confirmDeleteResource(selected))) return;
 
   await withBusy(async () => {
-    for (const session of sessionsForResource(selected.resource.id)) {
-      await stopSession(session.id);
-    }
-    for (const tunnel of tunnelsForResource(selected.resource.id)) {
-      await stopTunnel(tunnel.tunnelId);
+    const resourceIDs = resourceIDsForSelection(selected);
+    for (const resourceID of resourceIDs) {
+      for (const session of sessionsForResource(resourceID)) {
+        await stopSession(session.id);
+      }
+      for (const tunnel of tunnelsForResource(resourceID)) {
+        await stopTunnel(tunnel.tunnelId);
+      }
     }
     await apiDeleteResource(selected.resource.id);
     writeNotice(`Deleted ${selected.resource.hostname}.`);
-    state.selectedId = selected.parent?.id ?? null;
+    if (!state.activeSessionId) state.selectedId = selected.parent?.id ?? null;
     await refreshHosts();
   });
+}
+
+function resourceIDsForSelection(selected) {
+  const ids = [selected.resource.id];
+  if (selected.type === 'host') {
+    for (const subsystem of selected.resource.subsystems ?? []) {
+      ids.push(subsystem.id);
+    }
+  }
+  return ids;
 }
 
 function confirmDeleteResource(selected) {
@@ -660,7 +675,7 @@ async function stopSession(sessionID) {
     await apiStopSSHSession(sessionID);
   }
   if (state.activeSessionId === sessionID) {
-    state.activeSessionId = firstSessionID();
+    setActiveSession(firstSessionID());
   }
   renderTabs();
   renderSelection();
@@ -803,7 +818,7 @@ function createPendingTab(resource) {
   clearPendingTabs(resource.id);
   const existing = sessionForResource(resource.id);
   if (existing) {
-    state.activeSessionId = existing.id;
+    setActiveSession(existing.id);
     return existing.id;
   }
 
@@ -823,7 +838,7 @@ function createPendingTab(resource) {
     pending: true,
     closed: false,
   });
-  state.activeSessionId = sessionID;
+  setActiveSession(sessionID);
   return sessionID;
 }
 
@@ -841,9 +856,9 @@ function selectResource(resource) {
   const session = sessionForResource(resource.id);
   if (session) {
     if (!session.pending) clearPendingTabs(resource.id);
-    state.activeSessionId = session.id;
+    setActiveSession(session.id);
   } else {
-    state.activeSessionId = createPendingTab(resource);
+    createPendingTab(resource);
   }
   renderTabs();
   renderSelection();
@@ -906,8 +921,7 @@ function createSession(sessionID, resource) {
     element: pane,
     closed: false,
   });
-  state.activeSessionId = sessionID;
-  state.selectedId = resource.id;
+  setActiveSession(sessionID);
   writeNotice(`Connected to ${resource.user}@${resource.ip || resource.hostname}:${resource.port}`);
   renderTabs();
   renderSelection();
@@ -931,8 +945,7 @@ function renderTabs() {
     tab.querySelector('strong').textContent = session.title;
     tab.addEventListener('click', () => {
       if (!session.pending) clearPendingTabs(session.resourceId);
-      state.activeSessionId = session.id;
-      state.selectedId = session.resourceId;
+      setActiveSession(session.id);
       renderTabs();
       renderSelection();
       scheduleTerminalFit();
@@ -1206,6 +1219,7 @@ function renderSelection() {
   if (!selected) {
     edit.disabled = true;
     addSubsystem.disabled = true;
+    addSubsystem.hidden = true;
     keys.disabled = true;
     tunnel.disabled = true;
     connect.disabled = true;
@@ -1214,8 +1228,9 @@ function renderSelection() {
     return;
   }
 
+  addSubsystem.hidden = selected.type !== 'host';
   edit.disabled = state.busy || !selected;
-  addSubsystem.disabled = state.busy || !selected;
+  addSubsystem.disabled = state.busy || selected.type !== 'host';
   keys.disabled = state.busy || !selected;
   tunnel.disabled = state.busy || !selected;
   connect.disabled = state.busy || !selected;
@@ -1345,11 +1360,17 @@ function focusSession(sessionID) {
   const session = state.sessions.get(sessionID);
   if (!session) return;
   if (!session.pending) clearPendingTabs(session.resourceId);
-  state.activeSessionId = session.id;
-  state.selectedId = session.resourceId;
+  setActiveSession(session.id);
   renderTabs();
   renderSelection();
   scheduleTerminalFit();
+}
+
+function setActiveSession(sessionID) {
+  const session = sessionID ? state.sessions.get(sessionID) : null;
+  state.activeSessionId = session?.id ?? null;
+  if (session) state.selectedId = session.resourceId;
+  return session;
 }
 
 function firstSessionID() {
