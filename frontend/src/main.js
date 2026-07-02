@@ -846,6 +846,9 @@ function createPendingTab(resource) {
     closed: false,
   });
   setActiveSession(sessionID);
+  renderTabs();
+  renderSelection();
+  scheduleTerminalFit();
   return sessionID;
 }
 
