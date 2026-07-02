@@ -274,6 +274,7 @@ app.innerHTML = `
         <button class="close-panel" type="button" data-close-file-transfer title="Close">X</button>
       </header>
       <div id="file-transfer-root" class="file-transfer-root"></div>
+      <div id="file-transfer-resize-handle" class="file-transfer-resize-handle" title="Resize" aria-hidden="true"></div>
     </section>
   </section>
 
@@ -342,6 +343,7 @@ const stack = document.querySelector('#terminal-stack');
 
 window.addEventListener('resize', () => {
   scheduleTerminalFit();
+  clampFileTransferModalSize();
 });
 
 if (globalThis.ResizeObserver) {
@@ -395,6 +397,7 @@ document.querySelectorAll('[data-close-keys]').forEach((element) => {
 document.querySelectorAll('[data-close-file-transfer]').forEach((element) => {
   element.addEventListener('click', () => closeFileTransferModal());
 });
+registerFileTransferModalResize();
 document.querySelectorAll('[data-confirm-cancel]').forEach((element) => {
   element.addEventListener('click', () => resolveConfirmModal(false));
 });
@@ -1255,6 +1258,64 @@ function closeFileTransferModal() {
   const panel = document.querySelector('#file-transfer-modal');
   panel.classList.remove('open');
   panel.hidden = true;
+}
+
+function registerFileTransferModalResize() {
+  const card = document.querySelector('.file-transfer-card');
+  const handle = document.querySelector('#file-transfer-resize-handle');
+  if (!card || !handle) return;
+
+  let resizeState = null;
+  handle.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    resizeState = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      width: card.offsetWidth,
+      height: card.offsetHeight,
+    };
+    handle.setPointerCapture(event.pointerId);
+    document.body.classList.add('resizing-file-transfer');
+  });
+
+  handle.addEventListener('pointermove', (event) => {
+    if (!resizeState || resizeState.pointerId !== event.pointerId) return;
+    resizeFileTransferModal(
+      resizeState.width + event.clientX - resizeState.startX,
+      resizeState.height + event.clientY - resizeState.startY,
+    );
+  });
+
+  const stopResize = (event) => {
+    if (!resizeState || resizeState.pointerId !== event.pointerId) return;
+    resizeState = null;
+    document.body.classList.remove('resizing-file-transfer');
+  };
+  handle.addEventListener('pointerup', stopResize);
+  handle.addEventListener('pointercancel', stopResize);
+}
+
+function resizeFileTransferModal(width, height) {
+  const card = document.querySelector('.file-transfer-card');
+  if (!card) return;
+  const minWidth = Math.min(720, window.innerWidth - 36);
+  const minHeight = Math.min(460, window.innerHeight - 36);
+  const maxWidth = window.innerWidth - 36;
+  const maxHeight = window.innerHeight - 36;
+  card.style.width = `${clamp(width, minWidth, maxWidth)}px`;
+  card.style.height = `${clamp(height, minHeight, maxHeight)}px`;
+}
+
+function clampFileTransferModalSize() {
+  const panel = document.querySelector('#file-transfer-modal');
+  const card = document.querySelector('.file-transfer-card');
+  if (!panel || panel.hidden || !card || !card.style.width) return;
+  resizeFileTransferModal(card.offsetWidth, card.offsetHeight);
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
 }
 
 function renderSelection() {

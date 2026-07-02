@@ -774,7 +774,6 @@ textarea {
   height: min(760px, calc(100vh - 36px));
   min-width: 720px;
   min-height: 460px;
-  resize: both;
   overflow: hidden;
   grid-template-rows: auto minmax(0, 1fr);
   border: 1px solid #c7cfd8;
@@ -801,6 +800,34 @@ textarea {
 .file-transfer-root {
   min-width: 0;
   min-height: 0;
+}
+
+.file-transfer-resize-handle {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  color: #7b8794;
+}
+
+.file-transfer-resize-handle::before {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 11px;
+  height: 11px;
+  content: "";
+  background:
+    linear-gradient(135deg, transparent 0 46%, currentColor 47% 54%, transparent 55%),
+    linear-gradient(135deg, transparent 0 66%, currentColor 67% 74%, transparent 75%);
+  opacity: 0.75;
+}
+
+.resizing-file-transfer {
+  cursor: nwse-resize;
+  user-select: none;
 }
 
 .transfer-shell {
@@ -845,6 +872,7 @@ textarea {
 }
 
 .transfer-manager {
+  position: relative;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -852,6 +880,135 @@ textarea {
 
 .transfer-manager .wx-filemanager {
   height: 100%;
+}
+
+.transfer-shell.dragging .transfer-manager::after {
+  position: absolute;
+  inset: 10px;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  border: 1px dashed #2f6f73;
+  border-radius: 8px;
+  background: rgba(237, 248, 240, 0.68);
+  color: #1f6f3d;
+  content: "Drop files here";
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.transfer-manager [class^="wxi-"]::before,
+.transfer-manager [class*=" wxi-"]::before,
+.transfer-manager [class^="mdi "]::before,
+.transfer-manager [class*=" mdi-"]::before {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  content: "";
+  background: currentColor;
+  -webkit-mask: var(--bashes-local-icon) center / contain no-repeat;
+  mask: var(--bashes-local-icon) center / contain no-repeat;
+}
+
+.transfer-manager .wxi-empty::before {
+  background: transparent;
+}
+
+.transfer-manager .wxi-view-sequential::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M5 6h14v2H5zm0 5h14v2H5zm0 5h14v2H5z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-view-grid::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4 4h7v7H4zm9 0h7v7h-7zM4 13h7v7H4zm9 0h7v7h-7z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-view-column::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4 4h5v16H4zm7 0h5v16h-5zm7 0h2v16h-2z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-eye::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 5C6.8 5 3.2 8.1 2 12c1.2 3.9 4.8 7 10 7s8.8-3.1 10-7c-1.2-3.9-4.8-7-10-7zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-search::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M10 4a6 6 0 0 1 4.7 9.7l4.8 4.8-1.4 1.4-4.8-4.8A6 6 0 1 1 10 4zm0 2a4 4 0 1 0 0 8 4 4 0 0 0 0-8z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-close::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m6.4 5 12.6 12.6-1.4 1.4L5 6.4z'/%3E%3Cpath d='M17.6 5 5 17.6 6.4 19 19 6.4z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-angle-right::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m8 5 8 7-8 7z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-angle-down::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m5 8 7 8 7-8z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-arrow-left::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m10 5 1.4 1.4L7.8 10H20v2H7.8l3.6 3.6L10 17l-6-6z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-dots-v::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-dots-h::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8 12a2 2 0 1 0-4 0 2 2 0 0 0 4 0zm6 0a2 2 0 1 0-4 0 2 2 0 0 0 4 0zm6 0a2 2 0 1 0-4 0 2 2 0 0 0 4 0z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-content-copy::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8 7h11v13H8zM5 4h11v2H7v11H5z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-content-cut::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m6 4 12 16h-3L3 4zm12 0L3 20h3L21 4z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-content-paste::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8 4h8v3h3v14H5V7h3zm2 2v2h4V6zM7 9v10h10V9z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-download::before,
+.transfer-manager .mdi-file-upload-outline::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M11 4h2v8l3-3 1.4 1.4L12 16l-5.4-5.6L8 9l3 3zM5 18h14v2H5z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-edit::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M5 16.5V20h3.5L18.8 9.7l-3.5-3.5zM17 4.5 19.5 7 18 8.5 15.5 6z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-folder::before,
+.transfer-manager .mdi-folder-plus-outline::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3 6h7l2 2h9v10H3z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .mdi-file-plus-outline::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 3h9l4 4v14H6zm8 2v4h3zM11 11v3H8v2h3v3h2v-3h3v-2h-3v-3z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-check::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m9 16.5-4-4 1.4-1.4L9 13.7l8.6-8.6L19 6.5z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-alert::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 3 2 21h20zm-1 6h2v6h-2zm0 8h2v2h-2z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-loading::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2a10 10 0 0 1 10 10h-3a7 7 0 0 0-7-7z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-spin::before {
+  animation: wx-local-spin 0.8s linear infinite;
+}
+
+@keyframes wx-local-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .parent-summary {
