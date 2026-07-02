@@ -32,6 +32,7 @@ const state = {
   drawerMode: null,
   drawerHostId: null,
   editResourceId: null,
+  confirmResolver: null,
   sessions: new Map(),
 };
 
@@ -299,6 +300,21 @@ app.innerHTML = `
     </section>
   </section>
 
+  <section id="confirm-modal" class="confirm-modal" hidden>
+    <div class="confirm-scrim" data-confirm-cancel></div>
+    <section class="confirm-card" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+      <header>
+        <p class="eyebrow" id="confirm-kicker">Confirm</p>
+        <h3 id="confirm-title">Delete resource</h3>
+      </header>
+      <p id="confirm-message"></p>
+      <footer class="confirm-actions">
+        <button id="confirm-cancel" class="secondary" type="button" data-confirm-cancel>Cancel</button>
+        <button id="confirm-accept" class="danger" type="button">Delete</button>
+      </footer>
+    </section>
+  </section>
+
   <div id="sidebar-tooltip" class="sidebar-tooltip" hidden></div>
 `;
 
@@ -355,6 +371,15 @@ document.querySelectorAll('[data-close-tunnel]').forEach((element) => {
 });
 document.querySelectorAll('[data-close-keys]').forEach((element) => {
   element.addEventListener('click', () => closeKeysPanel());
+});
+document.querySelectorAll('[data-confirm-cancel]').forEach((element) => {
+  element.addEventListener('click', () => resolveConfirmModal(false));
+});
+document.querySelector('#confirm-accept').addEventListener('click', () => resolveConfirmModal(true));
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !document.querySelector('#confirm-modal').hidden) {
+    resolveConfirmModal(false);
+  }
 });
 
 await loadHosts();
@@ -544,7 +569,7 @@ async function submitInstallKey(event) {
 async function deleteSelectedResource() {
   const selected = findResource(state.selectedId);
   if (!selected) return;
-  if (!confirmDeleteResource(selected)) return;
+  if (!(await confirmDeleteResource(selected))) return;
 
   await withBusy(async () => {
     for (const session of sessionsForResource(selected.resource.id)) {
@@ -565,8 +590,45 @@ function confirmDeleteResource(selected) {
   const extra = subsystemCount > 0
     ? `\n\nThis will also delete ${subsystemCount} subsystem${subsystemCount === 1 ? '' : 's'}.`
     : '';
-  const message = `Delete ${selected.resource.hostname}?${extra}\n\nThis action cannot be undone.`;
-  return typeof globalThis.confirm === 'function' ? globalThis.confirm(message) : true;
+  return openConfirmModal({
+    kicker: 'Delete',
+    title: `Delete ${selected.resource.hostname}?`,
+    message: `This action cannot be undone.${extra}`,
+    confirmLabel: 'Delete',
+  });
+}
+
+function openConfirmModal({ kicker = 'Confirm', title, message, confirmLabel = 'Confirm' }) {
+  const modal = document.querySelector('#confirm-modal');
+  const cancel = document.querySelector('#confirm-cancel');
+  document.querySelector('#confirm-kicker').textContent = kicker;
+  document.querySelector('#confirm-title').textContent = title;
+  document.querySelector('#confirm-message').textContent = message;
+  document.querySelector('#confirm-accept').textContent = confirmLabel;
+
+  if (state.confirmResolver) {
+    state.confirmResolver(false);
+  }
+
+  modal.hidden = false;
+  requestAnimationFrame(() => modal.classList.add('open'));
+  requestAnimationFrame(() => cancel.focus());
+
+  return new Promise((resolve) => {
+    state.confirmResolver = resolve;
+  });
+}
+
+function resolveConfirmModal(confirmed) {
+  const modal = document.querySelector('#confirm-modal');
+  if (!modal || modal.hidden) return;
+
+  modal.classList.remove('open');
+  modal.hidden = true;
+
+  const resolve = state.confirmResolver;
+  state.confirmResolver = null;
+  if (resolve) resolve(confirmed);
 }
 
 async function stopSelectedTunnel() {
