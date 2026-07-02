@@ -34,6 +34,7 @@ const state = {
   editResourceId: null,
   confirmResolver: null,
   lastSessionByResource: new Map(),
+  sessionFocusHistory: [],
   sessions: new Map(),
 };
 
@@ -668,6 +669,7 @@ async function disconnectActiveSession() {
 async function stopSession(sessionID) {
   const session = state.sessions.get(sessionID);
   state.sessions.delete(sessionID);
+  forgetSessionFocus(sessionID);
   if (session && state.lastSessionByResource.get(session.resourceId) === sessionID) {
     state.lastSessionByResource.delete(session.resourceId);
   }
@@ -676,7 +678,7 @@ async function stopSession(sessionID) {
     await apiStopSSHSession(sessionID);
   }
   if (state.activeSessionId === sessionID) {
-    setActiveSession(firstSessionID());
+    setActiveSession(lastFocusedSessionID());
   }
   renderTabs();
   renderSelection();
@@ -857,7 +859,8 @@ function clearPendingTabs(exceptResourceId = '') {
     if (!session.pending || session.resourceId === exceptResourceId) continue;
     if (session.element) session.element.remove();
     state.sessions.delete(session.id);
-    if (state.activeSessionId === session.id) state.activeSessionId = null;
+    forgetSessionFocus(session.id);
+    if (state.activeSessionId === session.id) setActiveSession(lastFocusedSessionID());
   }
 }
 
@@ -1419,6 +1422,7 @@ function setActiveSession(sessionID) {
   state.activeSessionId = session?.id ?? null;
   if (session) {
     state.selectedId = session.resourceId;
+    rememberSessionFocus(session.id);
     if (!session.pending && !session.closed) {
       state.lastSessionByResource.set(session.resourceId, session.id);
     }
@@ -1426,7 +1430,20 @@ function setActiveSession(sessionID) {
   return session;
 }
 
-function firstSessionID() {
+function rememberSessionFocus(sessionID) {
+  forgetSessionFocus(sessionID);
+  state.sessionFocusHistory.push(sessionID);
+}
+
+function forgetSessionFocus(sessionID) {
+  state.sessionFocusHistory = state.sessionFocusHistory.filter((id) => id !== sessionID);
+}
+
+function lastFocusedSessionID() {
+  for (let index = state.sessionFocusHistory.length - 1; index >= 0; index -= 1) {
+    const sessionID = state.sessionFocusHistory[index];
+    if (state.sessions.has(sessionID)) return sessionID;
+  }
   return state.sessions.keys().next().value ?? null;
 }
 
