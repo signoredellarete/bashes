@@ -25,27 +25,46 @@
   let status = 'Connecting...';
   let error = '';
   let busy = false;
+  let needsPassword = false;
+  let password = '';
+  let trustHostKey = true;
+  let passwordInput = null;
   let dragging = false;
   let dragDepth = 0;
   let cleanupDragEvents = () => {};
   let cleanupDraggableObserver = () => {};
 
   onMount(() => {
-    cleanupDragEvents = setupDragAndDrop();
+    if (resource?.auth?.method === 'password') {
+      showPasswordPrompt('');
+      return;
+    }
     startSession();
   });
 
-  async function startSession() {
+  async function startSession(authInput = {}) {
+    busy = true;
+    error = '';
     try {
       session = await startFileTransfer({
         resourceId: resource.id,
         trustHostKey: true,
+        ...authInput,
       });
+      needsPassword = false;
+      password = '';
       status = `Local: ${session.localRoot} | Remote: ${session.remoteRoot}`;
       await loadInitial();
     } catch (err) {
-      error = String(err?.message ?? err);
-      status = 'Connection failed';
+      const message = String(err?.message ?? err);
+      if (isAuthError(message)) {
+        showPasswordPrompt(authInput.password ? 'Authentication failed. Check the password and try again.' : 'Enter the SSH password to open file transfer.');
+      } else {
+        error = message;
+        status = 'Connection failed';
+      }
+    } finally {
+      busy = false;
     }
   }
 
@@ -67,8 +86,29 @@
     api.intercept('move-files', handleMoveFiles);
     api.intercept('download-file', handleDownloadFile);
     api.intercept('open-file', handleOpenFile);
+    cleanupDragEvents();
+    cleanupDragEvents = setupDragAndDrop();
     setupDraggableItems();
     loadInitial();
+  }
+
+  async function submitPassword(event) {
+    event.preventDefault();
+    if (!password.trim()) {
+      error = 'Password is required.';
+      return;
+    }
+    await startSession({
+      password,
+      trustHostKey,
+    });
+  }
+
+  function showPasswordPrompt(message) {
+    needsPassword = true;
+    status = 'Password required';
+    error = message;
+    requestAnimationFrame(() => passwordInput?.focus());
   }
 
   async function loadInitial() {
@@ -180,6 +220,14 @@
 
   function unique(values) {
     return [...new Set(values)];
+  }
+
+  function isAuthError(message) {
+    const normalized = message.toLowerCase();
+    return normalized.includes('authenticate') ||
+      normalized.includes('authentication') ||
+      normalized.includes('no supported methods') ||
+      normalized.includes('permission denied');
   }
 
   function localIcon(file, size) {
@@ -379,20 +427,42 @@
   {#if error}
     <p class="transfer-error">{error}</p>
   {/if}
-  <div class="transfer-manager" bind:this={managerElement}>
-    <Willow fonts={false}>
-      <Filemanager
-        {data}
-        mode="panels"
-        preview={true}
-        icons={localIcon}
-        panels={[
-          { path: '/local', selected: [] },
-          { path: '/remote', selected: [] },
-        ]}
-        activePanel={0}
-        {init}
-      />
-    </Willow>
-  </div>
+  {#if needsPassword && !session}
+    <form class="transfer-auth" onsubmit={submitPassword}>
+      <label>
+        <span>User</span>
+        <input value={resource.user} autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" readonly />
+      </label>
+      <label>
+        <span>Password</span>
+        <input bind:this={passwordInput} bind:value={password} type="password" autocomplete="current-password" disabled={busy} />
+      </label>
+      <label class="transfer-auth-check">
+        <input bind:checked={trustHostKey} type="checkbox" disabled={busy} />
+        <span>Trust host key for this transfer</span>
+      </label>
+      <button type="submit" disabled={busy}>{busy ? 'Connecting...' : 'Connect'}</button>
+    </form>
+  {:else if session}
+    <div class="transfer-manager" bind:this={managerElement}>
+      <Willow fonts={false}>
+        <Filemanager
+          {data}
+          mode="panels"
+          preview={true}
+          icons={localIcon}
+          panels={[
+            { path: '/local', selected: [] },
+            { path: '/remote', selected: [] },
+          ]}
+          activePanel={0}
+          {init}
+        />
+      </Willow>
+    </div>
+  {:else}
+    <div class="transfer-auth transfer-auth-placeholder">
+      <p>Opening file transfer...</p>
+    </div>
+  {/if}
 </div>

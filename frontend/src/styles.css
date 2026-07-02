@@ -871,6 +871,69 @@ textarea {
   padding: 7px 10px;
 }
 
+.transfer-auth {
+  align-self: start;
+  justify-self: center;
+  display: grid;
+  width: min(360px, calc(100% - 32px));
+  gap: 11px;
+  margin-top: 44px;
+  border: 1px solid #dce1e6;
+  border-radius: 7px;
+  background: #fff;
+  box-shadow: 0 8px 22px rgba(31, 41, 51, 0.08);
+  padding: 16px;
+}
+
+.transfer-auth label {
+  display: grid;
+  gap: 5px;
+  color: #53606f;
+  font-size: 12px;
+}
+
+.transfer-auth input {
+  min-width: 0;
+  border: 1px solid #c7cfd8;
+  border-radius: 5px;
+  background: #fff;
+  color: #2f3945;
+  font: inherit;
+  padding: 8px 9px;
+}
+
+.transfer-auth input[readonly] {
+  background: #f5f7f9;
+}
+
+.transfer-auth button {
+  justify-self: end;
+  min-height: 30px;
+  border-radius: 5px;
+  padding: 6px 13px;
+}
+
+.transfer-auth-check {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+.transfer-auth-check input {
+  width: 15px;
+  height: 15px;
+  padding: 0;
+}
+
+.transfer-auth-placeholder {
+  color: #53606f;
+  font-size: 13px;
+  text-align: center;
+}
+
+.transfer-auth-placeholder p {
+  margin: 0;
+}
+
 .transfer-manager {
   position: relative;
   min-width: 0;

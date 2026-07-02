@@ -129,6 +129,10 @@ func (a *App) StartFileTransfer(input SSHSessionInput) (FileTransferSessionInfo,
 	a.transfers[sessionID] = session
 	a.mu.Unlock()
 
+	if auth := authPreferenceFromSessionInput(input); auth != nil && hasExplicitAuth(input) {
+		_ = a.service.SetResourceAuth(resource.ID, *auth)
+	}
+
 	return session.info(), nil
 }
 
