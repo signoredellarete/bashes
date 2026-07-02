@@ -408,11 +408,9 @@ async function submitResource(event) {
       writeNotice(`Updated ${resource?.hostname ?? 'resource'}.`);
     } else if (state.drawerMode === 'subsystem') {
       const subsystem = await apiAddSubsystem(state.drawerHostId, input);
-      state.selectedId = subsystem.id;
       writeNotice(`Added ${subsystem.type} ${subsystem.hostname}.`);
     } else {
       const host = await apiAddHost(input);
-      state.selectedId = host.id;
       writeNotice(`Added host ${host.hostname}.`);
     }
     closeResourcePanel();
@@ -546,6 +544,7 @@ async function submitInstallKey(event) {
 async function deleteSelectedResource() {
   const selected = findResource(state.selectedId);
   if (!selected) return;
+  if (!confirmDeleteResource(selected)) return;
 
   await withBusy(async () => {
     for (const session of sessionsForResource(selected.resource.id)) {
@@ -559,6 +558,15 @@ async function deleteSelectedResource() {
     state.selectedId = selected.parent?.id ?? null;
     await refreshHosts();
   });
+}
+
+function confirmDeleteResource(selected) {
+  const subsystemCount = selected.type === 'host' ? (selected.resource.subsystems ?? []).length : 0;
+  const extra = subsystemCount > 0
+    ? `\n\nThis will also delete ${subsystemCount} subsystem${subsystemCount === 1 ? '' : 's'}.`
+    : '';
+  const message = `Delete ${selected.resource.hostname}?${extra}\n\nThis action cannot be undone.`;
+  return typeof globalThis.confirm === 'function' ? globalThis.confirm(message) : true;
 }
 
 async function stopSelectedTunnel() {
@@ -659,21 +667,13 @@ function resourceRow(resource, type, child = false) {
   selectButton.querySelector('strong').textContent = resource.hostname;
   selectButton.querySelector('small').textContent = target;
   selectButton.addEventListener('click', () => {
-    state.selectedId = resource.id;
-    const session = sessionForResource(resource.id);
-    state.activeSessionId = session?.id ?? createPendingTab(resource);
-    renderTabs();
-    renderSelection();
-    scheduleTerminalFit();
+    selectResource(resource);
   });
   selectButton.addEventListener('dblclick', () => {
     state.selectedId = resource.id;
     const session = sessionForResource(resource.id);
     if (session && !session.pending) {
-      state.activeSessionId = session.id;
-      renderTabs();
-      renderSelection();
-      scheduleTerminalFit();
+      selectResource(resource);
       return;
     }
     createPendingTab(resource);
@@ -774,6 +774,20 @@ function clearPendingTabs(exceptResourceId = '') {
   }
 }
 
+function selectResource(resource) {
+  state.selectedId = resource.id;
+  const session = sessionForResource(resource.id);
+  if (session) {
+    if (!session.pending) clearPendingTabs(resource.id);
+    state.activeSessionId = session.id;
+  } else {
+    state.activeSessionId = createPendingTab(resource);
+  }
+  renderTabs();
+  renderSelection();
+  scheduleTerminalFit();
+}
+
 function createSession(sessionID, resource) {
   const pending = sessionForResource(resource.id);
   if (pending?.pending) {
@@ -854,6 +868,7 @@ function renderTabs() {
     tab.querySelector('span').textContent = session.closed ? 'closed' : session.pending ? 'new' : 'ssh';
     tab.querySelector('strong').textContent = session.title;
     tab.addEventListener('click', () => {
+      if (!session.pending) clearPendingTabs(session.resourceId);
       state.activeSessionId = session.id;
       state.selectedId = session.resourceId;
       renderTabs();
@@ -1267,6 +1282,7 @@ function tunnelsForResource(resourceId) {
 function focusSession(sessionID) {
   const session = state.sessions.get(sessionID);
   if (!session) return;
+  if (!session.pending) clearPendingTabs(session.resourceId);
   state.activeSessionId = session.id;
   state.selectedId = session.resourceId;
   renderTabs();
