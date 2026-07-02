@@ -87,6 +87,7 @@ app.innerHTML = `
     </section>
 
     <footer class="workspace-footer">
+      <p id="app-status" class="app-status" aria-live="polite"></p>
       <div class="terminal-font-controls" aria-label="Terminal font size">
         <button id="decrease-terminal-font" type="button" title="Decrease terminal font size">-</button>
         <span aria-hidden="true">A</span>
@@ -802,7 +803,7 @@ function createSession(sessionID, resource) {
   terminal.open(pane);
   terminal.onData((data) => {
     apiWriteSSHSession(sessionID, data).catch((error) => {
-      terminal.writeln(`\r\nError: ${error?.message ?? error}`);
+      writeNotice(`SSH input error: ${error?.message ?? error}`);
     });
   });
   terminal.onSelectionChange(() => {
@@ -831,7 +832,7 @@ function createSession(sessionID, resource) {
   });
   state.activeSessionId = sessionID;
   state.selectedId = resource.id;
-  terminal.writeln(`Connected to ${resource.user}@${resource.ip || resource.hostname}:${resource.port}`);
+  writeNotice(`Connected to ${resource.user}@${resource.ip || resource.hostname}:${resource.port}`);
   renderTabs();
   renderSelection();
   scheduleTerminalFit();
@@ -1355,17 +1356,10 @@ function resizeActiveSession() {
 }
 
 function writeNotice(message) {
-  const session = state.sessions.get(state.activeSessionId);
-  if (session?.terminal) {
-    session.terminal.writeln(`\r\n${message}`);
-    return;
-  }
-  if (session?.element) {
-    session.element.textContent = message;
-    return;
-  }
-  const empty = document.querySelector('#empty-terminal');
-  empty.textContent = message;
+  const status = document.querySelector('#app-status');
+  if (!status) return;
+  status.textContent = message;
+  status.title = message;
 }
 
 async function writeClipboard(text) {
@@ -1390,14 +1384,13 @@ function registerSSHEvents() {
     if (session?.terminal) session.terminal.write(event.data ?? '');
   });
   eventsOn('ssh:status', (event) => {
-    const session = state.sessions.get(event.sessionId);
-    if (session?.terminal) session.terminal.writeln(`\r\n${event.message}`);
+    if (event?.message) writeNotice(event.message);
   });
   eventsOn('ssh:closed', (event) => {
     const session = state.sessions.get(event.sessionId);
     if (!session) return;
     session.closed = true;
-    if (session.terminal) session.terminal.writeln(`\r\n${event.message}`);
+    if (event?.message) writeNotice(event.message);
     renderTabs();
     renderSelection();
   });

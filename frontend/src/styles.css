@@ -691,13 +691,26 @@ textarea {
   display: flex;
   min-height: 30px;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
+  gap: 12px;
   border-top: 1px solid #d3d9df;
   background: #f9fafb;
   padding: 4px 10px;
 }
 
+.app-status {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: #53606f;
+  font-size: 12px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .terminal-font-controls {
+  flex: 0 0 auto;
   display: inline-grid;
   grid-template-columns: 22px 18px 22px;
   align-items: center;
