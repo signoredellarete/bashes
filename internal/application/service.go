@@ -66,39 +66,36 @@ func (s *Service) AddSubsystem(hostID string, input EndpointInput) (domain.Endpo
 		return domain.Endpoint{}, err
 	}
 
-	hostIndex := -1
-	for i := range data.Hosts {
-		if data.Hosts[i].ID == hostID {
-			hostIndex = i
-			break
-		}
-	}
-	if hostIndex < 0 {
-		return domain.Endpoint{}, fmt.Errorf("host %q not found", hostID)
-	}
+	parentID := strings.TrimSpace(hostID)
 
 	if !domain.ValidResourceType(input.Type) || input.Type == domain.ResourceHost {
 		return domain.Endpoint{}, fmt.Errorf("invalid subsystem type %q", input.Type)
 	}
 
-	subsystem := domain.Endpoint{
-		Type:     input.Type,
-		Hostname: strings.TrimSpace(input.Hostname),
-		IP:       strings.TrimSpace(input.IP),
-		Port:     input.Port,
-		User:     strings.TrimSpace(input.User),
+	parent, parts := findSubsystemParent(data.Hosts, parentID)
+	if parent == nil {
+		return domain.Endpoint{}, fmt.Errorf("resource %q not found", parentID)
 	}
+
+	subsystem := domain.Endpoint{
+		Type:       input.Type,
+		Hostname:   strings.TrimSpace(input.Hostname),
+		IP:         strings.TrimSpace(input.IP),
+		Port:       input.Port,
+		User:       strings.TrimSpace(input.User),
+		Subsystems: []domain.Endpoint{},
+	}
+	parts = append(parts, len(*parent))
 	subsystem.ID = domain.StableID(
 		subsystem.Type,
 		subsystem.Hostname,
 		subsystem.IP,
 		subsystem.Port,
 		subsystem.User,
-		hostIndex,
-		len(data.Hosts[hostIndex].Subsystems),
+		parts...,
 	)
 
-	data.Hosts[hostIndex].Subsystems = append(data.Hosts[hostIndex].Subsystems, subsystem)
+	*parent = append(*parent, subsystem)
 	if err := s.store.Save(data); err != nil {
 		return domain.Endpoint{}, err
 	}
@@ -127,20 +124,16 @@ func (s *Service) UpdateResource(id string, input EndpointInput) error {
 		}
 	}
 
-	for i := range data.Hosts {
-		for j := range data.Hosts[i].Subsystems {
-			if data.Hosts[i].Subsystems[j].ID == id {
-				if !domain.ValidResourceType(input.Type) || input.Type == domain.ResourceHost {
-					return fmt.Errorf("invalid subsystem type %q", input.Type)
-				}
-				data.Hosts[i].Subsystems[j].Type = input.Type
-				data.Hosts[i].Subsystems[j].Hostname = strings.TrimSpace(input.Hostname)
-				data.Hosts[i].Subsystems[j].IP = strings.TrimSpace(input.IP)
-				data.Hosts[i].Subsystems[j].Port = input.Port
-				data.Hosts[i].Subsystems[j].User = strings.TrimSpace(input.User)
-				return s.store.Save(data)
-			}
+	if subsystem := findSubsystemByID(data.Hosts, id); subsystem != nil {
+		if !domain.ValidResourceType(input.Type) || input.Type == domain.ResourceHost {
+			return fmt.Errorf("invalid subsystem type %q", input.Type)
 		}
+		subsystem.Type = input.Type
+		subsystem.Hostname = strings.TrimSpace(input.Hostname)
+		subsystem.IP = strings.TrimSpace(input.IP)
+		subsystem.Port = input.Port
+		subsystem.User = strings.TrimSpace(input.User)
+		return s.store.Save(data)
 	}
 
 	return fmt.Errorf("resource %q not found", id)
@@ -165,12 +158,8 @@ func (s *Service) DeleteResource(id string) error {
 	}
 
 	for i := range data.Hosts {
-		subsystems := data.Hosts[i].Subsystems
-		for j := range subsystems {
-			if subsystems[j].ID == id {
-				data.Hosts[i].Subsystems = append(subsystems[:j], subsystems[j+1:]...)
-				return s.store.Save(data)
-			}
+		if deleteSubsystemByID(&data.Hosts[i].Subsystems, id) {
+			return s.store.Save(data)
 		}
 	}
 
@@ -200,16 +189,71 @@ func (s *Service) SetResourceAuth(id string, auth domain.Auth) error {
 		}
 	}
 
-	for i := range data.Hosts {
-		for j := range data.Hosts[i].Subsystems {
-			if data.Hosts[i].Subsystems[j].ID == id {
-				data.Hosts[i].Subsystems[j].Auth = &normalized
-				return s.store.Save(data)
-			}
-		}
+	if subsystem := findSubsystemByID(data.Hosts, id); subsystem != nil {
+		subsystem.Auth = &normalized
+		return s.store.Save(data)
 	}
 
 	return fmt.Errorf("resource %q not found", id)
+}
+
+func findSubsystemParent(hosts []domain.Host, parentID string) (*[]domain.Endpoint, []int) {
+	for i := range hosts {
+		if hosts[i].ID == parentID {
+			return &hosts[i].Subsystems, []int{i}
+		}
+		if parent, parts := findSubsystemParentInEndpoints(hosts[i].Subsystems, parentID, []int{i}); parent != nil {
+			return parent, parts
+		}
+	}
+	return nil, nil
+}
+
+func findSubsystemParentInEndpoints(subsystems []domain.Endpoint, parentID string, parts []int) (*[]domain.Endpoint, []int) {
+	for i := range subsystems {
+		currentParts := append(append([]int{}, parts...), i)
+		if subsystems[i].ID == parentID {
+			return &subsystems[i].Subsystems, currentParts
+		}
+		if parent, childParts := findSubsystemParentInEndpoints(subsystems[i].Subsystems, parentID, currentParts); parent != nil {
+			return parent, childParts
+		}
+	}
+	return nil, nil
+}
+
+func findSubsystemByID(hosts []domain.Host, id string) *domain.Endpoint {
+	for i := range hosts {
+		if subsystem := findSubsystemInEndpoints(hosts[i].Subsystems, id); subsystem != nil {
+			return subsystem
+		}
+	}
+	return nil
+}
+
+func findSubsystemInEndpoints(subsystems []domain.Endpoint, id string) *domain.Endpoint {
+	for i := range subsystems {
+		if subsystems[i].ID == id {
+			return &subsystems[i]
+		}
+		if subsystem := findSubsystemInEndpoints(subsystems[i].Subsystems, id); subsystem != nil {
+			return subsystem
+		}
+	}
+	return nil
+}
+
+func deleteSubsystemByID(subsystems *[]domain.Endpoint, id string) bool {
+	for i := range *subsystems {
+		if (*subsystems)[i].ID == id {
+			*subsystems = append((*subsystems)[:i], (*subsystems)[i+1:]...)
+			return true
+		}
+		if deleteSubsystemByID(&(*subsystems)[i].Subsystems, id) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeAuth(auth domain.Auth) (domain.Auth, error) {

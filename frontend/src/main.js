@@ -343,7 +343,7 @@ document.querySelector('#open-tunnel-panel').addEventListener('click', () => ope
 document.querySelector('#edit-resource').addEventListener('click', () => openEditPanel());
 document.querySelector('#header-add-subsystem').addEventListener('click', () => {
   const selected = findResource(state.selectedId);
-  if (selected?.type === 'host') openResourcePanel('subsystem', selected.resource.id);
+  if (selected) openResourcePanel('subsystem', selected.resource.id);
 });
 document.querySelector('#connect').addEventListener('click', () => openConnectPanel());
 document.querySelector('#disconnect').addEventListener('click', () => disconnectActiveSession());
@@ -592,16 +592,20 @@ async function deleteSelectedResource() {
 
 function resourceIDsForSelection(selected) {
   const ids = [selected.resource.id];
-  if (selected.type === 'host') {
-    for (const subsystem of selected.resource.subsystems ?? []) {
-      ids.push(subsystem.id);
-    }
+  ids.push(...nestedResourceIDs(selected.resource.subsystems ?? []));
+  return ids;
+}
+
+function nestedResourceIDs(subsystems) {
+  const ids = [];
+  for (const subsystem of subsystems ?? []) {
+    ids.push(subsystem.id, ...nestedResourceIDs(subsystem.subsystems ?? []));
   }
   return ids;
 }
 
 function confirmDeleteResource(selected) {
-  const subsystemCount = selected.type === 'host' ? (selected.resource.subsystems ?? []).length : 0;
+  const subsystemCount = nestedResourceIDs(selected.resource.subsystems ?? []).length;
   const extra = subsystemCount > 0
     ? `\n\nThis will also delete ${subsystemCount} subsystem${subsystemCount === 1 ? '' : 's'}.`
     : '';
@@ -709,20 +713,26 @@ function renderHosts(filter = '') {
   const rows = [];
 
   for (const host of state.hosts) {
-    rows.push(resourceRow(host, 'host'));
-    for (const subsystem of host.subsystems ?? []) {
-      rows.push(resourceRow(subsystem, subsystem.type, true));
-    }
+    rows.push(...resourceRows(host, 'host', 0));
   }
 
   const visibleRows = rows.filter((row) => row.search.includes(query));
   container.replaceChildren(...visibleRows.map((row) => row.element));
 }
 
-function resourceRow(resource, type, child = false) {
+function resourceRows(resource, type, depth) {
+  const rows = [resourceRow(resource, type, depth)];
+  for (const subsystem of resource.subsystems ?? []) {
+    rows.push(...resourceRows(subsystem, subsystem.type, depth + 1));
+  }
+  return rows;
+}
+
+function resourceRow(resource, type, depth = 0) {
   const row = document.createElement('div');
-  row.className = `host-row ${child ? 'child' : ''}`;
+  row.className = `host-row ${depth > 0 ? 'child' : ''}`;
   row.dataset.id = resource.id;
+  row.style.setProperty('--tree-offset', `${depth * 18}px`);
   const target = `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`;
   const tooltip = `${resource.hostname} - ${target}`;
 
@@ -987,7 +997,6 @@ function openResourcePanel(mode, hostID = '') {
   form.reset();
   form.elements.port.value = '22';
 
-  const host = state.hosts.find((candidate) => candidate.id === hostID);
   const subsystemMode = mode === 'subsystem';
   typeField.hidden = !subsystemMode;
   parentSummary.hidden = !subsystemMode;
@@ -995,7 +1004,8 @@ function openResourcePanel(mode, hostID = '') {
     kicker.textContent = 'Subsystem';
     title.textContent = 'Add Subsystem';
     submit.textContent = 'Add Subsystem';
-    parentSummary.textContent = host ? `Parent host: ${host.hostname} (${host.user}@${host.ip || host.hostname})` : '';
+    const parent = findResource(hostID)?.resource;
+    parentSummary.textContent = parent ? `Parent: ${parent.hostname} (${parent.user}@${parent.ip || parent.hostname})` : '';
   } else {
     kicker.textContent = 'Host';
     title.textContent = 'Add Host';
@@ -1039,7 +1049,7 @@ function openEditPanel() {
     title.textContent = 'Edit Subsystem';
     submit.textContent = 'Save Changes';
     parentSummary.textContent = selected.parent
-      ? `Parent host: ${selected.parent.hostname} (${selected.parent.user}@${selected.parent.ip || selected.parent.hostname})`
+      ? `Parent: ${selected.parent.hostname} (${selected.parent.user}@${selected.parent.ip || selected.parent.hostname})`
       : '';
   } else {
     kicker.textContent = 'Host';
@@ -1219,7 +1229,7 @@ function renderSelection() {
   if (!selected) {
     edit.disabled = true;
     addSubsystem.disabled = true;
-    addSubsystem.hidden = true;
+    addSubsystem.hidden = false;
     keys.disabled = true;
     tunnel.disabled = true;
     connect.disabled = true;
@@ -1228,9 +1238,9 @@ function renderSelection() {
     return;
   }
 
-  addSubsystem.hidden = selected.type !== 'host';
+  addSubsystem.hidden = false;
   edit.disabled = state.busy || !selected;
-  addSubsystem.disabled = state.busy || selected.type !== 'host';
+  addSubsystem.disabled = state.busy || !selected;
   keys.disabled = state.busy || !selected;
   tunnel.disabled = state.busy || !selected;
   connect.disabled = state.busy || !selected;
@@ -1333,8 +1343,18 @@ function tunnelLabel(type) {
 function findResource(id) {
   for (const host of state.hosts) {
     if (host.id === id) return { type: 'host', resource: host, parent: null };
-    for (const subsystem of host.subsystems ?? []) {
-      if (subsystem.id === id) return { type: subsystem.type, resource: subsystem, parent: host };
+    const found = findNestedResource(host.subsystems ?? [], id, host);
+    if (found) return found;
+  }
+  return null;
+}
+
+function findNestedResource(subsystems, id, parent) {
+  for (const subsystem of subsystems ?? []) {
+    if (subsystem.id === id) return { type: subsystem.type, resource: subsystem, parent };
+    const found = findNestedResource(subsystem.subsystems ?? [], id, subsystem);
+    if (found) {
+      return found;
     }
   }
   return null;
@@ -1516,10 +1536,11 @@ async function apiAddHost(input) {
 async function apiAddSubsystem(hostID, input) {
   const api = wailsAPI();
   if (api?.AddSubsystem) return await api.AddSubsystem(hostID, input);
-  const host = demoStore.hosts.find((candidate) => candidate.id === hostID);
-  if (!host) throw new Error(`Host ${hostID} not found`);
-  const subsystem = { id: `${input.type}-${Date.now()}`, type: input.type, hostname: input.hostname, ip: input.ip, port: input.port, user: input.user };
-  host.subsystems.push(subsystem);
+  const parent = findDemoResource(hostID);
+  if (!parent) throw new Error(`Resource ${hostID} not found`);
+  if (!parent.subsystems) parent.subsystems = [];
+  const subsystem = { id: `${input.type}-${Date.now()}`, type: input.type, hostname: input.hostname, ip: input.ip, port: input.port, user: input.user, subsystems: [] };
+  parent.subsystems.push(subsystem);
   return clone(subsystem);
 }
 
@@ -1534,13 +1555,13 @@ async function apiUpdateResource(id, input) {
       host.user = input.user;
       return;
     }
-    const subsystem = host.subsystems.find((candidate) => candidate.id === id);
-    if (subsystem) {
-      subsystem.type = input.type;
-      subsystem.hostname = input.hostname;
-      subsystem.ip = input.ip;
-      subsystem.port = input.port;
-      subsystem.user = input.user;
+    const resource = findDemoNestedResource(host.subsystems ?? [], id);
+    if (resource) {
+      resource.type = input.type;
+      resource.hostname = input.hostname;
+      resource.ip = input.ip;
+      resource.port = input.port;
+      resource.user = input.user;
       return;
     }
   }
@@ -1556,13 +1577,42 @@ async function apiDeleteResource(id) {
     return;
   }
   for (const host of demoStore.hosts) {
-    const index = host.subsystems.findIndex((subsystem) => subsystem.id === id);
-    if (index >= 0) {
-      host.subsystems.splice(index, 1);
+    if (deleteDemoNestedResource(host.subsystems ?? [], id)) {
       return;
     }
   }
   throw new Error(`Resource ${id} not found`);
+}
+
+function findDemoResource(id) {
+  for (const host of demoStore.hosts) {
+    if (host.id === id) return host;
+    const subsystem = findDemoNestedResource(host.subsystems ?? [], id);
+    if (subsystem) return subsystem;
+  }
+  return null;
+}
+
+function findDemoNestedResource(subsystems, id) {
+  for (const subsystem of subsystems ?? []) {
+    if (subsystem.id === id) return subsystem;
+    const child = findDemoNestedResource(subsystem.subsystems ?? [], id);
+    if (child) return child;
+  }
+  return null;
+}
+
+function deleteDemoNestedResource(subsystems, id) {
+  for (let index = 0; index < subsystems.length; index += 1) {
+    if (subsystems[index].id === id) {
+      subsystems.splice(index, 1);
+      return true;
+    }
+    if (deleteDemoNestedResource(subsystems[index].subsystems ?? [], id)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 async function apiStartSSHSession(input) {

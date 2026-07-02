@@ -199,8 +199,8 @@ textarea {
 }
 
 .host-row.child {
-  margin-left: 18px;
-  width: calc(100% - 18px);
+  margin-left: var(--tree-offset, 18px);
+  width: calc(100% - var(--tree-offset, 18px));
   grid-template-columns: minmax(0, 1fr);
 }
 

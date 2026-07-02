@@ -583,13 +583,35 @@ func (a *App) resourceIDsForDelete(id string) ([]string, error) {
 	for _, host := range hosts {
 		if host.ID == id {
 			ids := []string{host.ID}
-			for _, subsystem := range host.Subsystems {
-				ids = append(ids, subsystem.ID)
-			}
+			ids = append(ids, nestedResourceIDs(host.Subsystems)...)
+			return ids, nil
+		}
+		if ids := nestedResourceIDsForDelete(host.Subsystems, id); len(ids) > 0 {
 			return ids, nil
 		}
 	}
 	return []string{id}, nil
+}
+
+func nestedResourceIDs(subsystems []domain.Endpoint) []string {
+	var ids []string
+	for _, subsystem := range subsystems {
+		ids = append(ids, subsystem.ID)
+		ids = append(ids, nestedResourceIDs(subsystem.Subsystems)...)
+	}
+	return ids
+}
+
+func nestedResourceIDsForDelete(subsystems []domain.Endpoint, id string) []string {
+	for _, subsystem := range subsystems {
+		if subsystem.ID == id {
+			return append([]string{subsystem.ID}, nestedResourceIDs(subsystem.Subsystems)...)
+		}
+		if ids := nestedResourceIDsForDelete(subsystem.Subsystems, id); len(ids) > 0 {
+			return ids
+		}
+	}
+	return nil
 }
 
 func (a *App) waitForShell(ctx context.Context, session *sshSession) {
@@ -653,14 +675,24 @@ func (a *App) resourceByID(id string) (domain.Endpoint, error) {
 				Auth:     host.Auth,
 			}, nil
 		}
-		for _, subsystem := range host.Subsystems {
-			if subsystem.ID == id {
-				return subsystem, nil
-			}
+		if subsystem, ok := nestedResourceByID(host.Subsystems, id); ok {
+			return subsystem, nil
 		}
 	}
 
 	return domain.Endpoint{}, fmt.Errorf("resource %q not found", id)
+}
+
+func nestedResourceByID(subsystems []domain.Endpoint, id string) (domain.Endpoint, bool) {
+	for _, subsystem := range subsystems {
+		if subsystem.ID == id {
+			return subsystem, true
+		}
+		if child, ok := nestedResourceByID(subsystem.Subsystems, id); ok {
+			return child, true
+		}
+	}
+	return domain.Endpoint{}, false
 }
 
 func (a *App) emit(name string, event SSHEvent) {

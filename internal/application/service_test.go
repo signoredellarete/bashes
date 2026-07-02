@@ -53,6 +53,55 @@ func TestServiceAddsHostAndSubsystem(t *testing.T) {
 	}
 }
 
+func TestServiceAddsNestedSubsystem(t *testing.T) {
+	store := newMemoryStore()
+	service := NewService(store)
+
+	host, err := service.AddHost(EndpointInput{
+		Hostname: "server-01",
+		IP:       "10.0.0.10",
+		Port:     22,
+		User:     "root",
+	})
+	if err != nil {
+		t.Fatalf("AddHost() error = %v", err)
+	}
+	vm, err := service.AddSubsystem(host.ID, EndpointInput{
+		Type:     domain.ResourceVM,
+		Hostname: "vm-app",
+		IP:       "10.0.0.30",
+		Port:     22,
+		User:     "ubuntu",
+	})
+	if err != nil {
+		t.Fatalf("AddSubsystem(vm) error = %v", err)
+	}
+	lxc, err := service.AddSubsystem(vm.ID, EndpointInput{
+		Type:     domain.ResourceLXC,
+		Hostname: "lxc-app",
+		IP:       "10.0.0.31",
+		Port:     22,
+		User:     "deploy",
+	})
+	if err != nil {
+		t.Fatalf("AddSubsystem(lxc) error = %v", err)
+	}
+
+	hosts, err := service.ListHosts()
+	if err != nil {
+		t.Fatalf("ListHosts() error = %v", err)
+	}
+	if len(hosts[0].Subsystems) != 1 {
+		t.Fatalf("Host subsystem length = %d, want 1", len(hosts[0].Subsystems))
+	}
+	if len(hosts[0].Subsystems[0].Subsystems) != 1 {
+		t.Fatalf("Nested subsystem length = %d, want 1", len(hosts[0].Subsystems[0].Subsystems))
+	}
+	if hosts[0].Subsystems[0].Subsystems[0].ID != lxc.ID {
+		t.Fatalf("Nested subsystem ID = %q, want %q", hosts[0].Subsystems[0].Subsystems[0].ID, lxc.ID)
+	}
+}
+
 func TestServiceRejectsInvalidSubsystemType(t *testing.T) {
 	store := newMemoryStore()
 	service := NewService(store)
@@ -186,6 +235,54 @@ func TestServiceUpdatesHostAndSubsystemByID(t *testing.T) {
 	}
 	if hosts[0].Subsystems[0].Type != domain.ResourceLXC || hosts[0].Subsystems[0].User != "deploy" {
 		t.Fatalf("Subsystem was not updated: %+v", hosts[0].Subsystems[0])
+	}
+}
+
+func TestServiceUpdatesDeletesAndSetsAuthOnNestedSubsystem(t *testing.T) {
+	store := newMemoryStore()
+	service := NewService(store)
+
+	host, err := service.AddHost(EndpointInput{Hostname: "host", IP: "10.0.0.1", Port: 22, User: "root"})
+	if err != nil {
+		t.Fatalf("AddHost() error = %v", err)
+	}
+	vm, err := service.AddSubsystem(host.ID, EndpointInput{Type: domain.ResourceVM, Hostname: "vm", IP: "10.0.0.2", Port: 22, User: "ubuntu"})
+	if err != nil {
+		t.Fatalf("AddSubsystem(vm) error = %v", err)
+	}
+	lxc, err := service.AddSubsystem(vm.ID, EndpointInput{Type: domain.ResourceLXC, Hostname: "lxc", IP: "10.0.0.3", Port: 22, User: "deploy"})
+	if err != nil {
+		t.Fatalf("AddSubsystem(lxc) error = %v", err)
+	}
+
+	if err := service.UpdateResource(lxc.ID, EndpointInput{Type: domain.ResourceDocker, Hostname: "docker", IP: "10.0.0.4", Port: 2222, User: "app"}); err != nil {
+		t.Fatalf("UpdateResource(nested) error = %v", err)
+	}
+	if err := service.SetResourceAuth(lxc.ID, domain.Auth{Method: domain.AuthMethodPath, PrivateKeyPath: " ~/.ssh/nested "}); err != nil {
+		t.Fatalf("SetResourceAuth(nested) error = %v", err)
+	}
+
+	hosts, err := service.ListHosts()
+	if err != nil {
+		t.Fatalf("ListHosts() error = %v", err)
+	}
+	nested := hosts[0].Subsystems[0].Subsystems[0]
+	if nested.Type != domain.ResourceDocker || nested.Hostname != "docker" || nested.Port != 2222 {
+		t.Fatalf("Nested subsystem was not updated: %+v", nested)
+	}
+	if nested.Auth == nil || nested.Auth.PrivateKeyPath != "~/.ssh/nested" {
+		t.Fatalf("Nested auth was not saved: %+v", nested.Auth)
+	}
+
+	if err := service.DeleteResource(vm.ID); err != nil {
+		t.Fatalf("DeleteResource(parent subsystem) error = %v", err)
+	}
+	hosts, err = service.ListHosts()
+	if err != nil {
+		t.Fatalf("ListHosts() error = %v", err)
+	}
+	if len(hosts[0].Subsystems) != 0 {
+		t.Fatalf("Host subsystem length after deleting parent = %d, want 0", len(hosts[0].Subsystems))
 	}
 }
 

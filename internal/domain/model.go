@@ -38,13 +38,14 @@ type Host struct {
 }
 
 type Endpoint struct {
-	ID       string       `json:"id"`
-	Type     ResourceType `json:"type"`
-	Hostname string       `json:"hostname"`
-	IP       string       `json:"ip"`
-	Port     int          `json:"port"`
-	User     string       `json:"user"`
-	Auth     *Auth        `json:"auth,omitempty"`
+	ID         string       `json:"id"`
+	Type       ResourceType `json:"type"`
+	Hostname   string       `json:"hostname"`
+	IP         string       `json:"ip"`
+	Port       int          `json:"port"`
+	User       string       `json:"user"`
+	Auth       *Auth        `json:"auth,omitempty"`
+	Subsystems []Endpoint   `json:"subsystems,omitempty"`
 }
 
 type AuthMethod string
@@ -85,23 +86,36 @@ func (s Store) Validate() error {
 		}
 		seen[host.ID] = struct{}{}
 
-		for j, sub := range host.Subsystems {
-			if !ValidResourceType(sub.Type) || sub.Type == ResourceHost {
-				return fmt.Errorf("hosts[%d].subsystems[%d]: invalid type %q", i, j, sub.Type)
+		for j := range host.Subsystems {
+			if err := validateSubsystem(host.Subsystems[j], fmt.Sprintf("hosts[%d].subsystems[%d]", i, j), seen); err != nil {
+				return err
 			}
-			if err := validateEndpointFields(string(sub.Type), sub.ID, sub.Hostname, sub.IP, sub.Port, sub.User); err != nil {
-				return fmt.Errorf("hosts[%d].subsystems[%d]: %w", i, j, err)
-			}
-			if err := validateAuth(sub.Auth); err != nil {
-				return fmt.Errorf("hosts[%d].subsystems[%d].auth: %w", i, j, err)
-			}
-			if _, exists := seen[sub.ID]; exists {
-				return fmt.Errorf("hosts[%d].subsystems[%d]: duplicate id %q", i, j, sub.ID)
-			}
-			seen[sub.ID] = struct{}{}
 		}
 	}
 
+	return nil
+}
+
+func validateSubsystem(sub Endpoint, path string, seen map[string]struct{}) error {
+	if !ValidResourceType(sub.Type) || sub.Type == ResourceHost {
+		return fmt.Errorf("%s: invalid type %q", path, sub.Type)
+	}
+	if err := validateEndpointFields(string(sub.Type), sub.ID, sub.Hostname, sub.IP, sub.Port, sub.User); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	if err := validateAuth(sub.Auth); err != nil {
+		return fmt.Errorf("%s.auth: %w", path, err)
+	}
+	if _, exists := seen[sub.ID]; exists {
+		return fmt.Errorf("%s: duplicate id %q", path, sub.ID)
+	}
+	seen[sub.ID] = struct{}{}
+
+	for i := range sub.Subsystems {
+		if err := validateSubsystem(sub.Subsystems[i], fmt.Sprintf("%s.subsystems[%d]", path, i), seen); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -131,14 +145,23 @@ func NormalizeStore(store Store) Store {
 			host.Subsystems = []Endpoint{}
 		}
 		for j := range host.Subsystems {
-			sub := &host.Subsystems[j]
-			if sub.ID == "" {
-				sub.ID = StableID(sub.Type, sub.Hostname, sub.IP, sub.Port, sub.User, i, j)
-			}
+			normalizeSubsystem(&host.Subsystems[j], i, j)
 		}
 	}
 
 	return store
+}
+
+func normalizeSubsystem(sub *Endpoint, parts ...int) {
+	if sub.ID == "" {
+		sub.ID = StableID(sub.Type, sub.Hostname, sub.IP, sub.Port, sub.User, parts...)
+	}
+	if sub.Subsystems == nil {
+		sub.Subsystems = []Endpoint{}
+	}
+	for i := range sub.Subsystems {
+		normalizeSubsystem(&sub.Subsystems[i], append(parts, i)...)
+	}
 }
 
 func ValidResourceType(kind ResourceType) bool {

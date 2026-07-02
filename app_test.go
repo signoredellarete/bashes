@@ -96,7 +96,7 @@ func TestNormalizeTunnelInputDefaultsToLocalSocks(t *testing.T) {
 
 func TestNormalizeTunnelInputAcceptsLocalAndRemoteForwarding(t *testing.T) {
 	tests := []struct {
-		name string
+		name  string
 		input SSHTunnelInput
 	}{
 		{
@@ -165,6 +165,38 @@ func TestResourceIDsForDeleteIncludesHostSubsystems(t *testing.T) {
 	}
 	if len(ids) != 2 || ids[0] != host.ID || ids[1] != subsystem.ID {
 		t.Fatalf("resourceIDsForDelete() = %v, want host and subsystem ids", ids)
+	}
+}
+
+func TestResourceIDsForDeleteIncludesNestedSubsystems(t *testing.T) {
+	app := NewApp(filepath.Join(t.TempDir(), "hosts.json"))
+	host, err := app.AddHost(applicationEndpoint("host", "10.0.0.1"))
+	if err != nil {
+		t.Fatalf("AddHost() error = %v", err)
+	}
+	vm, err := app.AddSubsystem(host.ID, applicationEndpoint("vm", "10.0.0.2"))
+	if err != nil {
+		t.Fatalf("AddSubsystem(vm) error = %v", err)
+	}
+	lxc, err := app.AddSubsystem(vm.ID, applicationEndpoint("lxc", "10.0.0.3"))
+	if err != nil {
+		t.Fatalf("AddSubsystem(lxc) error = %v", err)
+	}
+
+	ids, err := app.resourceIDsForDelete(host.ID)
+	if err != nil {
+		t.Fatalf("resourceIDsForDelete(host) error = %v", err)
+	}
+	if len(ids) != 3 || ids[0] != host.ID || ids[1] != vm.ID || ids[2] != lxc.ID {
+		t.Fatalf("resourceIDsForDelete(host) = %v, want host, vm and lxc ids", ids)
+	}
+
+	ids, err = app.resourceIDsForDelete(vm.ID)
+	if err != nil {
+		t.Fatalf("resourceIDsForDelete(vm) error = %v", err)
+	}
+	if len(ids) != 2 || ids[0] != vm.ID || ids[1] != lxc.ID {
+		t.Fatalf("resourceIDsForDelete(vm) = %v, want vm and lxc ids", ids)
 	}
 }
 
