@@ -33,6 +33,7 @@ const state = {
   drawerHostId: null,
   editResourceId: null,
   confirmResolver: null,
+  lastSessionByResource: new Map(),
   sessions: new Map(),
 };
 
@@ -451,13 +452,6 @@ async function submitConnect(event) {
   const selected = findResource(state.selectedId)?.resource;
   if (!selected) return;
 
-  const existing = sessionForResource(selected.id);
-  if (existing && !existing.pending) {
-    focusSession(existing.id);
-    closeConnectPanel();
-    return;
-  }
-
   const form = event.currentTarget;
   await withBusy(async () => {
     const target = `${selected.user}@${selected.ip || selected.hostname}:${selected.port}`;
@@ -674,6 +668,9 @@ async function disconnectActiveSession() {
 async function stopSession(sessionID) {
   const session = state.sessions.get(sessionID);
   state.sessions.delete(sessionID);
+  if (session && state.lastSessionByResource.get(session.resourceId) === sessionID) {
+    state.lastSessionByResource.delete(session.resourceId);
+  }
   if (session?.element) session.element.remove();
   if (!session?.pending) {
     await apiStopSSHSession(sessionID);
@@ -826,9 +823,9 @@ function hideSidebarTooltip() {
 
 function createPendingTab(resource) {
   clearPendingTabs(resource.id);
-  const existing = sessionForResource(resource.id);
+  const existing = pendingSessionForResource(resource.id);
   if (existing) {
-    setActiveSession(existing.id);
+    focusSession(existing.id);
     return existing.id;
   }
 
@@ -842,7 +839,7 @@ function createPendingTab(resource) {
   state.sessions.set(sessionID, {
     id: sessionID,
     resourceId: resource.id,
-    title: resource.hostname,
+    title: `${resource.hostname} new`,
     target: `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`,
     element: pane,
     pending: true,
@@ -863,24 +860,22 @@ function clearPendingTabs(exceptResourceId = '') {
 
 function selectResource(resource) {
   state.selectedId = resource.id;
-  const session = sessionForResource(resource.id);
+  const session = preferredSessionForResource(resource.id);
   if (session) {
     if (!session.pending) clearPendingTabs(resource.id);
-    setActiveSession(session.id);
+    focusSession(session.id);
   } else {
     createPendingTab(resource);
   }
-  renderTabs();
-  renderSelection();
-  scheduleTerminalFit();
 }
 
 function createSession(sessionID, resource) {
-  const pending = sessionForResource(resource.id);
+  const pending = pendingSessionForResource(resource.id);
   if (pending?.pending) {
     pending.element.remove();
     state.sessions.delete(pending.id);
   }
+  const ordinal = realSessionsForResource(resource.id).length + 1;
 
   const pane = document.createElement('section');
   pane.className = 'terminal-pane';
@@ -924,7 +919,8 @@ function createSession(sessionID, resource) {
   state.sessions.set(sessionID, {
     id: sessionID,
     resourceId: resource.id,
-    title: resource.hostname,
+    title: sessionTitle(resource.hostname, ordinal),
+    ordinal,
     target: `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`,
     terminal,
     fitAddon,
@@ -1083,8 +1079,10 @@ async function openConnectPanel() {
   form.elements.trustHostKey.checked = true;
   renderKeyOptions(form.elements.keyName, true);
   applyConnectDefaults(form, selected);
+  const realSessionCount = realSessionsForResource(selected.id).length;
   document.querySelector('#connect-summary').textContent =
-    `${selected.user}@${selected.ip || selected.hostname}:${selected.port}`;
+    `${realSessionCount > 0 ? 'New session: ' : ''}${selected.user}@${selected.ip || selected.hostname}:${selected.port}`;
+  form.querySelector('button[type="submit"]').textContent = realSessionCount > 0 ? 'New Session' : 'Connect';
   panel.hidden = false;
   requestAnimationFrame(() => panel.classList.add('open'));
   form.elements.password.focus();
@@ -1243,6 +1241,7 @@ function renderSelection() {
   addSubsystem.disabled = state.busy || !selected;
   keys.disabled = state.busy || !selected;
   tunnel.disabled = state.busy || !selected;
+  connect.textContent = realSessionsForResource(selected.resource.id).length > 0 ? 'New Session' : 'Connect';
   connect.disabled = state.busy || !selected;
   disconnect.disabled = state.busy || !activeSession;
   remove.disabled = state.busy || !selected;
@@ -1361,11 +1360,37 @@ function findNestedResource(subsystems, id, parent) {
 }
 
 function sessionForResource(resourceId) {
-  return [...state.sessions.values()].find((session) => session.resourceId === resourceId && !session.closed);
+  return preferredSessionForResource(resourceId);
 }
 
 function sessionsForResource(resourceId) {
   return [...state.sessions.values()].filter((session) => session.resourceId === resourceId);
+}
+
+function realSessionsForResource(resourceId) {
+  return sessionsForResource(resourceId).filter((session) => !session.closed && !session.pending);
+}
+
+function pendingSessionForResource(resourceId) {
+  return sessionsForResource(resourceId).find((session) => !session.closed && session.pending);
+}
+
+function preferredSessionForResource(resourceId) {
+  const lastSessionID = state.lastSessionByResource.get(resourceId);
+  const lastSession = lastSessionID ? state.sessions.get(lastSessionID) : null;
+  if (lastSession && !lastSession.closed && !lastSession.pending) {
+    return lastSession;
+  }
+
+  const realSessions = realSessionsForResource(resourceId);
+  if (realSessions.length > 0) {
+    return realSessions[realSessions.length - 1];
+  }
+  return pendingSessionForResource(resourceId);
+}
+
+function sessionTitle(hostname, ordinal) {
+  return ordinal > 1 ? `${hostname} #${ordinal}` : hostname;
 }
 
 function tunnelForResource(resourceId) {
@@ -1389,7 +1414,12 @@ function focusSession(sessionID) {
 function setActiveSession(sessionID) {
   const session = sessionID ? state.sessions.get(sessionID) : null;
   state.activeSessionId = session?.id ?? null;
-  if (session) state.selectedId = session.resourceId;
+  if (session) {
+    state.selectedId = session.resourceId;
+    if (!session.pending && !session.closed) {
+      state.lastSessionByResource.set(session.resourceId, session.id);
+    }
+  }
   return session;
 }
 

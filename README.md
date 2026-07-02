@@ -12,7 +12,7 @@ The app is built with Wails, Go and a Vite frontend. The terminal surface uses `
 - Subsystems attached to a host, with VM, LXC and Docker resource types.
 - Fast searchable sidebar for hosts and subsystems.
 - Contextual actions for the selected resource: edit, add subsystem, key management, delete and connect.
-- Tabbed terminal area for multiple SSH sessions.
+- Tabbed terminal area for multiple SSH sessions, including multiple sessions to the same resource.
 - Temporary tabs when selecting a resource before connecting.
 - Double-click a host or subsystem card to start an SSH connection.
 - Terminal text selection copies to the clipboard.
