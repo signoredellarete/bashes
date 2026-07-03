@@ -241,12 +241,23 @@ textarea {
   min-width: 0;
 }
 
+.resource-name-line {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+}
+
 .details strong,
 .details small {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.details strong {
+  min-width: 0;
 }
 
 .details strong {
@@ -257,6 +268,26 @@ textarea {
   margin-top: 3px;
   color: #66717f;
   font-size: 11px;
+}
+
+.smart-chip {
+  display: inline-grid;
+  flex: 0 0 auto;
+  min-width: 0;
+  place-items: center;
+  border-radius: 999px;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.tunnel-chip {
+  border: 1px solid #87c79b;
+  background: #e6f7eb;
+  color: #1f7a3a;
+  padding: 2px 4px;
 }
 
 #app.sidebar-collapsed .sidebar {
@@ -354,6 +385,24 @@ textarea {
 
 #app.sidebar-collapsed .details {
   display: none;
+}
+
+#app.sidebar-collapsed .host-select.tunnel-active::after {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid #87c79b;
+  border-radius: 999px;
+  background: #e6f7eb;
+  color: #1f7a3a;
+  content: "tun";
+  padding: 2px 3px;
+  font-size: 7px;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
 }
 
 .sidebar-tooltip {

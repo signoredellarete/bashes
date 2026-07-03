@@ -441,13 +441,10 @@ jobs:
           fi
 
           {
-            printf '%s\n\n' "$GITHUB_REF_NAME"
-            printf '%s\n' "Builds:"
-            printf '%s\n' "- Linux amd64: bashes-linux-amd64.tar.gz"
-            printf '%s\n' "- Linux arm64: bashes-linux-arm64.tar.gz (when available)"
-            printf '%s\n' "- macOS universal: bashes-darwin-universal.zip"
-            printf '%s\n' "- Windows amd64: bashes-windows-amd64.zip"
-            printf '%s\n' "- Windows arm64: bashes-windows-arm64.zip"
+            printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
+            printf '## RELEASE NOTE\n\n'
+            printf 'Maintenance release with the latest fixes and refinements.\n\n'
+            printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
 
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then

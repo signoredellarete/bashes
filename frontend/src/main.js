@@ -442,6 +442,7 @@ async function loadKeys() {
 async function loadTunnels() {
   const tunnels = await apiListSSHTunnels();
   state.tunnels = new Map(tunnels.map((tunnel) => [tunnel.tunnelId, tunnel]));
+  renderHosts(searchInput.value);
 }
 
 async function submitResource(event) {
@@ -527,6 +528,7 @@ async function submitTunnel(event) {
       trustHostKey: form.elements.trustHostKey.checked,
     });
     state.tunnels.set(tunnel.tunnelId, tunnel);
+    renderHosts(searchInput.value);
     renderTunnelStatus();
     writeNotice(`${tunnelLabel(tunnel.type)} active on ${tunnel.localAddress}.`);
   });
@@ -684,6 +686,7 @@ async function stopSelectedTunnel() {
 async function stopTunnel(tunnelID) {
   await apiStopSSHTunnel(tunnelID);
   state.tunnels.delete(tunnelID);
+  renderHosts(searchInput.value);
 }
 
 async function disconnectActiveSession() {
@@ -765,20 +768,31 @@ function resourceRow(resource, type, depth = 0) {
   row.style.setProperty('--tree-offset', `${depth * 18}px`);
   const target = `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`;
   const tooltip = `${resource.hostname} - ${target}`;
+  const tunnel = tunnelForResource(resource.id);
 
   const selectButton = document.createElement('button');
   selectButton.type = 'button';
   selectButton.className = 'host-select';
+  if (tunnel) selectButton.classList.add('tunnel-active');
   selectButton.title = tooltip;
   selectButton.dataset.tooltip = tooltip;
   selectButton.innerHTML = `
     <span class="type"></span>
     <span class="compact-name" aria-hidden="true"></span>
     <span class="details">
-      <strong></strong>
+      <span class="resource-name-line">
+        <strong></strong>
+      </span>
       <small></small>
     </span>
   `;
+  if (tunnel) {
+    const chip = document.createElement('span');
+    chip.className = 'smart-chip tunnel-chip';
+    chip.textContent = 'tun';
+    chip.title = tunnelLabel(tunnel.type);
+    selectButton.querySelector('.resource-name-line').append(chip);
+  }
   selectButton.querySelector('.type').textContent = type;
   selectButton.querySelector('.compact-name').textContent = compactResourceName(resource.hostname);
   selectButton.querySelector('strong').textContent = resource.hostname;
