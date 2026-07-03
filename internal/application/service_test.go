@@ -286,6 +286,75 @@ func TestServiceUpdatesDeletesAndSetsAuthOnNestedSubsystem(t *testing.T) {
 	}
 }
 
+func TestServiceReordersHostBlocks(t *testing.T) {
+	store := newMemoryStore()
+	service := NewService(store)
+
+	hostA, err := service.AddHost(EndpointInput{Hostname: "host-a", IP: "10.0.0.1", Port: 22, User: "root"})
+	if err != nil {
+		t.Fatalf("AddHost(host-a) error = %v", err)
+	}
+	subA, err := service.AddSubsystem(hostA.ID, EndpointInput{Type: domain.ResourceVM, Hostname: "vm-a", IP: "10.0.0.11", Port: 22, User: "ubuntu"})
+	if err != nil {
+		t.Fatalf("AddSubsystem(host-a) error = %v", err)
+	}
+	hostB, err := service.AddHost(EndpointInput{Hostname: "host-b", IP: "10.0.0.2", Port: 22, User: "root"})
+	if err != nil {
+		t.Fatalf("AddHost(host-b) error = %v", err)
+	}
+	hostC, err := service.AddHost(EndpointInput{Hostname: "host-c", IP: "10.0.0.3", Port: 22, User: "root"})
+	if err != nil {
+		t.Fatalf("AddHost(host-c) error = %v", err)
+	}
+
+	if err := service.ReorderHosts([]string{hostC.ID, hostA.ID, hostB.ID}); err != nil {
+		t.Fatalf("ReorderHosts() error = %v", err)
+	}
+
+	hosts, err := service.ListHosts()
+	if err != nil {
+		t.Fatalf("ListHosts() error = %v", err)
+	}
+	if got := []string{hosts[0].ID, hosts[1].ID, hosts[2].ID}; got[0] != hostC.ID || got[1] != hostA.ID || got[2] != hostB.ID {
+		t.Fatalf("Host order = %v, want [%s %s %s]", got, hostC.ID, hostA.ID, hostB.ID)
+	}
+	if len(hosts[1].Subsystems) != 1 || hosts[1].Subsystems[0].ID != subA.ID {
+		t.Fatalf("Subsystem block was not preserved: %+v", hosts[1].Subsystems)
+	}
+}
+
+func TestServiceRejectsInvalidHostOrder(t *testing.T) {
+	store := newMemoryStore()
+	service := NewService(store)
+
+	hostA, err := service.AddHost(EndpointInput{Hostname: "host-a", IP: "10.0.0.1", Port: 22, User: "root"})
+	if err != nil {
+		t.Fatalf("AddHost(host-a) error = %v", err)
+	}
+	hostB, err := service.AddHost(EndpointInput{Hostname: "host-b", IP: "10.0.0.2", Port: 22, User: "root"})
+	if err != nil {
+		t.Fatalf("AddHost(host-b) error = %v", err)
+	}
+
+	if err := service.ReorderHosts([]string{hostA.ID}); err == nil {
+		t.Fatal("ReorderHosts(short order) error = nil, want error")
+	}
+	if err := service.ReorderHosts([]string{hostA.ID, hostA.ID}); err == nil {
+		t.Fatal("ReorderHosts(duplicate) error = nil, want error")
+	}
+	if err := service.ReorderHosts([]string{hostA.ID, "missing-host"}); err == nil {
+		t.Fatal("ReorderHosts(missing host) error = nil, want error")
+	}
+
+	hosts, err := service.ListHosts()
+	if err != nil {
+		t.Fatalf("ListHosts() error = %v", err)
+	}
+	if hosts[0].ID != hostA.ID || hosts[1].ID != hostB.ID {
+		t.Fatalf("Host order changed after invalid reorder: %+v", hosts)
+	}
+}
+
 func TestServiceSetsResourceAuth(t *testing.T) {
 	store := newMemoryStore()
 	service := NewService(store)

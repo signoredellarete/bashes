@@ -166,6 +166,39 @@ func (s *Service) DeleteResource(id string) error {
 	return fmt.Errorf("resource %q not found", id)
 }
 
+func (s *Service) ReorderHosts(order []string) error {
+	data, err := s.store.Load()
+	if err != nil {
+		return err
+	}
+	if len(order) != len(data.Hosts) {
+		return fmt.Errorf("host order length = %d, want %d", len(order), len(data.Hosts))
+	}
+
+	byID := make(map[string]domain.Host, len(data.Hosts))
+	for _, host := range data.Hosts {
+		byID[host.ID] = host
+	}
+
+	reordered := make([]domain.Host, 0, len(data.Hosts))
+	seen := make(map[string]struct{}, len(order))
+	for _, id := range order {
+		id = strings.TrimSpace(id)
+		host, ok := byID[id]
+		if !ok {
+			return fmt.Errorf("host %q not found", id)
+		}
+		if _, exists := seen[id]; exists {
+			return fmt.Errorf("duplicate host %q in order", id)
+		}
+		seen[id] = struct{}{}
+		reordered = append(reordered, host)
+	}
+
+	data.Hosts = reordered
+	return s.store.Save(data)
+}
+
 func (s *Service) SetResourceAuth(id string, auth domain.Auth) error {
 	id = strings.TrimSpace(id)
 	if id == "" {

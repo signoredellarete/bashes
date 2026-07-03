@@ -209,6 +209,26 @@ textarea {
   box-shadow: inset 3px 0 0 #2f6f73;
 }
 
+.host-row.dragging-block .host-select {
+  opacity: 0.52;
+}
+
+.host-row.drop-before .host-select {
+  box-shadow: 0 -2px 0 #2f6f73;
+}
+
+.host-row.drop-after .host-select {
+  box-shadow: 0 2px 0 #2f6f73;
+}
+
+.host-row.selected.drop-before .host-select {
+  box-shadow: inset 3px 0 0 #2f6f73, 0 -2px 0 #2f6f73;
+}
+
+.host-row.selected.drop-after .host-select {
+  box-shadow: inset 3px 0 0 #2f6f73, 0 2px 0 #2f6f73;
+}
+
 .row-action {
   display: grid;
   width: 34px;

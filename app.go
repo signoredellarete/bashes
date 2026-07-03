@@ -107,6 +107,10 @@ func (a *App) UpdateResource(id string, input application.EndpointInput) error {
 	return a.service.UpdateResource(id, input)
 }
 
+func (a *App) ReorderHosts(order []string) error {
+	return a.service.ReorderHosts(order)
+}
+
 func (a *App) DeleteResource(id string) error {
 	resourceIDs, err := a.resourceIDsForDelete(id)
 	if err != nil {

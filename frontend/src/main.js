@@ -33,6 +33,7 @@ const state = {
   drawerHostId: null,
   editResourceId: null,
   confirmResolver: null,
+  draggedHostId: null,
   lastSessionByResource: new Map(),
   sessionFocusHistory: [],
   sessions: new Map(),
@@ -743,28 +744,30 @@ function scheduleHostRender() {
 function renderHosts(filter = '') {
   const container = document.querySelector('#hosts');
   const query = filter.trim().toLowerCase();
+  const canReorder = query === '';
   const rows = [];
 
   for (const host of state.hosts) {
-    rows.push(...resourceRows(host, 'host', 0));
+    rows.push(...resourceRows(host, 'host', 0, host.id, canReorder));
   }
 
   const visibleRows = rows.filter((row) => row.search.includes(query));
   container.replaceChildren(...visibleRows.map((row) => row.element));
 }
 
-function resourceRows(resource, type, depth) {
-  const rows = [resourceRow(resource, type, depth)];
+function resourceRows(resource, type, depth, rootHostId, canReorder) {
+  const rows = [resourceRow(resource, type, depth, rootHostId, canReorder)];
   for (const subsystem of resource.subsystems ?? []) {
-    rows.push(...resourceRows(subsystem, subsystem.type, depth + 1));
+    rows.push(...resourceRows(subsystem, subsystem.type, depth + 1, rootHostId, canReorder));
   }
   return rows;
 }
 
-function resourceRow(resource, type, depth = 0) {
+function resourceRow(resource, type, depth = 0, rootHostId = resource.id, canReorder = true) {
   const row = document.createElement('div');
   row.className = `host-row ${depth > 0 ? 'child' : ''}`;
   row.dataset.id = resource.id;
+  row.dataset.rootHostId = rootHostId;
   row.style.setProperty('--tree-offset', `${depth * 18}px`);
   const target = `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`;
   const tooltip = `${resource.hostname} - ${target}`;
@@ -774,6 +777,7 @@ function resourceRow(resource, type, depth = 0) {
   selectButton.type = 'button';
   selectButton.className = 'host-select';
   if (tunnel) selectButton.classList.add('tunnel-active');
+  selectButton.draggable = canReorder;
   selectButton.title = tooltip;
   selectButton.dataset.tooltip = tooltip;
   selectButton.innerHTML = `
@@ -814,12 +818,99 @@ function resourceRow(resource, type, depth = 0) {
   selectButton.addEventListener('focus', () => showSidebarTooltip(selectButton));
   selectButton.addEventListener('mouseleave', () => hideSidebarTooltip());
   selectButton.addEventListener('blur', () => hideSidebarTooltip());
+  if (canReorder) {
+    selectButton.addEventListener('dragstart', (event) => startHostDrag(event, rootHostId));
+    selectButton.addEventListener('dragend', () => endHostDrag());
+    selectButton.addEventListener('dragover', (event) => previewHostDrop(event, row));
+    selectButton.addEventListener('dragleave', () => clearHostDropPreview(row));
+    selectButton.addEventListener('drop', (event) => dropHostBlock(event, row));
+  }
   row.append(selectButton);
 
   return {
     element: row,
     search: `${resource.hostname} ${resource.ip} ${resource.user} ${type}`.toLowerCase(),
   };
+}
+
+function startHostDrag(event, rootHostId) {
+  state.draggedHostId = rootHostId;
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', rootHostId);
+  document.querySelectorAll(`.host-row[data-root-host-id="${cssEscape(rootHostId)}"]`).forEach((row) => {
+    row.classList.add('dragging-block');
+  });
+}
+
+function endHostDrag() {
+  state.draggedHostId = null;
+  document.querySelectorAll('.host-row.dragging-block, .host-row.drop-before, .host-row.drop-after').forEach((row) => {
+    row.classList.remove('dragging-block', 'drop-before', 'drop-after');
+  });
+}
+
+function previewHostDrop(event, row) {
+  if (!state.draggedHostId) return;
+  const targetHostId = row.dataset.rootHostId;
+  if (!targetHostId || targetHostId === state.draggedHostId) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'move';
+  showHostDropPreview(row, dropAfterRow(event, row));
+}
+
+function showHostDropPreview(row, after) {
+  document.querySelectorAll('.host-row.drop-before, .host-row.drop-after').forEach((element) => {
+    if (element !== row) element.classList.remove('drop-before', 'drop-after');
+  });
+  row.classList.toggle('drop-before', !after);
+  row.classList.toggle('drop-after', after);
+}
+
+function clearHostDropPreview(row) {
+  row.classList.remove('drop-before', 'drop-after');
+}
+
+async function dropHostBlock(event, row) {
+  if (!state.draggedHostId) return;
+  const targetHostId = row.dataset.rootHostId;
+  if (!targetHostId || targetHostId === state.draggedHostId) return;
+
+  event.preventDefault();
+  const after = dropAfterRow(event, row);
+  const order = movedHostOrder(state.draggedHostId, targetHostId, after);
+  endHostDrag();
+  if (!order) return;
+
+  await withBusy(async () => {
+    await apiReorderHosts(order);
+    state.hosts = order.map((id) => state.hosts.find((host) => host.id === id)).filter(Boolean);
+    renderHosts(searchInput.value);
+    renderSelection();
+    writeNotice('Host order updated.');
+  });
+}
+
+function dropAfterRow(event, row) {
+  const rect = row.getBoundingClientRect();
+  return event.clientY > rect.top + rect.height / 2;
+}
+
+function movedHostOrder(draggedHostId, targetHostId, after) {
+  const order = state.hosts.map((host) => host.id);
+  const from = order.indexOf(draggedHostId);
+  const target = order.indexOf(targetHostId);
+  if (from < 0 || target < 0) return null;
+
+  order.splice(from, 1);
+  let insertAt = order.indexOf(targetHostId);
+  if (insertAt < 0) return null;
+  if (after) insertAt += 1;
+  order.splice(insertAt, 0, draggedHostId);
+  return order;
+}
+
+function cssEscape(value) {
+  return globalThis.CSS?.escape ? CSS.escape(value) : String(value).replace(/"/g, '\\"');
 }
 
 function compactResourceName(name) {
@@ -1751,6 +1842,18 @@ async function apiUpdateResource(id, input) {
     }
   }
   throw new Error(`Resource ${id} not found`);
+}
+
+async function apiReorderHosts(order) {
+  const api = wailsAPI();
+  if (api?.ReorderHosts) return await api.ReorderHosts(order);
+  if (order.length !== demoStore.hosts.length) throw new Error('Invalid host order');
+  const byID = new Map(demoStore.hosts.map((host) => [host.id, host]));
+  demoStore.hosts = order.map((id) => {
+    const host = byID.get(id);
+    if (!host) throw new Error(`Host ${id} not found`);
+    return host;
+  });
 }
 
 async function apiDeleteResource(id) {
