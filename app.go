@@ -626,14 +626,19 @@ func (a *App) waitForShell(ctx context.Context, session *sshSession) {
 	}
 	a.mu.Unlock()
 
+	wasStopped := false
+	select {
+	case <-ctx.Done():
+		wasStopped = true
+	default:
+	}
+
 	session.cancel()
 	session.stdin.Close()
 	session.client.Close()
 
-	select {
-	case <-ctx.Done():
+	if wasStopped {
 		return
-	default:
 	}
 
 	if err != nil && !errors.Is(err, io.EOF) {
