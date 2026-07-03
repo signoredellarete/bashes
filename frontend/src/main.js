@@ -693,15 +693,21 @@ async function disconnectActiveSession() {
 
 async function stopSession(sessionID) {
   const session = state.sessions.get(sessionID);
+  removeSessionFromUI(sessionID);
+  if (session && !session.pending) {
+    await apiStopSSHSession(sessionID);
+  }
+}
+
+function removeSessionFromUI(sessionID) {
+  const session = state.sessions.get(sessionID);
   state.sessions.delete(sessionID);
   forgetSessionFocus(sessionID);
   if (session && state.lastSessionByResource.get(session.resourceId) === sessionID) {
     state.lastSessionByResource.delete(session.resourceId);
   }
+  if (session?.terminal) session.terminal.dispose();
   if (session?.element) session.element.remove();
-  if (!session?.pending) {
-    await apiStopSSHSession(sessionID);
-  }
   if (state.activeSessionId === sessionID) {
     setActiveSession(lastFocusedSessionID());
   }
@@ -1675,10 +1681,8 @@ function registerSSHEvents() {
   eventsOn('ssh:closed', (event) => {
     const session = state.sessions.get(event.sessionId);
     if (!session) return;
-    session.closed = true;
+    removeSessionFromUI(event.sessionId);
     if (event?.message) writeNotice(event.message);
-    renderTabs();
-    renderSelection();
   });
 }
 
