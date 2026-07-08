@@ -51,6 +51,9 @@ func applicationMenu(app *App) *menu.Menu {
 	tools.AddText("Import Database...", nil, func(_ *menu.CallbackData) {
 		app.importDatabaseFromMenu()
 	})
+	tools.AddText("Import from hosts file", nil, func(_ *menu.CallbackData) {
+		app.importHostsFileFromMenu()
+	})
 	tools.AddSeparator()
 	tools.AddText("Check for Updates", nil, func(_ *menu.CallbackData) {
 		app.checkForUpdatesFromMenu()

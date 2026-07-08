@@ -255,6 +255,48 @@ func TestDataDirForOSUsesPlatformConventions(t *testing.T) {
 	}
 }
 
+func TestHostsFilePathForOS(t *testing.T) {
+	env := func(values map[string]string) func(string) string {
+		return func(name string) string {
+			return values[name]
+		}
+	}
+
+	if got := hostsFilePathForOS("linux", env(nil)); got != "/etc/hosts" {
+		t.Fatalf("linux hosts path = %q, want /etc/hosts", got)
+	}
+	if got := hostsFilePathForOS("darwin", env(nil)); got != "/etc/hosts" {
+		t.Fatalf("darwin hosts path = %q, want /etc/hosts", got)
+	}
+	got := hostsFilePathForOS("windows", env(map[string]string{"SystemRoot": `C:\Windows`}))
+	want := filepath.Join(`C:\Windows`, "System32", "drivers", "etc", "hosts")
+	if got != want {
+		t.Fatalf("windows hosts path = %q, want %q", got, want)
+	}
+}
+
+func TestParseHostsFileSkipsLocalAndImportsFirstAlias(t *testing.T) {
+	data := []byte(`
+127.0.0.1 localhost
+::1 localhost
+255.255.255.255 broadcasthost
+10.0.0.10 bastion bastion.local
+192.168.1.20 vm1 # comment
+fe80::1 link-local
+`)
+
+	entries := parseHostsFile(data)
+	if len(entries) != 2 {
+		t.Fatalf("parseHostsFile() returned %d entries: %+v", len(entries), entries)
+	}
+	if entries[0].IP != "10.0.0.10" || entries[0].Hostname != "bastion" {
+		t.Fatalf("first entry = %+v, want bastion", entries[0])
+	}
+	if entries[1].IP != "192.168.1.20" || entries[1].Hostname != "vm1" {
+		t.Fatalf("second entry = %+v, want vm1", entries[1])
+	}
+}
+
 func TestExportAndImportDatabase(t *testing.T) {
 	dir := t.TempDir()
 	source := NewApp(filepath.Join(dir, "source", "hosts.json"))
@@ -294,6 +336,46 @@ func TestExportAndImportDatabase(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "target", "hosts.json.bak")); err != nil {
 		t.Fatalf("backup stat error = %v", err)
+	}
+}
+
+func TestImportFromHostsFileAddsNewHostsAndSkipsDuplicates(t *testing.T) {
+	dir := t.TempDir()
+	app := NewApp(filepath.Join(dir, "hosts.json"))
+	if _, err := app.AddHost(applicationEndpoint("existing", "10.0.0.10")); err != nil {
+		t.Fatalf("AddHost(existing) error = %v", err)
+	}
+
+	hostsFile := filepath.Join(dir, "system-hosts")
+	if err := os.WriteFile(hostsFile, []byte(`
+127.0.0.1 localhost
+10.0.0.10 duplicate-ip
+10.0.0.20 imported-one
+10.0.0.21 imported-two imported-two.local
+`), 0o600); err != nil {
+		t.Fatalf("write hosts file: %v", err)
+	}
+
+	result, err := app.importFromHostsFile(hostsFile, "deploy")
+	if err != nil {
+		t.Fatalf("importFromHostsFile() error = %v", err)
+	}
+	if result.Imported != 2 || result.Skipped != 1 {
+		t.Fatalf("import result = %+v, want imported=2 skipped=1", result)
+	}
+
+	hosts, err := app.ListHosts()
+	if err != nil {
+		t.Fatalf("ListHosts() error = %v", err)
+	}
+	if len(hosts) != 3 {
+		t.Fatalf("host count = %d, want 3: %+v", len(hosts), hosts)
+	}
+	if hosts[1].Hostname != "imported-one" || hosts[1].User != "deploy" || hosts[1].Port != 22 {
+		t.Fatalf("imported host = %+v, want imported-one deploy:22", hosts[1])
+	}
+	if hosts[2].Hostname != "imported-two" {
+		t.Fatalf("second imported host = %+v, want imported-two", hosts[2])
 	}
 }
 

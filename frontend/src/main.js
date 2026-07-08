@@ -2077,6 +2077,12 @@ function registerAppEvents() {
     await loadTunnels();
     writeNotice(event?.message ?? 'Database imported.');
   });
+  eventsOn('database:hosts-file-imported', async (event) => {
+    await refreshHosts();
+    const imported = event?.imported ?? 0;
+    const skipped = event?.skipped ?? 0;
+    writeNotice(`Imported ${imported} host${imported === 1 ? '' : 's'} from hosts file. Skipped ${skipped}.`);
+  });
   eventsOn('app:about', (info) => showAboutModal(info));
   eventsOn('app:update-check', (event) => {
     if (event?.error) {

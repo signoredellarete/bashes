@@ -95,6 +95,36 @@ func dataDirForOS(goos string, home string, env func(string) string) string {
 	return filepath.Join("data")
 }
 
+func hostsFilePathForOS(goos string, env func(string) string) string {
+	if goos == "windows" {
+		root := strings.TrimSpace(env("SystemRoot"))
+		if root == "" {
+			root = strings.TrimSpace(env("WINDIR"))
+		}
+		if root == "" {
+			root = `C:\Windows`
+		}
+		return filepath.Join(root, "System32", "drivers", "etc", "hosts")
+	}
+	return "/etc/hosts"
+}
+
+func defaultSSHUserForOS(goos string, env func(string) string) string {
+	names := []string{"USER", "LOGNAME", "USERNAME"}
+	if goos == "windows" {
+		names = []string{"USERNAME", "USER", "LOGNAME"}
+	}
+	for _, name := range names {
+		if value := strings.TrimSpace(env(name)); value != "" {
+			return value
+		}
+	}
+	if goos == "windows" {
+		return "Administrator"
+	}
+	return "root"
+}
+
 func getenv(name string) string {
 	return os.Getenv(name)
 }
@@ -173,6 +203,19 @@ type UpdateInfo struct {
 	Message         string `json:"message"`
 }
 
+type HostsFileImportResult struct {
+	Path      string   `json:"path"`
+	Imported  int      `json:"imported"`
+	Skipped   int      `json:"skipped"`
+	User      string   `json:"user"`
+	Hostnames []string `json:"hostnames"`
+}
+
+type hostsFileEntry struct {
+	IP       string
+	Hostname string
+}
+
 func (a *App) GetAppInfo() AppInfo {
 	return AppInfo{
 		Name:        "Bashes",
@@ -226,6 +269,129 @@ func (a *App) ExportDatabase(path string) error {
 	}
 	encoded = append(encoded, '\n')
 	return writeFileAtomic(path, encoded, 0o600)
+}
+
+func (a *App) ImportFromHostsFile() (HostsFileImportResult, error) {
+	return a.importFromHostsFile(hostsFilePathForOS(goruntime.GOOS, getenv), defaultSSHUserForOS(goruntime.GOOS, getenv))
+}
+
+func (a *App) importFromHostsFile(path string, user string) (HostsFileImportResult, error) {
+	result := HostsFileImportResult{
+		Path: path,
+		User: user,
+	}
+	if strings.TrimSpace(path) == "" {
+		return result, errors.New("hosts file path is required")
+	}
+	if strings.TrimSpace(user) == "" {
+		return result, errors.New("default SSH user is required")
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return result, fmt.Errorf("read hosts file: %w", err)
+	}
+	entries := parseHostsFile(raw)
+
+	repo := store.NewRepository(a.dataPath)
+	data, err := repo.Load()
+	if err != nil {
+		return result, err
+	}
+
+	seenHosts, seenIPs := existingHostKeys(data.Hosts)
+	for _, entry := range entries {
+		hostnameKey := strings.ToLower(entry.Hostname)
+		ipKey := strings.ToLower(entry.IP)
+		if _, exists := seenHosts[hostnameKey]; exists {
+			result.Skipped++
+			continue
+		}
+		if _, exists := seenIPs[ipKey]; exists {
+			result.Skipped++
+			continue
+		}
+
+		host := domain.Host{
+			Hostname:   entry.Hostname,
+			IP:         entry.IP,
+			Port:       22,
+			User:       user,
+			Subsystems: []domain.Endpoint{},
+		}
+		host.ID = domain.StableID(domain.ResourceHost, host.Hostname, host.IP, host.Port, host.User, len(data.Hosts))
+		data.Hosts = append(data.Hosts, host)
+		seenHosts[hostnameKey] = struct{}{}
+		seenIPs[ipKey] = struct{}{}
+		result.Imported++
+		result.Hostnames = append(result.Hostnames, host.Hostname)
+	}
+
+	if result.Imported == 0 {
+		return result, nil
+	}
+	if err := repo.Save(data); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+func parseHostsFile(data []byte) []hostsFileEntry {
+	var entries []hostsFileEntry
+	seen := map[string]struct{}{}
+	for _, line := range strings.Split(string(data), "\n") {
+		if cut := strings.Index(line, "#"); cut >= 0 {
+			line = line[:cut]
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		ip := net.ParseIP(fields[0])
+		if skipHostsFileIP(ip) {
+			continue
+		}
+		for _, hostname := range fields[1:] {
+			hostname = strings.TrimSpace(hostname)
+			if skipHostsFileHostname(hostname) {
+				continue
+			}
+			key := strings.ToLower(ip.String() + "|" + hostname)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			entries = append(entries, hostsFileEntry{IP: ip.String(), Hostname: hostname})
+			break
+		}
+	}
+	return entries
+}
+
+func skipHostsFileIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	return ip.IsLoopback() ||
+		ip.IsUnspecified() ||
+		ip.IsMulticast() ||
+		ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() ||
+		ip.Equal(net.IPv4bcast)
+}
+
+func skipHostsFileHostname(hostname string) bool {
+	hostname = strings.TrimSpace(strings.ToLower(hostname))
+	if hostname == "" || hostname == "localhost" || hostname == "localhost.localdomain" {
+		return true
+	}
+	if strings.ContainsAny(hostname, "\r\n\t ") {
+		return true
+	}
+	if net.ParseIP(hostname) != nil {
+		return true
+	}
+	return false
 }
 
 func (a *App) ImportDatabase(path string) error {
@@ -782,6 +948,32 @@ func nestedResourceIDsForDelete(subsystems []domain.Endpoint, id string) []strin
 	return nil
 }
 
+func existingHostKeys(hosts []domain.Host) (map[string]struct{}, map[string]struct{}) {
+	hostnames := map[string]struct{}{}
+	ips := map[string]struct{}{}
+	for _, host := range hosts {
+		addHostKey(hostnames, host.Hostname)
+		addHostKey(ips, host.IP)
+		addEndpointKeys(hostnames, ips, host.Subsystems)
+	}
+	return hostnames, ips
+}
+
+func addEndpointKeys(hostnames map[string]struct{}, ips map[string]struct{}, endpoints []domain.Endpoint) {
+	for _, endpoint := range endpoints {
+		addHostKey(hostnames, endpoint.Hostname)
+		addHostKey(ips, endpoint.IP)
+		addEndpointKeys(hostnames, ips, endpoint.Subsystems)
+	}
+}
+
+func addHostKey(values map[string]struct{}, value string) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value != "" {
+		values[value] = struct{}{}
+	}
+}
+
 func (a *App) waitForShell(ctx context.Context, session *sshSession) {
 	err := session.shell.Wait()
 
@@ -974,6 +1166,21 @@ func (a *App) importDatabaseFromMenu() {
 		return
 	}
 	a.showInfoDialog("Import Database", "Database imported.")
+}
+
+func (a *App) importHostsFileFromMenu() {
+	result, err := a.ImportFromHostsFile()
+	if err != nil {
+		a.showErrorDialog("Import from hosts file", err)
+		return
+	}
+
+	message := fmt.Sprintf("Read hosts file:\n%s\n\nImported: %d\nSkipped duplicates: %d\nDefault SSH user: %s", result.Path, result.Imported, result.Skipped, result.User)
+	if result.Imported == 0 {
+		message += "\n\nNo new remote hosts were found."
+	}
+	a.showInfoDialog("Import from hosts file", message)
+	a.emitData("database:hosts-file-imported", result)
 }
 
 func (a *App) showAboutFromMenu() {

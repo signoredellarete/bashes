@@ -23,6 +23,7 @@ The app is built with Wails, Go and a Vite frontend. The terminal surface uses `
 - SSH tunnels from a selected host or subsystem, including SOCKS proxy (`-D`), local forwarding (`-L`) and remote forwarding (`-R`), without opening a terminal tab.
 - File transfer modal with a Svelte/SVAR dual-pane file manager: local home on the left, remote SFTP home on the right.
 - Native Tools menu actions for exporting and importing the JSON datastore.
+- Native Tools menu action for importing SSH host entries from the operating system hosts file.
 - Native Help menu actions for About, README and GitHub Releases.
 - Daily update check with an in-app notification when a newer GitHub release is available.
 - Ed25519 SSH key generation from inside the app.
@@ -190,6 +191,21 @@ Tools > Import Database...
 ```
 
 The selected JSON file is loaded, normalized and validated before it replaces the current datastore. Bashes creates `hosts.json.bak` from the previous datastore before saving the imported data. Active SSH sessions, tunnels and file transfers are closed after a successful import so the UI matches the imported data.
+
+### Import From Hosts File
+
+Use:
+
+```text
+Tools > Import from hosts file
+```
+
+Bashes reads the operating system hosts file and imports non-local entries as top-level SSH hosts with port `22` and the current local username as the default SSH user. Existing hostnames or IP addresses already present in Bashes are skipped.
+
+Hosts file locations:
+
+- Linux and macOS: `/etc/hosts`
+- Windows: `%SystemRoot%\System32\drivers\etc\hosts`
 
 ### Automatic Backup
 
