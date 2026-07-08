@@ -720,6 +720,7 @@ function removeSessionFromUI(sessionID) {
   renderTabs();
   renderSelection();
   scheduleTerminalFit();
+  focusActiveTerminal();
 }
 
 function endpointInput(form, type) {
@@ -1710,6 +1711,7 @@ function focusSession(sessionID) {
   renderTabs();
   renderSelection();
   scheduleTerminalFit();
+  focusActiveTerminal();
 }
 
 function setActiveSession(sessionID) {

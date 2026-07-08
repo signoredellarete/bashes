@@ -443,9 +443,7 @@ jobs:
           {
             printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
             printf '## RELEASE NOTE\n\n'
-            printf -- '- Focus the password field when credentials are required after a double-click connection attempt.\n'
-            printf -- '- Open the new-session flow on double-click when the selected resource already has an active session.\n'
-            printf -- '- Keep the connection form submit button labeled as Connect.\n\n'
+            printf -- '- Restore terminal focus after a tab is closed or an SSH session ends.\n\n'
             printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
 
