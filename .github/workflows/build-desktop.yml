@@ -443,7 +443,8 @@ jobs:
           {
             printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
             printf '## RELEASE NOTE\n\n'
-            printf -- '- Restore terminal focus after a tab is closed or an SSH session ends.\n\n'
+            printf -- '- Show explicit SSH key installation errors in the keys panel.\n'
+            printf -- '- Report missing key/resource selections and public-key read failures.\n\n'
             printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
 

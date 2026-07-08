@@ -310,6 +310,7 @@ app.innerHTML = `
 
       <form id="key-install-form" class="compact-form">
         <p class="parent-summary" id="key-install-summary">Select a host or subsystem to install the key.</p>
+        <p class="inline-status" id="key-install-status" hidden></p>
         <label>
           <span>Remote Password</span>
           <input name="password" type="password" autocomplete="current-password" />
@@ -575,20 +576,38 @@ async function submitInstallKey(event) {
   event.preventDefault();
   const selected = findResource(state.selectedId)?.resource;
   const keyName = document.querySelector('#key-select').value;
-  if (!selected || !keyName) return;
+  if (!selected) {
+    setKeyInstallStatus('Select a host or subsystem before installing a key.', 'error');
+    writeNotice('Select a host or subsystem before installing a key.');
+    return;
+  }
+  if (!keyName) {
+    setKeyInstallStatus('Select or generate an SSH key before installing it.', 'error');
+    writeNotice('Select or generate an SSH key before installing it.');
+    return;
+  }
 
   const form = event.currentTarget;
+  setKeyInstallStatus(`Installing key ${keyName} on ${selected.hostname} ...`, 'pending');
   await withBusy(async () => {
-    await apiInstallSSHKey({
-      resourceId: selected.id,
-      keyName,
-      password: form.elements.password.value,
-      trustHostKey: form.elements.trustHostKey.checked,
-    });
-    form.reset();
-    form.elements.trustHostKey.checked = true;
-    await refreshHosts();
-    writeNotice(`Installed key ${keyName} on ${selected.hostname}.`);
+    try {
+      await apiInstallSSHKey({
+        resourceId: selected.id,
+        keyName,
+        password: form.elements.password.value,
+        trustHostKey: form.elements.trustHostKey.checked,
+      });
+      form.reset();
+      form.elements.trustHostKey.checked = true;
+      await refreshHosts();
+      setKeyInstallStatus(`Installed key ${keyName} on ${selected.hostname}.`, 'success');
+      writeNotice(`Installed key ${keyName} on ${selected.hostname}.`);
+    } catch (error) {
+      const message = keyInstallErrorMessage(error, selected);
+      setKeyInstallStatus(message, 'error');
+      writeNotice(message);
+      window.setTimeout(() => form.elements.password.focus(), 0);
+    }
   });
 }
 
@@ -1402,6 +1421,7 @@ function updateTunnelMode() {
 
 async function openKeysPanel() {
   await loadKeys();
+  setKeyInstallStatus('', '');
   renderKeyInstallSummary();
   const panel = document.querySelector('#keys-panel');
   panel.hidden = false;
@@ -1611,7 +1631,15 @@ async function renderSelectedPublicKey() {
     output.value = '';
     return;
   }
-  output.value = await apiReadSSHPublicKey(select.value);
+  try {
+    output.value = await apiReadSSHPublicKey(select.value);
+    setKeyInstallStatus('', '');
+  } catch (error) {
+    output.value = '';
+    const message = `Could not read SSH key ${select.value}: ${error?.message ?? error}`;
+    setKeyInstallStatus(message, 'error');
+    writeNotice(message);
+  }
 }
 
 function renderKeyInstallSummary() {
@@ -1621,6 +1649,33 @@ function renderKeyInstallSummary() {
   summary.textContent = selected
     ? `Install selected key on ${selected.user}@${selected.ip || selected.hostname}:${selected.port}`
     : 'Select a host or subsystem to install the key.';
+}
+
+function setKeyInstallStatus(message, kind) {
+  const status = document.querySelector('#key-install-status');
+  if (!status) return;
+  status.textContent = message;
+  status.title = message;
+  status.hidden = !message;
+  status.dataset.kind = kind;
+}
+
+function keyInstallErrorMessage(error, resource) {
+  const detail = String(error?.message ?? error ?? '').trim();
+  const target = `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`;
+  if (/unable to authenticate|no supported methods|no SSH authentication method|handshake failed/i.test(detail)) {
+    return `Could not connect to ${target} to install the SSH key. Enter the remote password or configure a valid existing key.`;
+  }
+  if (/host key|knownhosts|known host/i.test(detail)) {
+    return `Could not verify ${target}. Enable "Trust host key for this install" if this is the expected server.`;
+  }
+  if (/timeout|deadline|i\/o timeout/i.test(detail)) {
+    return `Could not reach ${target} to install the SSH key: connection timed out.`;
+  }
+  if (/connection refused/i.test(detail)) {
+    return `Could not reach ${target} to install the SSH key: connection refused.`;
+  }
+  return `Could not install the SSH key on ${target}: ${detail || 'unknown error'}`;
 }
 
 function renderTunnelStatus() {

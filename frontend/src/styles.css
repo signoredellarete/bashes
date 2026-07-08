@@ -1163,6 +1163,35 @@ textarea {
   font-size: 13px;
 }
 
+.inline-status {
+  margin: 0;
+  border: 1px solid #c7cfd8;
+  border-radius: 6px;
+  background: #f5f7f9;
+  color: #2f3945;
+  padding: 8px 9px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.inline-status[data-kind="pending"] {
+  border-color: #9db7d8;
+  background: #eef5ff;
+  color: #2d5f9a;
+}
+
+.inline-status[data-kind="success"] {
+  border-color: #96d0a7;
+  background: #edf8f0;
+  color: #1f6f3d;
+}
+
+.inline-status[data-kind="error"] {
+  border-color: #e0a39c;
+  background: #fff0ee;
+  color: #a23a2f;
+}
+
 .compact-form {
   display: grid;
   gap: 9px;
