@@ -443,7 +443,9 @@ jobs:
           {
             printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
             printf '## RELEASE NOTE\n\n'
-            printf -- '- Fixed early SSH welcome/banner output being dropped before the terminal tab is ready.\n\n'
+            printf -- '- Focus the password field when credentials are required after a double-click connection attempt.\n'
+            printf -- '- Open the new-session flow on double-click when the selected resource already has an active session.\n'
+            printf -- '- Keep the connection form submit button labeled as Connect.\n\n'
             printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
 

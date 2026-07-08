@@ -806,11 +806,12 @@ function resourceRow(resource, type, depth = 0, rootHostId = resource.id, canReo
   selectButton.addEventListener('click', () => {
     selectResource(resource);
   });
-  selectButton.addEventListener('dblclick', () => {
+  selectButton.addEventListener('dblclick', async () => {
     state.selectedId = resource.id;
-    const session = sessionForResource(resource.id);
-    if (session && !session.pending) {
+    const realSessions = realSessionsForResource(resource.id);
+    if (realSessions.length > 0) {
       selectResource(resource);
+      await openConnectPanel();
       return;
     }
     createPendingTab(resource);
@@ -1285,10 +1286,19 @@ async function openConnectPanel() {
   const realSessionCount = realSessionsForResource(selected.id).length;
   document.querySelector('#connect-summary').textContent =
     `${realSessionCount > 0 ? 'New session: ' : ''}${selected.user}@${selected.ip || selected.hostname}:${selected.port}`;
-  form.querySelector('button[type="submit"]').textContent = realSessionCount > 0 ? 'New Session' : 'Connect';
+  form.querySelector('button[type="submit"]').textContent = 'Connect';
   panel.hidden = false;
   requestAnimationFrame(() => panel.classList.add('open'));
-  form.elements.password.focus();
+  focusConnectPasswordInput(form);
+}
+
+function focusConnectPasswordInput(form) {
+  window.setTimeout(() => {
+    requestAnimationFrame(() => {
+      form.elements.password.focus();
+      form.elements.password.select();
+    });
+  }, 0);
 }
 
 function closeConnectPanel() {
@@ -1652,10 +1662,6 @@ function findNestedResource(subsystems, id, parent) {
     }
   }
   return null;
-}
-
-function sessionForResource(resourceId) {
-  return preferredSessionForResource(resourceId);
 }
 
 function sessionsForResource(resourceId) {
