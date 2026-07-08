@@ -443,9 +443,7 @@ jobs:
           {
             printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
             printf '## RELEASE NOTE\n\n'
-            printf -- '- Fixed terminal focus when switching between session tabs.\n'
-            printf -- '- Added SSH keepalive monitoring for sessions and tunnels.\n'
-            printf -- '- Removed stale tunnel state from the UI when a tunnel connection drops.\n\n'
+            printf -- '- Fixed keyboard auto-repeat inside terminal sessions, including vi/vim navigation keys.\n\n'
             printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
 

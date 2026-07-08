@@ -1039,6 +1039,7 @@ function createSession(sessionID, resource) {
   const fitAddon = new FitAddon();
   terminal.loadAddon(fitAddon);
   terminal.open(pane);
+  installTerminalKeyRepeatFallback(terminal, sessionID);
   terminal.onData((data) => {
     apiWriteSSHSession(sessionID, data).catch((error) => {
       writeNotice(`SSH input error: ${error?.message ?? error}`);
@@ -1075,6 +1076,62 @@ function createSession(sessionID, resource) {
   renderSelection();
   scheduleTerminalFit();
   focusActiveTerminal();
+}
+
+function installTerminalKeyRepeatFallback(terminal, sessionID) {
+  terminal.attachCustomKeyEventHandler((event) => {
+    if (event.type !== 'keydown' || !event.repeat || event.isComposing) {
+      return true;
+    }
+
+    const data = repeatedKeyData(event, terminal);
+    if (!data) return true;
+
+    event.preventDefault();
+    apiWriteSSHSession(sessionID, data).catch((error) => {
+      writeNotice(`SSH input error: ${error?.message ?? error}`);
+    });
+    return false;
+  });
+}
+
+function repeatedKeyData(event, terminal) {
+  if (event.key.length === 1) {
+    if (event.ctrlKey || event.metaKey || event.altKey) return '';
+    return event.key;
+  }
+
+  const applicationCursor = Boolean(terminal.modes?.applicationCursorKeysMode);
+  switch (event.key) {
+    case 'ArrowUp':
+      return applicationCursor ? '\x1bOA' : '\x1b[A';
+    case 'ArrowDown':
+      return applicationCursor ? '\x1bOB' : '\x1b[B';
+    case 'ArrowRight':
+      return applicationCursor ? '\x1bOC' : '\x1b[C';
+    case 'ArrowLeft':
+      return applicationCursor ? '\x1bOD' : '\x1b[D';
+    case 'Backspace':
+      return '\x7f';
+    case 'Delete':
+      return '\x1b[3~';
+    case 'Home':
+      return applicationCursor ? '\x1bOH' : '\x1b[H';
+    case 'End':
+      return applicationCursor ? '\x1bOF' : '\x1b[F';
+    case 'PageUp':
+      return '\x1b[5~';
+    case 'PageDown':
+      return '\x1b[6~';
+    case 'Tab':
+      return event.shiftKey ? '\x1b[Z' : '\t';
+    case 'Enter':
+      return '\r';
+    case 'Escape':
+      return '\x1b';
+    default:
+      return '';
+  }
 }
 
 function renderTabs() {
