@@ -1097,6 +1097,7 @@ function renderTabs() {
       renderTabs();
       renderSelection();
       scheduleTerminalFit();
+      focusActiveTerminal();
     });
 
     const close = document.createElement('button');
@@ -1787,6 +1788,14 @@ function registerSSHEvents() {
     const session = state.sessions.get(event.sessionId);
     if (!session) return;
     removeSessionFromUI(event.sessionId);
+    if (event?.message) writeNotice(event.message);
+  });
+  eventsOn('ssh:tunnel-closed', (event) => {
+    if (event?.sessionId) {
+      state.tunnels.delete(event.sessionId);
+      renderHosts(searchInput.value);
+      renderTunnelStatus();
+    }
     if (event?.message) writeNotice(event.message);
   });
 }

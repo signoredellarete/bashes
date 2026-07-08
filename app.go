@@ -379,6 +379,10 @@ func (a *App) StartSSHSession(input SSHSessionInput) (string, error) {
 		}
 	}
 
+	go monitorSSHKeepAlive(runtimeCtx, client, func(err error) {
+		_ = session.shell.Close()
+		session.client.Close()
+	})
 	go a.waitForShell(runtimeCtx, session)
 
 	return sessionID, nil
@@ -447,6 +451,9 @@ func (a *App) StartSSHTunnel(input SSHTunnelInput) (SSHTunnelInfo, error) {
 		}
 	}
 
+	go monitorSSHKeepAlive(ctx, client, func(err error) {
+		a.failTunnel(tunnel, fmt.Sprintf("Tunnel closed: SSH keepalive failed: %v", err))
+	})
 	go a.serveTunnel(ctx, tunnel)
 
 	return info, nil
@@ -518,16 +525,63 @@ func (a *App) serveTunnel(ctx context.Context, tunnel *sshTunnel) {
 
 	a.mu.Lock()
 	current := a.tunnels[tunnel.id]
+	removed := false
 	if current == tunnel {
 		delete(a.tunnels, tunnel.id)
+		removed = true
 	}
 	a.mu.Unlock()
 
 	tunnel.cancel()
 	tunnel.client.Close()
 
+	if !removed {
+		return
+	}
 	if err != nil && a.ctx != nil {
-		a.emit("ssh:status", SSHEvent{SessionID: tunnel.id, Message: fmt.Sprintf("Tunnel closed: %v", err)})
+		a.emit("ssh:tunnel-closed", SSHEvent{SessionID: tunnel.id, Message: fmt.Sprintf("Tunnel closed: %v", err)})
+	}
+}
+
+func (a *App) failTunnel(tunnel *sshTunnel, message string) {
+	a.mu.Lock()
+	current := a.tunnels[tunnel.id]
+	if current == tunnel {
+		delete(a.tunnels, tunnel.id)
+	}
+	a.mu.Unlock()
+
+	if current != tunnel {
+		return
+	}
+
+	tunnel.cancel()
+	tunnel.listener.Close()
+	tunnel.client.Close()
+	a.emit("ssh:tunnel-closed", SSHEvent{SessionID: tunnel.id, Message: message})
+}
+
+func monitorSSHKeepAlive(ctx context.Context, client *ssh.Client, onFailure func(error)) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	failures := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_, _, err := client.SendRequest("keepalive@openssh.com", true, nil)
+			if err == nil {
+				failures = 0
+				continue
+			}
+			failures++
+			if failures >= 2 {
+				onFailure(err)
+				return
+			}
+		}
 	}
 }
 
