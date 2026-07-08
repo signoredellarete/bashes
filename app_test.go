@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -251,6 +252,68 @@ func TestDataDirForOSUsesPlatformConventions(t *testing.T) {
 				t.Fatalf("dataDirForOS() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestExportAndImportDatabase(t *testing.T) {
+	dir := t.TempDir()
+	source := NewApp(filepath.Join(dir, "source", "hosts.json"))
+	host, err := source.AddHost(applicationEndpoint("source-host", "10.0.0.10"))
+	if err != nil {
+		t.Fatalf("AddHost() error = %v", err)
+	}
+	if _, err := source.AddSubsystem(host.ID, applicationEndpoint("source-vm", "10.0.0.11")); err != nil {
+		t.Fatalf("AddSubsystem() error = %v", err)
+	}
+
+	exportPath := filepath.Join(dir, "export", "bashes.json")
+	if err := source.ExportDatabase(exportPath); err != nil {
+		t.Fatalf("ExportDatabase() error = %v", err)
+	}
+	if _, err := os.Stat(exportPath); err != nil {
+		t.Fatalf("export file stat error = %v", err)
+	}
+
+	target := NewApp(filepath.Join(dir, "target", "hosts.json"))
+	if _, err := target.AddHost(applicationEndpoint("old-host", "10.0.0.20")); err != nil {
+		t.Fatalf("AddHost(old) error = %v", err)
+	}
+	if err := target.ImportDatabase(exportPath); err != nil {
+		t.Fatalf("ImportDatabase() error = %v", err)
+	}
+
+	hosts, err := target.ListHosts()
+	if err != nil {
+		t.Fatalf("ListHosts() error = %v", err)
+	}
+	if len(hosts) != 1 || hosts[0].Hostname != "source-host" {
+		t.Fatalf("imported hosts = %+v, want source-host", hosts)
+	}
+	if len(hosts[0].Subsystems) != 1 || hosts[0].Subsystems[0].Hostname != "source-vm" {
+		t.Fatalf("imported subsystems = %+v, want source-vm", hosts[0].Subsystems)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "target", "hosts.json.bak")); err != nil {
+		t.Fatalf("backup stat error = %v", err)
+	}
+}
+
+func TestIsNewerVersion(t *testing.T) {
+	tests := []struct {
+		latest  string
+		current string
+		want    bool
+	}{
+		{latest: "v0.1.43", current: "v0.1.42", want: true},
+		{latest: "v0.2.0", current: "v0.1.99", want: true},
+		{latest: "v1.0.0", current: "v1.0.0", want: false},
+		{latest: "v0.1.42", current: "v0.1.43", want: false},
+		{latest: "v0.1.43", current: "dev", want: false},
+	}
+
+	for _, tt := range tests {
+		if got := isNewerVersion(tt.latest, tt.current); got != tt.want {
+			t.Fatalf("isNewerVersion(%q, %q) = %v, want %v", tt.latest, tt.current, got, tt.want)
+		}
 	}
 }
 

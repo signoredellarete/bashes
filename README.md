@@ -22,6 +22,9 @@ The app is built with Wails, Go and a Vite frontend. The terminal surface uses `
 - SSH authentication with password, SSH agent, default keys, explicit key path or Bashes-generated keys.
 - SSH tunnels from a selected host or subsystem, including SOCKS proxy (`-D`), local forwarding (`-L`) and remote forwarding (`-R`), without opening a terminal tab.
 - File transfer modal with a Svelte/SVAR dual-pane file manager: local home on the left, remote SFTP home on the right.
+- Native Tools menu actions for exporting and importing the JSON datastore.
+- Native Help menu actions for About, README and GitHub Releases.
+- Daily update check with an in-app notification when a newer GitHub release is available.
 - Ed25519 SSH key generation from inside the app.
 - Public key installation on a remote host or subsystem.
 - Plain JSON datastore with validation, backups and atomic writes.
@@ -167,6 +170,26 @@ It contains hosts, subsystems, saved connection metadata and authentication pref
 Close Bashes, then copy `hosts.json` from the runtime data directory for your operating system.
 
 If you use Bashes-generated SSH keys and want to move them too, also copy the `keys/` directory. Treat private keys as secrets.
+
+### Export
+
+Use:
+
+```text
+Tools > Export Database...
+```
+
+This writes a validated, normalized JSON copy of the current datastore to the file selected in the native save dialog. It does not export generated private keys.
+
+### Import
+
+Use:
+
+```text
+Tools > Import Database...
+```
+
+The selected JSON file is loaded, normalized and validated before it replaces the current datastore. Bashes creates `hosts.json.bak` from the previous datastore before saving the imported data. Active SSH sessions, tunnels and file transfers are closed after a successful import so the UI matches the imported data.
 
 ### Automatic Backup
 

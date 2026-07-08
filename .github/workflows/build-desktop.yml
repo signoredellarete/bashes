@@ -80,7 +80,7 @@ jobs:
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Build Wails app
-        run: wails build -tags desktop -clean -nopackage -v 2
+        run: wails build -tags desktop -clean -nopackage -ldflags "-X main.version=${{ github.ref_name }}" -v 2
 
       - name: Package Linux binary
         run: |
@@ -123,7 +123,7 @@ jobs:
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Build Wails app
-        run: wails build -platform darwin/universal -tags desktop -clean -v 2
+        run: wails build -platform darwin/universal -tags desktop -clean -ldflags "-X main.version=${{ github.ref_name }}" -v 2
 
       - name: Locate macOS app
         id: macos-app
@@ -234,7 +234,7 @@ jobs:
           "$env:USERPROFILE\go\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Build Wails app
-        run: wails build -platform windows/amd64 -tags desktop -clean -nopackage -v 2
+        run: wails build -platform windows/amd64 -tags desktop -clean -nopackage -ldflags "-X main.version=${{ github.ref_name }}" -v 2
 
       - name: Sign Windows app
         shell: pwsh
@@ -324,7 +324,7 @@ jobs:
           CGO_ENABLED: "1"
           CC: aarch64-linux-gnu-gcc
           PKG_CONFIG_PATH: /usr/lib/aarch64-linux-gnu/pkgconfig
-        run: wails build -platform linux/arm64 -tags desktop -clean -nopackage -v 2
+        run: wails build -platform linux/arm64 -tags desktop -clean -nopackage -ldflags "-X main.version=${{ github.ref_name }}" -v 2
 
       - name: Package Linux ARM64 binary
         run: |
@@ -369,7 +369,7 @@ jobs:
           "$env:USERPROFILE\go\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Build Wails app
-        run: wails build -platform windows/arm64 -tags desktop -clean -nopackage -v 2
+        run: wails build -platform windows/arm64 -tags desktop -clean -nopackage -ldflags "-X main.version=${{ github.ref_name }}" -v 2
 
       - name: Sign Windows ARM64 app
         shell: pwsh
@@ -443,8 +443,9 @@ jobs:
           {
             printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
             printf '## RELEASE NOTE\n\n'
-            printf -- '- Reduce SSH connection timeout to 3 seconds.\n'
-            printf -- '- Show explicit connection errors in the Connect panel.\n\n'
+            printf -- '- Add native Tools menu entries for database export, import and update checks.\n'
+            printf -- '- Add Help menu entries for About, README and GitHub Releases.\n'
+            printf -- '- Add a daily update check with an in-app update modal.\n\n'
             printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
 

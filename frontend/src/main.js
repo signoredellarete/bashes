@@ -340,6 +340,22 @@ app.innerHTML = `
     </section>
   </section>
 
+  <section id="app-modal" class="app-modal" hidden>
+    <div class="app-modal-scrim" data-close-app-modal></div>
+    <section class="app-modal-card" role="dialog" aria-modal="true" aria-labelledby="app-modal-title" aria-describedby="app-modal-message">
+      <header>
+        <p class="eyebrow" id="app-modal-kicker">Bashes</p>
+        <h3 id="app-modal-title">Bashes</h3>
+      </header>
+      <p id="app-modal-message"></p>
+      <dl id="app-modal-details"></dl>
+      <footer class="app-modal-actions">
+        <button id="app-modal-secondary" class="secondary" type="button" hidden></button>
+        <button id="app-modal-primary" type="button">OK</button>
+      </footer>
+    </section>
+  </section>
+
   <div id="sidebar-tooltip" class="sidebar-tooltip" hidden></div>
 `;
 
@@ -356,6 +372,7 @@ if (globalThis.ResizeObserver) {
 }
 
 registerSSHEvents();
+registerAppEvents();
 
 const searchInput = document.querySelector('#search');
 document.querySelector('#toggle-sidebar').addEventListener('click', () => toggleSidebar());
@@ -406,9 +423,16 @@ document.querySelectorAll('[data-confirm-cancel]').forEach((element) => {
   element.addEventListener('click', () => resolveConfirmModal(false));
 });
 document.querySelector('#confirm-accept').addEventListener('click', () => resolveConfirmModal(true));
+document.querySelectorAll('[data-close-app-modal]').forEach((element) => {
+  element.addEventListener('click', () => closeAppModal());
+});
+document.querySelector('#app-modal-primary').addEventListener('click', () => runAppModalAction('primary'));
+document.querySelector('#app-modal-secondary').addEventListener('click', () => runAppModalAction('secondary'));
 window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !document.querySelector('#confirm-modal').hidden) {
     resolveConfirmModal(false);
+  } else if (event.key === 'Escape' && !document.querySelector('#app-modal').hidden) {
+    closeAppModal();
   }
 });
 
@@ -416,6 +440,7 @@ await loadHosts();
 await loadKeys();
 await loadTunnels();
 applySidebarState();
+schedulePeriodicUpdateCheck();
 
 async function loadHosts() {
   await withBusy(async () => {
@@ -701,6 +726,55 @@ function resolveConfirmModal(confirmed) {
   const resolve = state.confirmResolver;
   state.confirmResolver = null;
   if (resolve) resolve(confirmed);
+}
+
+let appModalActions = {};
+
+function showAppModal(options) {
+  const modal = document.querySelector('#app-modal');
+  document.querySelector('#app-modal-kicker').textContent = options.kicker ?? 'Bashes';
+  document.querySelector('#app-modal-title').textContent = options.title ?? 'Bashes';
+  document.querySelector('#app-modal-message').textContent = options.message ?? '';
+
+  const details = document.querySelector('#app-modal-details');
+  const entries = options.details ?? [];
+  details.replaceChildren(...entries.flatMap(([label, value]) => {
+    const term = document.createElement('dt');
+    term.textContent = label;
+    const description = document.createElement('dd');
+    description.textContent = value;
+    return [term, description];
+  }));
+  details.hidden = entries.length === 0;
+
+  appModalActions = {};
+  configureAppModalButton('primary', options.primaryLabel ?? 'OK', options.primaryAction);
+  configureAppModalButton('secondary', options.secondaryLabel, options.secondaryAction);
+
+  modal.hidden = false;
+  requestAnimationFrame(() => modal.classList.add('open'));
+}
+
+function configureAppModalButton(name, label, action) {
+  const button = document.querySelector(`#app-modal-${name}`);
+  button.hidden = !label;
+  if (!label) return;
+  button.textContent = label;
+  appModalActions[name] = action;
+}
+
+function runAppModalAction(name) {
+  const action = appModalActions[name];
+  closeAppModal();
+  if (typeof action === 'function') action();
+}
+
+function closeAppModal() {
+  const modal = document.querySelector('#app-modal');
+  if (!modal || modal.hidden) return;
+  modal.classList.remove('open');
+  modal.hidden = true;
+  appModalActions = {};
 }
 
 async function stopSelectedTunnel() {
@@ -1862,6 +1936,22 @@ async function withBusy(task) {
   }
 }
 
+function schedulePeriodicUpdateCheck() {
+  const oneDayMs = 24 * 60 * 60 * 1000;
+  const lastCheck = Number.parseInt(localStorage.getItem('bashes.updateCheck.lastAt') ?? '0', 10);
+  if (Number.isFinite(lastCheck) && Date.now() - lastCheck < oneDayMs) return;
+
+  window.setTimeout(async () => {
+    try {
+      const info = await apiCheckForUpdate();
+      localStorage.setItem('bashes.updateCheck.lastAt', String(Date.now()));
+      if (info?.updateAvailable) showUpdateModal(info, false);
+    } catch {
+      localStorage.setItem('bashes.updateCheck.lastAt', String(Date.now()));
+    }
+  }, 1200);
+}
+
 function setDisabledState(disabled) {
   document.querySelectorAll('button, input, select, textarea').forEach((element) => {
     element.disabled = disabled;
@@ -1972,6 +2062,99 @@ function registerSSHEvents() {
   });
 }
 
+function registerAppEvents() {
+  const eventsOn = globalThis.runtime?.EventsOn;
+  if (!eventsOn) return;
+
+  eventsOn('database:exported', (event) => {
+    if (event?.message) writeNotice(`${event.message} ${event.path ?? ''}`.trim());
+  });
+  eventsOn('database:imported', async (event) => {
+    clearAllSessionsFromUI();
+    closeFileTransferModal();
+    state.selectedId = null;
+    await refreshHosts();
+    await loadTunnels();
+    writeNotice(event?.message ?? 'Database imported.');
+  });
+  eventsOn('app:about', (info) => showAboutModal(info));
+  eventsOn('app:update-check', (event) => {
+    if (event?.error) {
+      showUpdateErrorModal(event.error);
+      return;
+    }
+    if (event?.info) showUpdateModal(event.info, Boolean(event.manual));
+  });
+}
+
+function clearAllSessionsFromUI() {
+  for (const sessionID of [...state.sessions.keys()]) {
+    removeSessionFromUI(sessionID);
+  }
+  state.pendingSSHOutput.clear();
+  state.lastSessionByResource.clear();
+  state.sessionFocusHistory = [];
+  state.activeSessionId = null;
+  renderTabs();
+  renderSelection();
+}
+
+function showAboutModal(info) {
+  const appInfo = info ?? {};
+  showAppModal({
+    kicker: 'About',
+    title: 'Bashes',
+    message: 'Fast remote server session manager.',
+    details: [
+      ['Version', appInfo.version ?? 'dev'],
+      ['Platform', `${appInfo.platform ?? 'unknown'}/${appInfo.arch ?? 'unknown'}`],
+      ['Data file', appInfo.dataPath ?? ''],
+    ],
+    primaryLabel: 'README',
+    primaryAction: () => openExternalURL(appInfo.readmeUrl ?? 'https://github.com/signoredellarete/bashes#readme'),
+    secondaryLabel: 'Releases',
+    secondaryAction: () => openExternalURL(appInfo.releasesUrl ?? 'https://github.com/signoredellarete/bashes/releases'),
+  });
+}
+
+function showUpdateModal(info, manual = false) {
+  if (!info) return;
+  if (!info.updateAvailable && !manual) return;
+  showAppModal({
+    kicker: 'Updates',
+    title: info.updateAvailable ? 'Update Available' : 'Bashes Is Up To Date',
+    message: info.message ?? '',
+    details: [
+      ['Current version', info.currentVersion ?? 'dev'],
+      ['Latest version', info.latestVersion ?? 'unknown'],
+    ],
+    primaryLabel: info.updateAvailable ? 'Open Releases' : 'OK',
+    primaryAction: info.updateAvailable ? () => openExternalURL(info.releaseUrl ?? info.repoUrl) : null,
+    secondaryLabel: info.updateAvailable ? 'Repository' : '',
+    secondaryAction: info.updateAvailable ? () => openExternalURL(info.repoUrl) : null,
+  });
+}
+
+function showUpdateErrorModal(message) {
+  showAppModal({
+    kicker: 'Updates',
+    title: 'Could Not Check Updates',
+    message,
+    primaryLabel: 'Repository',
+    primaryAction: () => openExternalURL('https://github.com/signoredellarete/bashes'),
+    secondaryLabel: 'OK',
+  });
+}
+
+function openExternalURL(url) {
+  if (!url) return;
+  if (globalThis.runtime?.BrowserOpenURL) {
+    globalThis.runtime.BrowserOpenURL(url);
+    return;
+  }
+  window.open(url, '_blank', 'noopener');
+}
+
 function writeSSHOutput(sessionID, data) {
   if (!sessionID || !data) return;
   const session = state.sessions.get(sessionID);
@@ -2001,6 +2184,34 @@ async function apiListHosts() {
   const api = wailsAPI();
   if (api?.ListHosts) return (await api.ListHosts()) ?? [];
   return clone(demoStore.hosts);
+}
+
+async function apiGetAppInfo() {
+  const api = wailsAPI();
+  if (api?.GetAppInfo) return await api.GetAppInfo();
+  return {
+    name: 'Bashes',
+    version: 'dev',
+    platform: 'browser',
+    arch: 'demo',
+    dataPath: 'demo',
+    repoUrl: 'https://github.com/signoredellarete/bashes',
+    readmeUrl: 'https://github.com/signoredellarete/bashes#readme',
+    releasesUrl: 'https://github.com/signoredellarete/bashes/releases',
+  };
+}
+
+async function apiCheckForUpdate() {
+  const api = wailsAPI();
+  if (api?.CheckForUpdate) return await api.CheckForUpdate();
+  return {
+    currentVersion: 'dev',
+    latestVersion: 'dev',
+    updateAvailable: false,
+    releaseUrl: 'https://github.com/signoredellarete/bashes/releases',
+    repoUrl: 'https://github.com/signoredellarete/bashes',
+    message: 'Update check is available only in the desktop app.',
+  };
 }
 
 async function apiAddHost(input) {

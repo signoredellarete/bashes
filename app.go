@@ -4,15 +4,19 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	goruntime "runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +28,14 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
+)
+
+var version = "dev"
+
+const (
+	repositoryURL = "https://github.com/signoredellarete/bashes"
+	readmeURL     = repositoryURL + "#readme"
+	releasesURL   = repositoryURL + "/releases"
 )
 
 type App struct {
@@ -139,6 +151,102 @@ type InstallSSHKeyInput struct {
 	PrivateKeyPath       string `json:"privateKeyPath,omitempty"`
 	PrivateKeyPassphrase string `json:"privateKeyPassphrase,omitempty"`
 	TrustHostKey         bool   `json:"trustHostKey"`
+}
+
+type AppInfo struct {
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Platform    string `json:"platform"`
+	Arch        string `json:"arch"`
+	DataPath    string `json:"dataPath"`
+	RepoURL     string `json:"repoUrl"`
+	ReadmeURL   string `json:"readmeUrl"`
+	ReleasesURL string `json:"releasesUrl"`
+}
+
+type UpdateInfo struct {
+	CurrentVersion  string `json:"currentVersion"`
+	LatestVersion   string `json:"latestVersion"`
+	UpdateAvailable bool   `json:"updateAvailable"`
+	ReleaseURL      string `json:"releaseUrl"`
+	RepoURL         string `json:"repoUrl"`
+	Message         string `json:"message"`
+}
+
+func (a *App) GetAppInfo() AppInfo {
+	return AppInfo{
+		Name:        "Bashes",
+		Version:     appVersion(),
+		Platform:    goruntime.GOOS,
+		Arch:        goruntime.GOARCH,
+		DataPath:    a.dataPath,
+		RepoURL:     repositoryURL,
+		ReadmeURL:   readmeURL,
+		ReleasesURL: releasesURL,
+	}
+}
+
+func (a *App) CheckForUpdate() (UpdateInfo, error) {
+	current := appVersion()
+	latest, err := latestGitHubRelease()
+	if err != nil {
+		return UpdateInfo{}, err
+	}
+
+	info := UpdateInfo{
+		CurrentVersion:  current,
+		LatestVersion:   latest,
+		UpdateAvailable: isNewerVersion(latest, current),
+		ReleaseURL:      releasesURL + "/tag/" + latest,
+		RepoURL:         repositoryURL,
+	}
+	if _, ok := versionParts(current); !ok {
+		info.Message = fmt.Sprintf("Latest release: %s. This build reports version %s, so it cannot be compared automatically.", latest, current)
+	} else if info.UpdateAvailable {
+		info.Message = fmt.Sprintf("Bashes %s is available. You are running %s.", latest, current)
+	} else {
+		info.Message = fmt.Sprintf("Bashes is up to date. Current version: %s.", current)
+	}
+	return info, nil
+}
+
+func (a *App) ExportDatabase(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return errors.New("export path is required")
+	}
+
+	data, err := store.NewRepository(a.dataPath).Load()
+	if err != nil {
+		return err
+	}
+	encoded, err := json.MarshalIndent(domain.NormalizeStore(data), "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode export json: %w", err)
+	}
+	encoded = append(encoded, '\n')
+	return writeFileAtomic(path, encoded, 0o600)
+}
+
+func (a *App) ImportDatabase(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return errors.New("import path is required")
+	}
+
+	data, err := store.NewRepository(path).Load()
+	if err != nil {
+		return err
+	}
+	if err := store.NewRepository(a.dataPath).Save(data); err != nil {
+		return err
+	}
+	a.stopAllRuntimeConnections()
+	a.emitData("database:imported", map[string]string{
+		"message": "Database imported.",
+		"path":    a.dataPath,
+	})
+	return nil
 }
 
 func (a *App) ListSSHKeys() ([]SSHKeyInfo, error) {
@@ -717,6 +825,33 @@ func (a *App) session(sessionID string) (*sshSession, error) {
 	return session, nil
 }
 
+func (a *App) stopAllRuntimeConnections() {
+	a.mu.Lock()
+	sessionIDs := make([]string, 0, len(a.sessions))
+	for id := range a.sessions {
+		sessionIDs = append(sessionIDs, id)
+	}
+	tunnelIDs := make([]string, 0, len(a.tunnels))
+	for id := range a.tunnels {
+		tunnelIDs = append(tunnelIDs, id)
+	}
+	transferIDs := make([]string, 0, len(a.transfers))
+	for id := range a.transfers {
+		transferIDs = append(transferIDs, id)
+	}
+	a.mu.Unlock()
+
+	for _, id := range sessionIDs {
+		_ = a.StopSSHSession(id)
+	}
+	for _, id := range tunnelIDs {
+		_ = a.StopSSHTunnel(id)
+	}
+	for _, id := range transferIDs {
+		_ = a.CloseFileTransfer(id)
+	}
+}
+
 func (a *App) resourceByID(id string) (domain.Endpoint, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -765,6 +900,133 @@ func (a *App) emit(name string, event SSHEvent) {
 		return
 	}
 	wailsruntime.EventsEmit(a.ctx, name, event)
+}
+
+func (a *App) emitData(name string, data interface{}) {
+	if a.ctx == nil {
+		return
+	}
+	wailsruntime.EventsEmit(a.ctx, name, data)
+}
+
+func (a *App) exportDatabaseFromMenu() {
+	if a.ctx == nil {
+		return
+	}
+	path, err := wailsruntime.SaveFileDialog(a.ctx, wailsruntime.SaveDialogOptions{
+		Title:           "Export Bashes Database",
+		DefaultFilename: fmt.Sprintf("bashes-hosts-%s.json", time.Now().Format("20060102")),
+		Filters: []wailsruntime.FileFilter{
+			{DisplayName: "JSON files (*.json)", Pattern: "*.json"},
+		},
+	})
+	if err != nil {
+		a.showErrorDialog("Export Database", err)
+		return
+	}
+	if strings.TrimSpace(path) == "" {
+		return
+	}
+	if err := a.ExportDatabase(path); err != nil {
+		a.showErrorDialog("Export Database", err)
+		return
+	}
+	a.showInfoDialog("Export Database", fmt.Sprintf("Database exported to:\n%s", path))
+	a.emitData("database:exported", map[string]string{"message": "Database exported.", "path": path})
+}
+
+func (a *App) importDatabaseFromMenu() {
+	if a.ctx == nil {
+		return
+	}
+	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title: "Import Bashes Database",
+		Filters: []wailsruntime.FileFilter{
+			{DisplayName: "JSON files (*.json)", Pattern: "*.json"},
+		},
+	})
+	if err != nil {
+		a.showErrorDialog("Import Database", err)
+		return
+	}
+	if strings.TrimSpace(path) == "" {
+		return
+	}
+
+	choice, err := wailsruntime.MessageDialog(a.ctx, wailsruntime.MessageDialogOptions{
+		Type:          wailsruntime.QuestionDialog,
+		Title:         "Import Database",
+		Message:       "Importing a database replaces the current hosts.json after creating hosts.json.bak. Active sessions, tunnels and file transfers will be closed.",
+		Buttons:       []string{"Import", "Cancel"},
+		DefaultButton: "Import",
+		CancelButton:  "Cancel",
+	})
+	if err != nil {
+		a.showErrorDialog("Import Database", err)
+		return
+	}
+	if choice != "Import" {
+		return
+	}
+
+	if err := a.ImportDatabase(path); err != nil {
+		a.showErrorDialog("Import Database", err)
+		return
+	}
+	a.showInfoDialog("Import Database", "Database imported.")
+}
+
+func (a *App) showAboutFromMenu() {
+	a.emitData("app:about", a.GetAppInfo())
+}
+
+func (a *App) checkForUpdatesFromMenu() {
+	info, err := a.CheckForUpdate()
+	if err != nil {
+		a.emitData("app:update-check", map[string]interface{}{
+			"manual": true,
+			"error":  err.Error(),
+		})
+		return
+	}
+	a.emitData("app:update-check", map[string]interface{}{
+		"manual": true,
+		"info":   info,
+	})
+}
+
+func (a *App) openReadmeFromMenu() {
+	if a.ctx != nil {
+		wailsruntime.BrowserOpenURL(a.ctx, readmeURL)
+	}
+}
+
+func (a *App) openReleasesFromMenu() {
+	if a.ctx != nil {
+		wailsruntime.BrowserOpenURL(a.ctx, releasesURL)
+	}
+}
+
+func (a *App) showInfoDialog(title string, message string) {
+	if a.ctx == nil {
+		return
+	}
+	_, _ = wailsruntime.MessageDialog(a.ctx, wailsruntime.MessageDialogOptions{
+		Type:    wailsruntime.InfoDialog,
+		Title:   title,
+		Message: message,
+	})
+}
+
+func (a *App) showErrorDialog(title string, err error) {
+	if a.ctx == nil {
+		return
+	}
+	_, _ = wailsruntime.MessageDialog(a.ctx, wailsruntime.MessageDialogOptions{
+		Type:    wailsruntime.ErrorDialog,
+		Title:   title,
+		Message: err.Error(),
+	})
 }
 
 type eventWriter struct {
@@ -1012,6 +1274,127 @@ func hostKeyPolicy(trustHostKey bool) remotessh.HostKeyPolicy {
 	}
 
 	return remotessh.HostKeyPolicy{}
+}
+
+func appVersion() string {
+	value := strings.TrimSpace(version)
+	if value == "" {
+		return "dev"
+	}
+	return value
+}
+
+func latestGitHubRelease() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/signoredellarete/bashes/releases/latest", nil)
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Accept", "application/vnd.github+json")
+	request.Header.Set("User-Agent", "Bashes/"+appVersion())
+
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return "", fmt.Errorf("check latest release: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return "", fmt.Errorf("check latest release: GitHub returned %s", response.Status)
+	}
+
+	var payload struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		return "", fmt.Errorf("decode latest release: %w", err)
+	}
+	if strings.TrimSpace(payload.TagName) == "" {
+		return "", errors.New("latest release response did not include a tag")
+	}
+	return strings.TrimSpace(payload.TagName), nil
+}
+
+func isNewerVersion(latest string, current string) bool {
+	latestParts, latestOK := versionParts(latest)
+	currentParts, currentOK := versionParts(current)
+	if !latestOK || !currentOK {
+		return false
+	}
+	for index := 0; index < len(latestParts); index++ {
+		if latestParts[index] > currentParts[index] {
+			return true
+		}
+		if latestParts[index] < currentParts[index] {
+			return false
+		}
+	}
+	return false
+}
+
+func versionParts(value string) ([3]int, bool) {
+	var result [3]int
+	value = strings.TrimPrefix(strings.TrimSpace(value), "v")
+	parts := strings.Split(value, ".")
+	if len(parts) < 2 {
+		return result, false
+	}
+	for index := 0; index < len(result); index++ {
+		if index >= len(parts) {
+			break
+		}
+		part := parts[index]
+		if cut := strings.IndexFunc(part, func(r rune) bool { return r < '0' || r > '9' }); cut >= 0 {
+			part = part[:cut]
+		}
+		number, err := strconv.Atoi(part)
+		if err != nil {
+			return result, false
+		}
+		result[index] = number
+	}
+	return result, true
+}
+
+func writeFileAtomic(path string, data []byte, perm fs.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create export directory: %w", err)
+	}
+	info, err := os.Stat(path)
+	if err == nil && info.IsDir() {
+		return fmt.Errorf("export path is a directory: %s", path)
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("stat export path: %w", err)
+	}
+
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temporary export: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write temporary export: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("sync temporary export: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temporary export: %w", err)
+	}
+	if err := os.Chmod(tmpName, perm); err != nil {
+		return fmt.Errorf("chmod temporary export: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("replace export: %w", err)
+	}
+	return nil
 }
 
 func expandHome(path string) string {
