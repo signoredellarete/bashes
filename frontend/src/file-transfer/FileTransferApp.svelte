@@ -1,6 +1,6 @@
 <script>
   import { onDestroy, onMount } from 'svelte';
-  import { Filemanager, Willow } from '@svar-ui/svelte-filemanager';
+  import { Filemanager, WillowDark } from '@svar-ui/svelte-filemanager';
   import {
     closeFileTransfer,
     copyItems,
@@ -445,11 +445,11 @@
     </form>
   {:else if session}
     <div class="transfer-manager" bind:this={managerElement}>
-      <Willow fonts={false}>
+      <WillowDark fonts={false}>
         <Filemanager
           {data}
           mode="panels"
-          preview={true}
+          preview={false}
           icons={localIcon}
           panels={[
             { path: '/local', selected: [] },
@@ -458,7 +458,7 @@
           activePanel={0}
           {init}
         />
-      </Willow>
+      </WillowDark>
     </div>
   {:else}
     <div class="transfer-auth transfer-auth-placeholder">
