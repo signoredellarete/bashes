@@ -37,6 +37,7 @@ const state = {
   lastSessionByResource: new Map(),
   sessionFocusHistory: [],
   sessions: new Map(),
+  pendingSSHOutput: new Map(),
 };
 
 const FILE_TRANSFER_ENABLED = true;
@@ -706,6 +707,7 @@ async function stopSession(sessionID) {
 function removeSessionFromUI(sessionID) {
   const session = state.sessions.get(sessionID);
   state.sessions.delete(sessionID);
+  state.pendingSSHOutput.delete(sessionID);
   forgetSessionFocus(sessionID);
   if (session && state.lastSessionByResource.get(session.resourceId) === sessionID) {
     state.lastSessionByResource.delete(session.resourceId);
@@ -1070,6 +1072,7 @@ function createSession(sessionID, resource) {
     element: pane,
     closed: false,
   });
+  flushPendingSSHOutput(sessionID);
   setActiveSession(sessionID);
   writeNotice(`Connected to ${resource.user}@${resource.ip || resource.hostname}:${resource.port}`);
   renderTabs();
@@ -1835,15 +1838,17 @@ function registerSSHEvents() {
   if (!eventsOn) return;
 
   eventsOn('ssh:output', (event) => {
-    const session = state.sessions.get(event.sessionId);
-    if (session?.terminal) session.terminal.write(event.data ?? '');
+    writeSSHOutput(event.sessionId, event.data ?? '');
   });
   eventsOn('ssh:status', (event) => {
     if (event?.message) writeNotice(event.message);
   });
   eventsOn('ssh:closed', (event) => {
     const session = state.sessions.get(event.sessionId);
-    if (!session) return;
+    if (!session) {
+      state.pendingSSHOutput.delete(event.sessionId);
+      return;
+    }
     removeSessionFromUI(event.sessionId);
     if (event?.message) writeNotice(event.message);
   });
@@ -1855,6 +1860,27 @@ function registerSSHEvents() {
     }
     if (event?.message) writeNotice(event.message);
   });
+}
+
+function writeSSHOutput(sessionID, data) {
+  if (!sessionID || !data) return;
+  const session = state.sessions.get(sessionID);
+  if (session?.terminal) {
+    session.terminal.write(data);
+    return;
+  }
+
+  const current = state.pendingSSHOutput.get(sessionID) ?? '';
+  const next = current + data;
+  state.pendingSSHOutput.set(sessionID, next.length > 262144 ? next.slice(-262144) : next);
+}
+
+function flushPendingSSHOutput(sessionID) {
+  const pending = state.pendingSSHOutput.get(sessionID);
+  if (!pending) return;
+  state.pendingSSHOutput.delete(sessionID);
+  const session = state.sessions.get(sessionID);
+  if (session?.terminal) session.terminal.write(pending);
 }
 
 function wailsAPI() {
