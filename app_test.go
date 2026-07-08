@@ -273,6 +273,15 @@ func TestHostsFilePathForOS(t *testing.T) {
 	if got != want {
 		t.Fatalf("windows hosts path = %q, want %q", got, want)
 	}
+	if got := sshConfigPathForOS("linux", "/home/alice"); got != filepath.Join("/home/alice", ".ssh", "config") {
+		t.Fatalf("linux ssh config path = %q", got)
+	}
+	if got := sshConfigPathForOS("darwin", "/Users/alice"); got != filepath.Join("/Users/alice", ".ssh", "config") {
+		t.Fatalf("darwin ssh config path = %q", got)
+	}
+	if got := sshConfigPathForOS("windows", `C:\Users\Alice`); got != "" {
+		t.Fatalf("windows ssh config path = %q, want empty", got)
+	}
 }
 
 func TestParseHostsFileSkipsLocalAndImportsFirstAlias(t *testing.T) {
@@ -294,6 +303,46 @@ fe80::1 link-local
 	}
 	if entries[1].IP != "192.168.1.20" || entries[1].Hostname != "vm1" {
 		t.Fatalf("second entry = %+v, want vm1", entries[1])
+	}
+}
+
+func TestParseSimpleSSHConfigMatchesExplicitHostsOnly(t *testing.T) {
+	config := parseSimpleSSHConfig([]byte(`
+Host bastion bastion.local
+  HostName 10.0.0.10
+  User admin
+  Port 2202
+
+Host *.prod
+  User ignored
+
+Host vm1
+  User deploy
+  Port 2222
+
+Match host *
+  User ignored
+`))
+
+	if len(config) != 2 {
+		t.Fatalf("parseSimpleSSHConfig() returned %d entries: %+v", len(config), config)
+	}
+	match, ok := config.match(hostsFileEntry{IP: "10.0.0.10", Hostname: "bastion"})
+	if !ok {
+		t.Fatal("expected bastion match")
+	}
+	if match.user != "admin" || match.port != 2202 {
+		t.Fatalf("bastion match = %+v, want admin:2202", match)
+	}
+	match, ok = config.match(hostsFileEntry{IP: "192.168.1.20", Hostname: "vm1"})
+	if !ok {
+		t.Fatal("expected vm1 match")
+	}
+	if match.user != "deploy" || match.port != 2222 {
+		t.Fatalf("vm1 match = %+v, want deploy:2222", match)
+	}
+	if _, ok := config.match(hostsFileEntry{IP: "192.168.1.30", Hostname: "web.prod"}); ok {
+		t.Fatal("wildcard host should not match")
 	}
 }
 
@@ -356,7 +405,7 @@ func TestImportFromHostsFileAddsNewHostsAndSkipsDuplicates(t *testing.T) {
 		t.Fatalf("write hosts file: %v", err)
 	}
 
-	result, err := app.importFromHostsFile(hostsFile, "deploy")
+	result, err := app.importFromHostsFile(hostsFile, "deploy", "")
 	if err != nil {
 		t.Fatalf("importFromHostsFile() error = %v", err)
 	}
@@ -376,6 +425,55 @@ func TestImportFromHostsFileAddsNewHostsAndSkipsDuplicates(t *testing.T) {
 	}
 	if hosts[2].Hostname != "imported-two" {
 		t.Fatalf("second imported host = %+v, want imported-two", hosts[2])
+	}
+}
+
+func TestImportFromHostsFileUsesSimpleSSHConfigOverrides(t *testing.T) {
+	dir := t.TempDir()
+	app := NewApp(filepath.Join(dir, "hosts.json"))
+
+	hostsFile := filepath.Join(dir, "system-hosts")
+	if err := os.WriteFile(hostsFile, []byte(`
+10.0.0.20 bastion
+10.0.0.21 vm1
+10.0.0.22 plain
+`), 0o600); err != nil {
+		t.Fatalf("write hosts file: %v", err)
+	}
+	sshConfig := filepath.Join(dir, "ssh-config")
+	if err := os.WriteFile(sshConfig, []byte(`
+Host bastion
+  User admin
+  Port 2202
+
+Host vm-alias
+  HostName vm1
+  User deploy
+  Port 2222
+`), 0o600); err != nil {
+		t.Fatalf("write ssh config: %v", err)
+	}
+
+	result, err := app.importFromHostsFile(hostsFile, "localuser", sshConfig)
+	if err != nil {
+		t.Fatalf("importFromHostsFile() error = %v", err)
+	}
+	if result.Imported != 3 {
+		t.Fatalf("imported = %d, want 3", result.Imported)
+	}
+
+	hosts, err := app.ListHosts()
+	if err != nil {
+		t.Fatalf("ListHosts() error = %v", err)
+	}
+	if hosts[0].Hostname != "bastion" || hosts[0].User != "admin" || hosts[0].Port != 2202 {
+		t.Fatalf("bastion host = %+v, want admin:2202", hosts[0])
+	}
+	if hosts[1].Hostname != "vm1" || hosts[1].User != "deploy" || hosts[1].Port != 2222 {
+		t.Fatalf("vm1 host = %+v, want deploy:2222", hosts[1])
+	}
+	if hosts[2].Hostname != "plain" || hosts[2].User != "localuser" || hosts[2].Port != 22 {
+		t.Fatalf("plain host = %+v, want localuser:22", hosts[2])
 	}
 }
 

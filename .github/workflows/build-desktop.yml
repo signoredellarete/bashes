@@ -443,8 +443,8 @@ jobs:
           {
             printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
             printf '## RELEASE NOTE\n\n'
-            printf -- '- Add Tools > Import from hosts file for Linux, macOS and Windows hosts files.\n'
-            printf -- '- Skip local and duplicate hosts while importing hosts file entries.\n\n'
+            printf -- '- Use simple ~/.ssh/config User and Port overrides when importing Linux and macOS hosts files.\n'
+            printf -- '- Keep hosts file import conservative by ignoring wildcards, Match and Include rules.\n\n'
             printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
 

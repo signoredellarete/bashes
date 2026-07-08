@@ -125,6 +125,13 @@ func defaultSSHUserForOS(goos string, env func(string) string) string {
 	return "root"
 }
 
+func sshConfigPathForOS(goos string, home string) string {
+	if goos == "windows" || strings.TrimSpace(home) == "" {
+		return ""
+	}
+	return filepath.Join(home, ".ssh", "config")
+}
+
 func getenv(name string) string {
 	return os.Getenv(name)
 }
@@ -216,6 +223,15 @@ type hostsFileEntry struct {
 	Hostname string
 }
 
+type simpleSSHHostConfig struct {
+	aliases  []string
+	hostname string
+	user     string
+	port     int
+}
+
+type simpleSSHConfig []simpleSSHHostConfig
+
 func (a *App) GetAppInfo() AppInfo {
 	return AppInfo{
 		Name:        "Bashes",
@@ -272,10 +288,14 @@ func (a *App) ExportDatabase(path string) error {
 }
 
 func (a *App) ImportFromHostsFile() (HostsFileImportResult, error) {
-	return a.importFromHostsFile(hostsFilePathForOS(goruntime.GOOS, getenv), defaultSSHUserForOS(goruntime.GOOS, getenv))
+	return a.importFromHostsFile(
+		hostsFilePathForOS(goruntime.GOOS, getenv),
+		defaultSSHUserForOS(goruntime.GOOS, getenv),
+		sshConfigPathForOS(goruntime.GOOS, userHomeDir()),
+	)
 }
 
-func (a *App) importFromHostsFile(path string, user string) (HostsFileImportResult, error) {
+func (a *App) importFromHostsFile(path string, user string, sshConfigPath string) (HostsFileImportResult, error) {
 	result := HostsFileImportResult{
 		Path: path,
 		User: user,
@@ -292,6 +312,7 @@ func (a *App) importFromHostsFile(path string, user string) (HostsFileImportResu
 		return result, fmt.Errorf("read hosts file: %w", err)
 	}
 	entries := parseHostsFile(raw)
+	sshConfig := loadSimpleSSHConfig(sshConfigPath)
 
 	repo := store.NewRepository(a.dataPath)
 	data, err := repo.Load()
@@ -318,6 +339,14 @@ func (a *App) importFromHostsFile(path string, user string) (HostsFileImportResu
 			Port:       22,
 			User:       user,
 			Subsystems: []domain.Endpoint{},
+		}
+		if override, ok := sshConfig.match(entry); ok {
+			if override.user != "" {
+				host.User = override.user
+			}
+			if override.port > 0 {
+				host.Port = override.port
+			}
 		}
 		host.ID = domain.StableID(domain.ResourceHost, host.Hostname, host.IP, host.Port, host.User, len(data.Hosts))
 		data.Hosts = append(data.Hosts, host)
@@ -366,6 +395,112 @@ func parseHostsFile(data []byte) []hostsFileEntry {
 		}
 	}
 	return entries
+}
+
+func loadSimpleSSHConfig(path string) simpleSSHConfig {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	return parseSimpleSSHConfig(data)
+}
+
+func parseSimpleSSHConfig(data []byte) simpleSSHConfig {
+	var result simpleSSHConfig
+	var current *simpleSSHHostConfig
+
+	flush := func() {
+		if current == nil || len(current.aliases) == 0 {
+			return
+		}
+		result = append(result, *current)
+	}
+
+	for _, line := range strings.Split(string(data), "\n") {
+		if cut := strings.Index(line, "#"); cut >= 0 {
+			line = line[:cut]
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+
+		key := strings.ToLower(fields[0])
+		switch key {
+		case "host":
+			flush()
+			current = &simpleSSHHostConfig{}
+			for _, alias := range fields[1:] {
+				if isExplicitSSHHostAlias(alias) {
+					current.aliases = append(current.aliases, alias)
+				}
+			}
+			if len(current.aliases) == 0 {
+				current = nil
+			}
+		case "match":
+			flush()
+			current = nil
+		case "hostname":
+			if current != nil && len(fields) > 1 && isExplicitSSHHostAlias(fields[1]) {
+				current.hostname = fields[1]
+			}
+		case "user":
+			if current != nil && len(fields) > 1 {
+				current.user = fields[1]
+			}
+		case "port":
+			if current != nil && len(fields) > 1 {
+				port, err := strconv.Atoi(fields[1])
+				if err == nil && port > 0 && port <= 65535 {
+					current.port = port
+				}
+			}
+		}
+	}
+	flush()
+	return result
+}
+
+func isExplicitSSHHostAlias(alias string) bool {
+	alias = strings.TrimSpace(alias)
+	if alias == "" || strings.HasPrefix(alias, "!") {
+		return false
+	}
+	return !strings.ContainsAny(alias, "*?[]{}")
+}
+
+func (config simpleSSHConfig) match(entry hostsFileEntry) (simpleSSHHostConfig, bool) {
+	for _, item := range config {
+		if item.matches(entry) {
+			return item, true
+		}
+	}
+	return simpleSSHHostConfig{}, false
+}
+
+func (item simpleSSHHostConfig) matches(entry hostsFileEntry) bool {
+	candidates := []string{
+		strings.ToLower(strings.TrimSpace(entry.Hostname)),
+		strings.ToLower(strings.TrimSpace(entry.IP)),
+	}
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		for _, alias := range item.aliases {
+			if strings.ToLower(strings.TrimSpace(alias)) == candidate {
+				return true
+			}
+		}
+		if strings.ToLower(strings.TrimSpace(item.hostname)) == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func skipHostsFileIP(ip net.IP) bool {

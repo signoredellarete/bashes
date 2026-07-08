@@ -200,7 +200,14 @@ Use:
 Tools > Import from hosts file
 ```
 
-Bashes reads the operating system hosts file and imports non-local entries as top-level SSH hosts with port `22` and the current local username as the default SSH user. Existing hostnames or IP addresses already present in Bashes are skipped.
+Bashes reads the operating system hosts file and imports non-local entries as top-level SSH hosts. Existing hostnames or IP addresses already present in Bashes are skipped.
+
+Default connection values:
+
+- Port: `22`
+- User: the current local username
+
+On Linux and macOS, Bashes also reads `~/.ssh/config` and applies simple explicit `Host` blocks when they match a hosts file entry. Only `HostName`, `User` and `Port` are used. Wildcards, `Host *`, `Match` and `Include` are ignored.
 
 Hosts file locations:
 
