@@ -438,8 +438,8 @@ jobs:
           {
             printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
             printf '## RELEASE NOTES\n\n'
-            printf -- '- Fix automatic update notifications so new releases are detected on startup.\n'
-            printf -- '- Avoid suppressing future checks after a temporary update-check failure.\n\n'
+            printf -- '- Add periodic update checks while Bashes remains open.\n'
+            printf -- '- Keep update notifications limited to one alert per released version.\n\n'
             printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
 

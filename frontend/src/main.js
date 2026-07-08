@@ -1937,24 +1937,29 @@ async function withBusy(task) {
 }
 
 function schedulePeriodicUpdateCheck() {
-  window.setTimeout(async () => {
-    try {
-      const info = await apiCheckForUpdate();
-      localStorage.setItem('bashes.updateCheck.lastAt', String(Date.now()));
-      if (!info?.updateAvailable) return;
+  const startupDelayMs = 1200;
+  const periodicIntervalMs = 6 * 60 * 60 * 1000;
+  window.setTimeout(runAutomaticUpdateCheck, startupDelayMs);
+  window.setInterval(runAutomaticUpdateCheck, periodicIntervalMs);
+}
 
-      const latestVersion = String(info.latestVersion ?? '').trim();
-      const notifiedVersion = localStorage.getItem('bashes.updateCheck.notifiedLatest');
-      if (latestVersion && notifiedVersion === latestVersion) return;
+async function runAutomaticUpdateCheck() {
+  try {
+    const info = await apiCheckForUpdate();
+    localStorage.setItem('bashes.updateCheck.lastAt', String(Date.now()));
+    if (!info?.updateAvailable) return;
 
-      showUpdateModal(info, false);
-      if (latestVersion) {
-        localStorage.setItem('bashes.updateCheck.notifiedLatest', latestVersion);
-      }
-    } catch {
-      // Keep update failures silent during startup and retry on the next launch.
+    const latestVersion = String(info.latestVersion ?? '').trim();
+    const notifiedVersion = localStorage.getItem('bashes.updateCheck.notifiedLatest');
+    if (latestVersion && notifiedVersion === latestVersion) return;
+
+    showUpdateModal(info, false);
+    if (latestVersion) {
+      localStorage.setItem('bashes.updateCheck.notifiedLatest', latestVersion);
     }
-  }, 1200);
+  } catch {
+    // Keep update failures silent and retry at the next scheduled check.
+  }
 }
 
 function setDisabledState(disabled) {
