@@ -22,6 +22,10 @@ body,
   margin: 0;
 }
 
+body {
+  overflow: hidden;
+}
+
 button,
 input,
 select,
@@ -32,7 +36,9 @@ textarea {
 #app {
   display: grid;
   grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
 }
 
 #app.sidebar-collapsed {
@@ -42,10 +48,12 @@ textarea {
 .sidebar {
   display: flex;
   min-width: 0;
+  min-height: 0;
   flex-direction: column;
   gap: 12px;
   border-right: 1px solid #d3d9df;
   background: #f9fafb;
+  overflow: hidden;
   padding: 14px;
 }
 
@@ -448,6 +456,7 @@ textarea {
   min-height: 0;
   grid-template-rows: auto minmax(0, 1fr) auto;
   background: #e9edf1;
+  overflow: hidden;
 }
 
 .session-header {
