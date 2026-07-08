@@ -1937,17 +1937,22 @@ async function withBusy(task) {
 }
 
 function schedulePeriodicUpdateCheck() {
-  const oneDayMs = 24 * 60 * 60 * 1000;
-  const lastCheck = Number.parseInt(localStorage.getItem('bashes.updateCheck.lastAt') ?? '0', 10);
-  if (Number.isFinite(lastCheck) && Date.now() - lastCheck < oneDayMs) return;
-
   window.setTimeout(async () => {
     try {
       const info = await apiCheckForUpdate();
       localStorage.setItem('bashes.updateCheck.lastAt', String(Date.now()));
-      if (info?.updateAvailable) showUpdateModal(info, false);
+      if (!info?.updateAvailable) return;
+
+      const latestVersion = String(info.latestVersion ?? '').trim();
+      const notifiedVersion = localStorage.getItem('bashes.updateCheck.notifiedLatest');
+      if (latestVersion && notifiedVersion === latestVersion) return;
+
+      showUpdateModal(info, false);
+      if (latestVersion) {
+        localStorage.setItem('bashes.updateCheck.notifiedLatest', latestVersion);
+      }
     } catch {
-      localStorage.setItem('bashes.updateCheck.lastAt', String(Date.now()));
+      // Keep update failures silent during startup and retry on the next launch.
     }
   }, 1200);
 }

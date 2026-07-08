@@ -438,8 +438,8 @@ jobs:
           {
             printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
             printf '## RELEASE NOTES\n\n'
-            printf -- '- Set the Svar file manager to dark mode by default.\n'
-            printf -- '- Disable file preview by default in the file transfer modal.\n\n'
+            printf -- '- Fix automatic update notifications so new releases are detected on startup.\n'
+            printf -- '- Avoid suppressing future checks after a temporary update-check failure.\n\n'
             printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
 
