@@ -438,9 +438,9 @@ jobs:
           {
             printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
             printf '## RELEASE NOTES\n\n'
-            printf -- '- Update GitHub Actions to Node.js 24-compatible action versions.\n'
-            printf -- '- Refresh application icon assets from the bundled Bashes icon.\n'
-            printf -- '- Include Linux ARM64 as a required release build.\n\n'
+            printf -- '- Fix Linux window icon handling and desktop launcher grouping.\n'
+            printf -- '- Install pre-scaled Linux hicolor icons for sharper launcher and panel rendering.\n'
+            printf -- '- Rename the Linux installer script to install-bashes-linux.sh.\n\n'
             printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
 

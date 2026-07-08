@@ -11,10 +11,14 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/menu"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	linuxopts "github.com/wailsapp/wails/v2/pkg/options/linux"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
+
+//go:embed icons/bashes.png
+var appIcon []byte
 
 func main() {
 	app := NewApp("")
@@ -27,6 +31,10 @@ func main() {
 		OnStartup: app.startup,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
+		},
+		Linux: &linuxopts.Options{
+			Icon:        appIcon,
+			ProgramName: "bashes",
 		},
 		Bind: []interface{}{
 			app,

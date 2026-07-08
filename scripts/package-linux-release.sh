@@ -18,6 +18,9 @@ mkdir -p "$package_dir/icons"
 cp "$binary_source" "$package_dir/bashes"
 chmod 755 "$package_dir/bashes"
 cp icons/bashes.png "$package_dir/icons/bashes.png"
+if [ -d icons/hicolor ]; then
+  cp -R icons/hicolor "$package_dir/icons/"
+fi
 
 cat > "$package_dir/bashes.desktop.template" <<'DESKTOP'
 [Desktop Entry]
@@ -29,6 +32,7 @@ Icon=@APPDIR@/icons/bashes.png
 Terminal=false
 Categories=Network;RemoteAccess;
 StartupNotify=true
+StartupWMClass=bashes
 DESKTOP
 
 cat > "$package_dir/install-desktop-entry.sh" <<'INSTALLER'
@@ -51,6 +55,7 @@ Icon=${app_dir}/icons/bashes.png
 Terminal=false
 Categories=Network;RemoteAccess;
 StartupNotify=true
+StartupWMClass=bashes
 DESKTOP
 
 chmod 644 "$desktop_file"

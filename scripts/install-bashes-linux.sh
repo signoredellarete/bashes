@@ -7,11 +7,12 @@ install_dir="${BASHES_INSTALL_DIR:-$HOME/.local/opt/bashes}"
 bin_dir="${BASHES_BIN_DIR:-$HOME/.local/bin}"
 share_dir="${XDG_DATA_HOME:-$HOME/.local/share}"
 applications_dir="$share_dir/applications"
-icon_dir="$share_dir/icons/hicolor/256x256/apps"
+icon_theme_dir="$share_dir/icons/hicolor"
+icon_sizes="16 22 24 32 48 64 128 256 512"
 binary_path="$install_dir/bashes"
 bin_link="$bin_dir/bashes"
 desktop_file="$applications_dir/bashes.desktop"
-icon_file="$icon_dir/bashes.png"
+primary_icon_file="$icon_theme_dir/256x256/apps/bashes.png"
 
 die() {
   printf 'Error: %s\n' "$*" >&2
@@ -81,7 +82,41 @@ latest_version() {
 }
 
 safe_mkdirs() {
-  mkdir -p "$install_dir" "$bin_dir" "$applications_dir" "$icon_dir"
+  mkdir -p "$install_dir" "$bin_dir" "$applications_dir"
+  for size in $icon_sizes; do
+    mkdir -p "$icon_theme_dir/${size}x${size}/apps"
+  done
+}
+
+install_icon_size() {
+  size="$1"
+  source_file="$2"
+  target_file="$icon_theme_dir/${size}x${size}/apps/bashes.png"
+  install -m 0644 "$source_file" "$target_file"
+}
+
+install_icons() {
+  package_icon_root="$1"
+  fallback_icon="$2"
+  installed_any=false
+
+  if [ -d "$package_icon_root/hicolor" ]; then
+    for size in $icon_sizes; do
+      source_file="$package_icon_root/hicolor/${size}x${size}/apps/bashes.png"
+      if [ -f "$source_file" ]; then
+        install_icon_size "$size" "$source_file"
+        installed_any=true
+      fi
+    done
+  fi
+
+  if [ "$installed_any" = false ]; then
+    if [ -f "$package_icon_root/bashes.png" ]; then
+      install_icon_size 256 "$package_icon_root/bashes.png"
+    else
+      install_icon_size 256 "$fallback_icon"
+    fi
+  fi
 }
 
 install_desktop_entry() {
@@ -95,6 +130,7 @@ Icon=bashes
 Terminal=false
 Categories=Network;RemoteAccess;System;
 StartupNotify=true
+StartupWMClass=bashes
 DESKTOP
 
   chmod 644 "$desktop_file"
@@ -143,19 +179,19 @@ main() {
   mv -f "$binary_path.new" "$binary_path"
   printf '%s\n' "$release_version" > "$install_dir/VERSION"
 
-  if [ -f "$tmp_dir/extract/bashes-linux-$arch/icons/bashes.png" ]; then
-    install -m 0644 "$tmp_dir/extract/bashes-linux-$arch/icons/bashes.png" "$icon_file"
-  else
+  if [ ! -f "$tmp_dir/extract/bashes-linux-$arch/icons/bashes.png" ] && [ ! -d "$tmp_dir/extract/bashes-linux-$arch/icons/hicolor" ]; then
     download "$icon_url" "$tmp_dir/bashes.png"
-    install -m 0644 "$tmp_dir/bashes.png" "$icon_file"
   fi
+  fallback_icon="$tmp_dir/bashes.png"
+  [ -f "$fallback_icon" ] || fallback_icon="$tmp_dir/extract/bashes-linux-$arch/icons/bashes.png"
+  install_icons "$tmp_dir/extract/bashes-linux-$arch/icons" "$fallback_icon"
 
   ln -sfn "$binary_path" "$bin_link"
   install_desktop_entry
 
   printf 'Installed binary: %s\n' "$binary_path"
   printf 'Installed launcher: %s\n' "$desktop_file"
-  printf 'Installed icon: %s\n' "$icon_file"
+  printf 'Installed icon: %s\n' "$primary_icon_file"
 
   case ":$PATH:" in
     *":$bin_dir:"*) ;;

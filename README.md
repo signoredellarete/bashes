@@ -48,8 +48,8 @@ Download the latest release from GitHub Releases and choose the package for your
 The recommended Linux install method is the user-local installer script:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/signoredellarete/bashes/main/scripts/install-or-update-linux.sh
-bash install-or-update-linux.sh
+curl -fsSLO https://raw.githubusercontent.com/signoredellarete/bashes/main/scripts/install-bashes-linux.sh
+bash install-bashes-linux.sh
 ```
 
 The same command updates an existing installation to the latest GitHub release. It installs the app without `sudo`, creates a desktop launcher, and registers the Bashes icon for the current user.
@@ -57,7 +57,7 @@ The same command updates an existing installation to the latest GitHub release. 
 To install a specific release:
 
 ```bash
-BASHES_VERSION=v0.1.38 bash install-or-update-linux.sh
+BASHES_VERSION=v0.1.48 bash install-bashes-linux.sh
 ```
 
 The script currently supports Linux `amd64` and `arm64`, matching the release assets.
@@ -115,7 +115,7 @@ The Linux install/update script writes the application binary and launcher files
 ~/.local/opt/bashes/VERSION
 ~/.local/bin/bashes
 ${XDG_DATA_HOME:-$HOME/.local/share}/applications/bashes.desktop
-${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/256x256/apps/bashes.png
+${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/<size>x<size>/apps/bashes.png
 ```
 
 Re-running the script replaces only the installed binary, version marker, launcher and icon. It does not delete or rewrite the Bashes data directory, `hosts.json`, backups or generated SSH keys.
