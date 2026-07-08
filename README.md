@@ -36,24 +36,29 @@ Download the latest release from GitHub Releases and choose the package for your
 - Linux amd64: `bashes-linux-amd64.tar.gz`
 - macOS Apple Silicon and Intel: `bashes-darwin-universal.zip`
 - Windows amd64: `bashes-windows-amd64.zip`
-- Linux arm64: `bashes-linux-arm64.tar.gz` when available
+- Linux arm64: `bashes-linux-arm64.tar.gz`
 - Windows arm64: `bashes-windows-arm64.zip`
 
 ### Linux
 
-Extract the archive into a folder you want to keep, then run:
+The recommended Linux install method is the user-local installer script:
 
 ```bash
-./bashes
+curl -fsSLO https://raw.githubusercontent.com/signoredellarete/bashes/main/scripts/install-or-update-linux.sh
+bash install-or-update-linux.sh
 ```
 
-To add Bashes to your desktop application launcher, run the included script from the extracted folder:
+The same command updates an existing installation to the latest GitHub release. It installs the app without `sudo`, creates a desktop launcher, and registers the Bashes icon for the current user.
+
+To install a specific release:
 
 ```bash
-./install-desktop-entry.sh
+BASHES_VERSION=v0.1.38 bash install-or-update-linux.sh
 ```
 
-That script creates a user-local launcher entry pointing to the extracted `bashes` binary and bundled icon.
+The script currently supports Linux `amd64` and `arm64`, matching the release assets.
+
+You can still use the release archive manually: extract `bashes-linux-<arch>.tar.gz` into a folder you want to keep and run `./bashes`.
 
 ### macOS
 
@@ -99,11 +104,17 @@ Files and folders:
 - `keys/<name>`: generated private key.
 - `keys/<name>.pub`: generated public key.
 
-If `install-desktop-entry.sh` is used, it also writes:
+The Linux install/update script writes the application binary and launcher files for the current user:
 
 ```text
+~/.local/opt/bashes/bashes
+~/.local/opt/bashes/VERSION
+~/.local/bin/bashes
 ${XDG_DATA_HOME:-$HOME/.local/share}/applications/bashes.desktop
+${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/256x256/apps/bashes.png
 ```
+
+Re-running the script replaces only the installed binary, version marker, launcher and icon. It does not delete or rewrite the Bashes data directory, `hosts.json`, backups or generated SSH keys.
 
 ### macOS
 
