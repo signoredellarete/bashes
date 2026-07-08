@@ -438,9 +438,8 @@ jobs:
           {
             printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
             printf '## RELEASE NOTES\n\n'
-            printf -- '- Fix Linux window icon handling and desktop launcher grouping.\n'
-            printf -- '- Install pre-scaled Linux hicolor icons for sharper launcher and panel rendering.\n'
-            printf -- '- Rename the Linux installer script to install-bashes-linux.sh.\n\n'
+            printf -- '- Set the Svar file manager to dark mode by default.\n'
+            printf -- '- Disable file preview by default in the file transfer modal.\n\n'
             printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
 
