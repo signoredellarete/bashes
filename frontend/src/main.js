@@ -165,6 +165,7 @@ app.innerHTML = `
       </header>
 
       <p id="connect-summary" class="parent-summary"></p>
+      <p class="inline-status" id="connect-status" hidden></p>
 
       <label>
         <span>Bashes Key</span>
@@ -485,21 +486,29 @@ async function submitConnect(event) {
   const form = event.currentTarget;
   await withBusy(async () => {
     const target = `${selected.user}@${selected.ip || selected.hostname}:${selected.port}`;
+    setConnectStatus('', '');
     writeNotice(`Connecting to ${target} ...`);
-    const sessionID = await apiStartSSHSession({
-      resourceId: selected.id,
-      keyName: form.elements.keyName.value,
-      password: form.elements.password.value,
-      privateKeyPath: form.elements.privateKeyPath.value.trim(),
-      privateKeyPassphrase: form.elements.privateKeyPassphrase.value,
-      trustHostKey: form.elements.trustHostKey.checked,
-      cols: 120,
-      rows: 32,
-    });
-    createSession(sessionID, selected);
-    closeConnectPanel();
-    await refreshHosts();
-    resizeActiveSession();
+    try {
+      const sessionID = await apiStartSSHSession({
+        resourceId: selected.id,
+        keyName: form.elements.keyName.value,
+        password: form.elements.password.value,
+        privateKeyPath: form.elements.privateKeyPath.value.trim(),
+        privateKeyPassphrase: form.elements.privateKeyPassphrase.value,
+        trustHostKey: form.elements.trustHostKey.checked,
+        cols: 120,
+        rows: 32,
+      });
+      createSession(sessionID, selected);
+      closeConnectPanel();
+      await refreshHosts();
+      resizeActiveSession();
+    } catch (error) {
+      const message = connectErrorMessage(error, selected);
+      setConnectStatus(message, 'error');
+      writeNotice(message);
+      if (isAuthError(error)) focusConnectPasswordInput(form);
+    }
   });
 }
 
@@ -552,8 +561,9 @@ async function quickConnect(resource) {
       await refreshHosts();
       resizeActiveSession();
     } catch (error) {
-      writeNotice(`Connection needs credentials: ${error?.message ?? error}`);
-      await openConnectPanel();
+      const message = connectErrorMessage(error, resource);
+      writeNotice(message);
+      await openConnectPanel(message, 'error');
     }
   });
 }
@@ -1292,7 +1302,7 @@ function closeResourcePanel() {
   state.editResourceId = null;
 }
 
-async function openConnectPanel() {
+async function openConnectPanel(statusMessage = '', statusKind = '') {
   const selected = findResource(state.selectedId)?.resource;
   if (!selected) return;
 
@@ -1307,6 +1317,7 @@ async function openConnectPanel() {
   document.querySelector('#connect-summary').textContent =
     `${realSessionCount > 0 ? 'New session: ' : ''}${selected.user}@${selected.ip || selected.hostname}:${selected.port}`;
   form.querySelector('button[type="submit"]').textContent = 'Connect';
+  setConnectStatus(statusMessage, statusKind);
   panel.hidden = false;
   requestAnimationFrame(() => panel.classList.add('open'));
   focusConnectPasswordInput(form);
@@ -1325,6 +1336,7 @@ function closeConnectPanel() {
   const panel = document.querySelector('#connect-panel');
   panel.classList.remove('open');
   panel.hidden = true;
+  setConnectStatus('', '');
 }
 
 async function openTunnelPanel() {
@@ -1660,10 +1672,45 @@ function setKeyInstallStatus(message, kind) {
   status.dataset.kind = kind;
 }
 
+function setConnectStatus(message, kind) {
+  const status = document.querySelector('#connect-status');
+  if (!status) return;
+  status.textContent = message;
+  status.title = message;
+  status.hidden = !message;
+  status.dataset.kind = kind;
+}
+
+function connectErrorMessage(error, resource) {
+  const detail = String(error?.message ?? error ?? '').trim();
+  const target = `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`;
+  if (isAuthError(error)) {
+    return `Could not authenticate to ${target}. Enter the remote password or configure a valid SSH key.`;
+  }
+  if (/host key|knownhosts|known host/i.test(detail)) {
+    return `Could not verify ${target}. Enable "Trust host key for this session" if this is the expected server.`;
+  }
+  if (/timeout|deadline|i\/o timeout|operation timed out|context canceled|context deadline exceeded/i.test(detail)) {
+    return `Could not connect to ${target}: connection timed out.`;
+  }
+  if (/no route to host|network is unreachable|host is down/i.test(detail)) {
+    return `Could not connect to ${target}: host is unreachable.`;
+  }
+  if (/connection refused/i.test(detail)) {
+    return `Could not connect to ${target}: connection refused.`;
+  }
+  return `Could not connect to ${target}: ${detail || 'unknown error'}`;
+}
+
+function isAuthError(error) {
+  const detail = String(error?.message ?? error ?? '');
+  return /unable to authenticate|no supported methods|no SSH authentication method|handshake failed|permission denied/i.test(detail);
+}
+
 function keyInstallErrorMessage(error, resource) {
   const detail = String(error?.message ?? error ?? '').trim();
   const target = `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`;
-  if (/unable to authenticate|no supported methods|no SSH authentication method|handshake failed/i.test(detail)) {
+  if (isAuthError(error)) {
     return `Could not connect to ${target} to install the SSH key. Enter the remote password or configure a valid existing key.`;
   }
   if (/host key|knownhosts|known host/i.test(detail)) {

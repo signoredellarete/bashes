@@ -13,7 +13,7 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
-const DefaultTimeout = 15 * time.Second
+const DefaultTimeout = 3 * time.Second
 
 type Target struct {
 	Host string
