@@ -438,8 +438,10 @@ jobs:
           {
             printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
             printf '## RELEASE NOTES\n\n'
-            printf -- '- Add support for PuTTY PPK private keys, including keys commonly exported by MobaXterm on Windows.\n'
-            printf -- '- Improve private key format errors to mention supported OpenSSH/PEM and PuTTY PPK formats.\n\n'
+            printf -- '- Add SSH key discovery from the system .ssh directory and an optional custom keys directory.\n'
+            printf -- '- Improve SSH key selection so managed keys, system keys and custom key paths stay distinct.\n'
+            printf -- '- Fix clipboard paste in the terminal on Linux by using the native Wails clipboard API.\n'
+            printf -- '- Add a compact cut/copy/paste context menu for editable fields in the app.\n\n'
             printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
 
