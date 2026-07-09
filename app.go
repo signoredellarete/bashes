@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -21,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kayrus/putty"
 	"github.com/signoredellarete/bashes/internal/application"
 	"github.com/signoredellarete/bashes/internal/domain"
 	"github.com/signoredellarete/bashes/internal/localterm"
@@ -1642,6 +1644,10 @@ func defaultPrivateKeyAuthMethods(passphrase string) []ssh.AuthMethod {
 }
 
 func parsePrivateKey(key []byte, passphrase string) (ssh.Signer, error) {
+	if isPuttyPrivateKey(key) {
+		return parsePuttyPrivateKey(key, passphrase)
+	}
+
 	if strings.TrimSpace(passphrase) != "" {
 		signer, err := ssh.ParsePrivateKeyWithPassphrase(key, []byte(passphrase))
 		if err != nil {
@@ -1652,7 +1658,33 @@ func parsePrivateKey(key []byte, passphrase string) (ssh.Signer, error) {
 
 	signer, err := ssh.ParsePrivateKey(key)
 	if err != nil {
-		return nil, fmt.Errorf("parse private key: %w", err)
+		return nil, fmt.Errorf("parse private key: %w. Supported formats are OpenSSH/PEM private keys and PuTTY PPK keys", err)
+	}
+	return signer, nil
+}
+
+func isPuttyPrivateKey(key []byte) bool {
+	normalized := bytes.TrimSpace(bytes.TrimPrefix(key, []byte{0xef, 0xbb, 0xbf}))
+	return bytes.HasPrefix(normalized, []byte("PuTTY-User-Key-File-"))
+}
+
+func parsePuttyPrivateKey(key []byte, passphrase string) (ssh.Signer, error) {
+	puttyKey, err := putty.New(key)
+	if err != nil {
+		return nil, fmt.Errorf("parse PuTTY PPK private key: %w", err)
+	}
+
+	rawKey, err := puttyKey.ParseRawPrivateKey([]byte(passphrase))
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "expecting password") {
+			return nil, errors.New("parse PuTTY PPK private key: key is encrypted; enter the key passphrase")
+		}
+		return nil, fmt.Errorf("parse PuTTY PPK private key: %w", err)
+	}
+
+	signer, err := ssh.NewSignerFromKey(rawKey)
+	if err != nil {
+		return nil, fmt.Errorf("create signer from PuTTY PPK private key: %w", err)
 	}
 	return signer, nil
 }

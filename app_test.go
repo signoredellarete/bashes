@@ -497,6 +497,36 @@ func TestIsNewerVersion(t *testing.T) {
 	}
 }
 
+func TestParsePrivateKeyAcceptsPuttyPPK(t *testing.T) {
+	signer, err := parsePrivateKey([]byte(testPuttyPPK), "")
+	if err != nil {
+		t.Fatalf("parsePrivateKey(PPK) error = %v", err)
+	}
+	if signer.PublicKey().Type() != "ssh-rsa" {
+		t.Fatalf("PPK signer type = %q, want ssh-rsa", signer.PublicKey().Type())
+	}
+}
+
+func TestIsPuttyPrivateKeyAllowsWhitespaceAndBOM(t *testing.T) {
+	key := append([]byte{0xef, 0xbb, 0xbf, '\n'}, []byte("PuTTY-User-Key-File-2: ssh-rsa\n")...)
+	if !isPuttyPrivateKey(key) {
+		t.Fatal("isPuttyPrivateKey() = false, want true")
+	}
+}
+
+const testPuttyPPK = `PuTTY-User-Key-File-2: ssh-rsa
+Encryption: none
+Comment: a@b
+Public-Lines: 2
+AAAAB3NzaC1yc2EAAAABJQAAAEEAqexbeyaaBw2rFZc2vwg4DqjOo6fQyOdfo9O2
+20y96bUlHRYzRWmIDzHC5gZBzlHQ6M56dprxhCJbsIQig+sQ+w==
+Private-Lines: 4
+AAAAQBb2bTonz6AWmpQ3B2XsWpoyfMoB68gfREaSO04RShipjkwri4K8DmSX1+Nb
+xUyFO7aS7rpsO3mitZtYt3bS3z0AAAAhANvUiZew5AgUZ3peSzSqaVch4vapHml4
+7nx03dx4aS5JAAAAIQDF4bDGZq973zNxW62MVA6MsxKdNsIDILMFvhXFNc/VIwAA
+ACEAgd1SYGV2aEEMQaMGQ4CnjQeiAuZL4z7OVTBTrtGap1A=
+Private-MAC: 3c3a9bd98e8e912f6163be95321676b6103aaed8`
+
 func applicationEndpoint(hostname string, ip string) application.EndpointInput {
 	return application.EndpointInput{
 		Hostname: hostname,

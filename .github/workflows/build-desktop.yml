@@ -438,9 +438,8 @@ jobs:
           {
             printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
             printf '## RELEASE NOTES\n\n'
-            printf -- '- Add a localhost shell card backed by a native PTY on Linux and macOS.\n'
-            printf -- '- Open an initial local shell tab by default where supported.\n'
-            printf -- '- Keep the localhost card out of hosts.json and hidden on Windows for now.\n\n'
+            printf -- '- Add support for PuTTY PPK private keys, including keys commonly exported by MobaXterm on Windows.\n'
+            printf -- '- Improve private key format errors to mention supported OpenSSH/PEM and PuTTY PPK formats.\n\n'
             printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
 
