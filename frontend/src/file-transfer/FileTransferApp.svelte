@@ -41,6 +41,7 @@
   let cleanupJobEvents = () => {};
   let jobs = [];
   let jobRefreshTargets = new Map();
+  let pointerDrag = null;
   let activeJobState = false;
 
   $: publishActiveTransferState(hasActiveJobs(jobs));
@@ -279,6 +280,10 @@
     }
   }
 
+  function dismissJob(jobId) {
+    jobs = jobs.filter((job) => job.jobId !== jobId);
+  }
+
   function updateStatusFromJob(job) {
     if (job.status === 'completed') {
       status = `${job.move ? 'Moved' : 'Copied'} ${job.sourceIds?.length || job.sourcePaths?.length || 1} item${(job.sourceIds?.length || job.sourcePaths?.length || 1) === 1 ? '' : 's'}`;
@@ -341,6 +346,13 @@
 
   function basename(id) {
     return id.slice(id.lastIndexOf('/') + 1);
+  }
+
+  function displayName(value) {
+    const clean = String(value ?? '').replaceAll('\\', '/');
+    const trimmed = clean.endsWith('/') ? clean.slice(0, -1) : clean;
+    const name = trimmed.slice(trimmed.lastIndexOf('/') + 1);
+    return name || trimmed || 'Transfer';
   }
 
   function unique(values) {
@@ -419,6 +431,7 @@
       ['dragleave', handleDragLeave, true],
       ['dragover', handleDragOver, true],
       ['drop', handleDrop, true],
+      ['pointerdown', handlePointerDown, true],
     ];
 
     const attached = [];
@@ -436,7 +449,75 @@
           target().removeEventListener(eventName, handler, { capture });
         }
       }
+      cleanupPointerDrag();
     };
+  }
+
+  function handlePointerDown(event) {
+    if (event.button !== 0 || event.target.closest('button, input, textarea, select, a')) return;
+    const id = transferIdFromElement(event.target);
+    if (!isTransferItem(id)) return;
+    pointerDrag = {
+      active: false,
+      id,
+      ids: selectedDragIds(id),
+      pointerId: event.pointerId,
+      shiftKey: event.shiftKey,
+      startX: event.clientX,
+      startY: event.clientY,
+    };
+    window.addEventListener('pointermove', handlePointerMove, true);
+    window.addEventListener('pointerup', handlePointerUp, true);
+    window.addEventListener('pointercancel', handlePointerCancel, true);
+  }
+
+  function handlePointerMove(event) {
+    if (!pointerDrag || pointerDrag.pointerId !== event.pointerId) return;
+    const distance = Math.hypot(event.clientX - pointerDrag.startX, event.clientY - pointerDrag.startY);
+    if (!pointerDrag.active && distance < 8) return;
+    if (!pointerDrag.active) {
+      pointerDrag.active = true;
+      dragging = true;
+      dragDepth = 1;
+      status = `Dragging ${pointerDrag.ids.length} item${pointerDrag.ids.length === 1 ? '' : 's'}`;
+      document.body.classList.add('dragging-file-transfer-item');
+    }
+    pointerDrag.shiftKey = event.shiftKey;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  async function handlePointerUp(event) {
+    if (!pointerDrag || pointerDrag.pointerId !== event.pointerId) return;
+    const drag = pointerDrag;
+    cleanupPointerDrag();
+    if (!drag.active) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const targetElement = document.elementFromPoint(event.clientX, event.clientY);
+    const target = dropTargetFromElement(targetElement);
+    if (!target || !session?.sessionId) return;
+    await runOperation(async () => {
+      const parents = unique([...drag.ids.map(parentId), target]);
+      const job = await startCopyJob(session.sessionId, drag.ids, target, drag.shiftKey);
+      trackJob(job, parents);
+      status = `${drag.shiftKey ? 'Moving' : 'Copying'} ${drag.ids.length} item${drag.ids.length === 1 ? '' : 's'}`;
+    });
+  }
+
+  function handlePointerCancel(event) {
+    if (!pointerDrag || pointerDrag.pointerId !== event.pointerId) return;
+    cleanupPointerDrag();
+  }
+
+  function cleanupPointerDrag() {
+    pointerDrag = null;
+    dragging = false;
+    dragDepth = 0;
+    document.body.classList.remove('dragging-file-transfer-item');
+    window.removeEventListener('pointermove', handlePointerMove, true);
+    window.removeEventListener('pointerup', handlePointerUp, true);
+    window.removeEventListener('pointercancel', handlePointerCancel, true);
   }
 
   function handleDragStart(event) {
@@ -524,12 +605,16 @@
   }
 
   function dropTarget(event) {
+    return dropTargetFromElement(event.target);
+  }
+
+  function dropTargetFromElement(element) {
     const state = api?.getState();
     if (!state) return null;
-    const panelElement = event.target.closest('[data-panel]');
+    const panelElement = element?.closest?.('[data-panel]');
     const panelIndex = Number(panelElement?.dataset.panel ?? state.activePanel ?? 0);
     const panel = state.panels[panelIndex];
-    const id = transferIdFromElement(event.target);
+    const id = transferIdFromElement(element);
     const item = id ? api.getFile(id) : null;
     return item?.type === 'folder' ? id : panel?.path;
   }
@@ -562,14 +647,17 @@
             <span>{job.status}</span>
             <strong>{progressValue(job)}%</strong>
           </div>
-          <div class="transfer-job-current" title={job.current || job.targetId}>{job.current || job.targetId}</div>
+          <div class="transfer-job-current" title={job.current || job.sourceIds?.[0] || job.sourcePaths?.[0] || job.targetId}>
+            {displayName(job.current || job.sourceIds?.[0] || job.sourcePaths?.[0] || job.targetId)}
+          </div>
           <progress value={job.transferredBytes} max={job.totalBytes || 1}></progress>
           <div class="transfer-job-footer">
             <span>{formatBytes(job.transferredBytes)}{job.totalBytes ? ` / ${formatBytes(job.totalBytes)}` : ''}</span>
             {#if job.status === 'queued' || job.status === 'running'}
               <button type="button" onclick={() => cancelTransferJob(job.jobId)}>Cancel</button>
-            {:else if job.error}
-              <span class="transfer-job-error">{job.error}</span>
+            {:else}
+              {#if job.error}<span class="transfer-job-error" title={job.error}>{job.error}</span>{/if}
+              <button type="button" onclick={() => dismissJob(job.jobId)}>Close</button>
             {/if}
           </div>
         </article>

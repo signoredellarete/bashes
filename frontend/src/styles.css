@@ -1110,6 +1110,11 @@ textarea {
   user-select: none;
 }
 
+.dragging-file-transfer-item {
+  cursor: grabbing;
+  user-select: none;
+}
+
 .transfer-shell {
   display: flex;
   flex-direction: column;
