@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -35,7 +36,7 @@ func StartShell(options ShellOptions) (*Shell, error) {
 		return nil, fmt.Errorf("local shell not found")
 	}
 
-	cmd := exec.Command(shellPath)
+	cmd := localShellCommand(shellPath, runtime.GOOS)
 	cmd.Env = localShellEnv(options.Term)
 	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
 		cmd.Dir = home
@@ -116,6 +117,14 @@ func (s *Shell) closeFile() error {
 	err := s.file.Close()
 	s.file = nil
 	return err
+}
+
+func localShellCommand(shellPath string, goos string) *exec.Cmd {
+	cmd := exec.Command(shellPath)
+	if goos == "darwin" {
+		cmd.Args[0] = "-" + filepath.Base(shellPath)
+	}
+	return cmd
 }
 
 func defaultShellPath() string {

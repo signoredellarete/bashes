@@ -47,6 +47,18 @@ func TestStartShellRunsInteractiveCommand(t *testing.T) {
 	}
 }
 
+func TestLocalShellCommandUsesLoginShellOnDarwinOnly(t *testing.T) {
+	darwin := localShellCommand("/bin/zsh", "darwin")
+	if darwin.Args[0] != "-zsh" {
+		t.Fatalf("darwin shell argv[0] = %q, want -zsh", darwin.Args[0])
+	}
+
+	linux := localShellCommand("/bin/bash", "linux")
+	if linux.Args[0] != "/bin/bash" {
+		t.Fatalf("linux shell argv[0] = %q, want /bin/bash", linux.Args[0])
+	}
+}
+
 type lockedBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
