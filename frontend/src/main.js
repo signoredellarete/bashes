@@ -41,11 +41,12 @@ const state = {
   sessionFocusHistory: [],
   sessions: new Map(),
   pendingSSHOutput: new Map(),
+  fileTransferWorkspaces: new Map(),
+  activeFileTransferResourceId: null,
 };
 
 const FILE_TRANSFER_ENABLED = true;
 const LOCAL_RESOURCE_ID = '__bashes_localhost__';
-let unmountFileTransfer = null;
 
 function localResource() {
   return {
@@ -284,14 +285,17 @@ app.innerHTML = `
   </section>
 
   <section id="file-transfer-modal" class="file-transfer-modal" hidden>
-    <div class="file-transfer-scrim" data-close-file-transfer></div>
+    <div class="file-transfer-scrim"></div>
     <section class="file-transfer-card">
       <header class="file-transfer-header">
         <div>
           <p class="eyebrow">File Transfer</p>
           <h3 id="file-transfer-title">Files</h3>
         </div>
-        <button class="close-panel" type="button" data-close-file-transfer title="Close">X</button>
+        <div class="file-transfer-header-actions">
+          <button id="file-transfer-background" class="secondary" type="button" title="Send transfer window to background">Background</button>
+          <button class="close-panel" type="button" data-close-file-transfer title="Close">X</button>
+        </div>
       </header>
       <div id="file-transfer-root" class="file-transfer-root"></div>
       <div id="file-transfer-resize-handle" class="file-transfer-resize-handle" title="Resize" aria-hidden="true"></div>
@@ -455,7 +459,9 @@ document.querySelectorAll('[data-close-keys]').forEach((element) => {
 document.querySelectorAll('[data-close-file-transfer]').forEach((element) => {
   element.addEventListener('click', () => closeFileTransferModal());
 });
+document.querySelector('#file-transfer-background').addEventListener('click', () => backgroundFileTransferModal());
 registerFileTransferModalResize();
+registerFileTransferModalDrag();
 document.querySelectorAll('[data-confirm-cancel]').forEach((element) => {
   element.addEventListener('click', () => resolveConfirmModal(false));
 });
@@ -1665,22 +1671,74 @@ async function openFileTransferModal() {
   panel.hidden = false;
   requestAnimationFrame(() => panel.classList.add('open'));
 
-  if (unmountFileTransfer) unmountFileTransfer();
-  const { mountFileTransfer } = await import('./file-transfer/mount.js');
-  unmountFileTransfer = mountFileTransfer(root, {
-    resource: selected,
-  });
+  let workspace = state.fileTransferWorkspaces.get(selected.id);
+  if (!workspace) {
+    const { mountFileTransfer } = await import('./file-transfer/mount.js');
+    const element = document.createElement('div');
+    element.className = 'file-transfer-workspace';
+    element.dataset.resourceId = selected.id;
+    element.addEventListener('bashes-file-transfer-active', (event) => {
+      workspace.active = Boolean(event.detail?.active);
+    });
+    root.append(element);
+    workspace = {
+      active: false,
+      element,
+      resource: selected,
+      unmount: mountFileTransfer(element, { resource: selected }),
+    };
+    state.fileTransferWorkspaces.set(selected.id, workspace);
+  }
+
+  showFileTransferWorkspace(selected.id);
 }
 
 function closeFileTransferModal() {
-  if (unmountFileTransfer) {
-    unmountFileTransfer();
-    unmountFileTransfer = null;
+  const workspace = state.fileTransferWorkspaces.get(state.activeFileTransferResourceId);
+  if (workspace?.active) {
+    backgroundFileTransferModal();
+    writeNotice('File transfer continues in background.');
+    return;
   }
+  if (workspace) destroyFileTransferWorkspace(state.activeFileTransferResourceId);
+  hideFileTransferModal();
+}
+
+function backgroundFileTransferModal() {
+  hideFileTransferModal();
+}
+
+function hideFileTransferModal() {
   const panel = document.querySelector('#file-transfer-modal');
   panel.classList.remove('open');
   panel.hidden = true;
   restoreTerminalFocusAfterOverlay();
+}
+
+function showFileTransferWorkspace(resourceId) {
+  for (const [id, workspace] of state.fileTransferWorkspaces) {
+    workspace.element.hidden = id !== resourceId;
+  }
+  state.activeFileTransferResourceId = resourceId;
+}
+
+function destroyFileTransferWorkspace(resourceId) {
+  if (!resourceId) return;
+  const workspace = state.fileTransferWorkspaces.get(resourceId);
+  if (!workspace) return;
+  workspace.unmount();
+  workspace.element.remove();
+  state.fileTransferWorkspaces.delete(resourceId);
+  if (state.activeFileTransferResourceId === resourceId) {
+    state.activeFileTransferResourceId = null;
+  }
+}
+
+function closeAllFileTransferWorkspaces() {
+  for (const resourceId of [...state.fileTransferWorkspaces.keys()]) {
+    destroyFileTransferWorkspace(resourceId);
+  }
+  hideFileTransferModal();
 }
 
 function registerFileTransferModalResize() {
@@ -1717,6 +1775,48 @@ function registerFileTransferModalResize() {
   };
   handle.addEventListener('pointerup', stopResize);
   handle.addEventListener('pointercancel', stopResize);
+}
+
+function registerFileTransferModalDrag() {
+  const card = document.querySelector('.file-transfer-card');
+  const header = document.querySelector('.file-transfer-header');
+  if (!card || !header) return;
+
+  let dragState = null;
+  header.addEventListener('pointerdown', (event) => {
+    if (event.target.closest('button, input, select, textarea, a')) return;
+    event.preventDefault();
+    const rect = card.getBoundingClientRect();
+    dragState = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      width: rect.width,
+      height: rect.height,
+    };
+    card.style.position = 'fixed';
+    card.style.left = `${rect.left}px`;
+    card.style.top = `${rect.top}px`;
+    card.style.margin = '0';
+    header.setPointerCapture(event.pointerId);
+    document.body.classList.add('dragging-file-transfer');
+  });
+
+  header.addEventListener('pointermove', (event) => {
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+    const maxLeft = Math.max(18, window.innerWidth - dragState.width - 18);
+    const maxTop = Math.max(18, window.innerHeight - dragState.height - 18);
+    card.style.left = `${clamp(event.clientX - dragState.offsetX, 18, maxLeft)}px`;
+    card.style.top = `${clamp(event.clientY - dragState.offsetY, 18, maxTop)}px`;
+  });
+
+  const stopDrag = (event) => {
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+    dragState = null;
+    document.body.classList.remove('dragging-file-transfer');
+  };
+  header.addEventListener('pointerup', stopDrag);
+  header.addEventListener('pointercancel', stopDrag);
 }
 
 function resizeFileTransferModal(width, height) {
@@ -2502,7 +2602,7 @@ function registerAppEvents() {
   });
   eventsOn('database:imported', async (event) => {
     clearAllSessionsFromUI();
-    closeFileTransferModal();
+    closeAllFileTransferWorkspaces();
     state.selectedId = null;
     await refreshHosts();
     await loadTunnels();

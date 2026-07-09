@@ -23,13 +23,12 @@ export async function listFiles(sessionID, id) {
 }
 
 export async function createItem(sessionID, parentId, file) {
-  const data = file.file ? await fileToBase64(file.file) : '';
   const result = await appAPI('CreateFileTransferItem')({
     sessionId: sessionID,
     parentId,
     name: file.name,
     type: file.type || (file.file ? 'file' : 'folder'),
-    data,
+    data: '',
   });
   return parseEntry(result);
 }
@@ -47,6 +46,33 @@ export async function copyItems(sessionID, ids, targetId, move = false) {
   return await appAPI('CopyFileTransferItems')({ sessionId: sessionID, ids, targetId, move });
 }
 
+export async function startCopyJob(sessionID, ids, targetId, move = false) {
+  return await appAPI('StartFileTransferCopyJob')({ sessionId: sessionID, ids, targetId, move });
+}
+
+export async function startUploadJob(sessionID, paths, targetId, move = false) {
+  return await appAPI('StartFileTransferUploadJob')({ sessionId: sessionID, paths, targetId, move });
+}
+
+export async function listJobs(sessionID) {
+  return await appAPI('ListFileTransferJobs')(sessionID);
+}
+
+export async function cancelJob(jobId) {
+  return await appAPI('CancelFileTransferJob')({ jobId });
+}
+
+export async function resolveDroppedFilePaths(files) {
+  const list = [...files];
+  const fromRuntime = await resolveFilePathsWithRuntime(list);
+  if (fromRuntime.length) return fromRuntime;
+
+  const fromFileObjects = list.map((file) => file.path || file.webkitRelativePath).filter(Boolean);
+  if (fromFileObjects.length) return fromFileObjects;
+
+  throw new Error('Native file paths are not available for this drop. Use the local panel to transfer files.');
+}
+
 function parseEntry(entry) {
   if (!entry) return entry;
   return {
@@ -55,13 +81,11 @@ function parseEntry(entry) {
   };
 }
 
-async function fileToBase64(file) {
-  const buffer = await file.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
-  }
-  return btoa(binary);
+async function resolveFilePathsWithRuntime(files) {
+  const runtime = globalThis.runtime;
+  if (!runtime?.CanResolveFilePaths || !runtime?.ResolveFilePaths) return [];
+  const canResolve = await runtime.CanResolveFilePaths();
+  if (!canResolve) return [];
+  const paths = await runtime.ResolveFilePaths(files);
+  return Array.isArray(paths) ? paths.filter(Boolean) : [];
 }

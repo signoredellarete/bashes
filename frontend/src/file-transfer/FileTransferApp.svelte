@@ -2,13 +2,17 @@
   import { onDestroy, onMount } from 'svelte';
   import { Filemanager, WillowDark } from '@svar-ui/svelte-filemanager';
   import {
+    cancelJob,
     closeFileTransfer,
-    copyItems,
     createItem,
     deleteItems,
+    listJobs,
     listFiles,
     renameItem,
+    resolveDroppedFilePaths,
+    startCopyJob,
     startFileTransfer,
+    startUploadJob,
   } from './api.js';
 
   export let resource;
@@ -21,6 +25,7 @@
   let api = null;
   let data = roots;
   let managerElement = null;
+  let transferShell = null;
   let session = null;
   let status = 'Connecting...';
   let error = '';
@@ -33,8 +38,15 @@
   let dragDepth = 0;
   let cleanupDragEvents = () => {};
   let cleanupDraggableObserver = () => {};
+  let cleanupJobEvents = () => {};
+  let jobs = [];
+  let jobRefreshTargets = new Map();
+  let activeJobState = false;
+
+  $: publishActiveTransferState(hasActiveJobs(jobs));
 
   onMount(() => {
+    cleanupJobEvents = registerJobEvents();
     if (resource?.auth?.method === 'password') {
       showPasswordPrompt('');
       return;
@@ -54,6 +66,7 @@
       needsPassword = false;
       password = '';
       status = `Local: ${session.localRoot} | Remote: ${session.remoteRoot}`;
+      await loadJobs();
       await loadInitial();
     } catch (err) {
       const message = String(err?.message ?? err);
@@ -71,6 +84,8 @@
   onDestroy(() => {
     cleanupDragEvents();
     cleanupDraggableObserver();
+    cleanupJobEvents();
+    publishActiveTransferState(false);
     if (session?.sessionId) {
       closeFileTransfer(session.sessionId).catch(() => {});
     }
@@ -124,6 +139,13 @@
 
   async function handleCreateFile(event) {
     await runOperation(async () => {
+      if (event.file?.file) {
+        const paths = await resolveDroppedFilePaths([event.file.file]);
+        const job = await startUploadJob(session.sessionId, paths, event.parent, false);
+        trackJob(job, [event.parent]);
+        status = `Uploading ${event.file.name}`;
+        return;
+      }
       const created = await createItem(session.sessionId, event.parent, event.file);
       await provide(event.parent);
       await api.exec('select-file', { id: created.id });
@@ -165,18 +187,18 @@
   async function runTransfer(event, move) {
     await runOperation(async () => {
       const parents = unique([...event.ids.map(parentId), event.target]);
-      await copyItems(session.sessionId, event.ids, event.target, move);
-      for (const parent of parents) await provide(parent);
-      status = `${move ? 'Moved' : 'Copied'} ${event.ids.length} item${event.ids.length === 1 ? '' : 's'}`;
+      const job = await startCopyJob(session.sessionId, event.ids, event.target, move);
+      trackJob(job, parents);
+      status = `${move ? 'Moving' : 'Copying'} ${event.ids.length} item${event.ids.length === 1 ? '' : 's'}`;
     });
   }
 
   async function handleDownloadFile(event) {
     await runOperation(async () => {
       if (event.id.startsWith('/remote/')) {
-        await copyItems(session.sessionId, [event.id], '/local', false);
-        await provide('/local');
-        status = `Copied ${basename(event.id)} to local root`;
+        const job = await startCopyJob(session.sessionId, [event.id], '/local', false);
+        trackJob(job, ['/local']);
+        status = `Downloading ${basename(event.id)} to local root`;
       } else {
         status = 'Local files are already on this machine';
       }
@@ -207,6 +229,109 @@
     } finally {
       busy = false;
     }
+  }
+
+  function registerJobEvents() {
+    const eventsOn = globalThis.runtime?.EventsOn;
+    if (!eventsOn) return () => {};
+    const off = eventsOn('file-transfer:job', (job) => {
+      if (!job || job.resourceId !== resource.id) return;
+      upsertJob(job);
+      handleJobRefresh(job);
+      updateStatusFromJob(job);
+    });
+    return typeof off === 'function' ? off : () => {};
+  }
+
+  async function loadJobs() {
+    if (!session?.sessionId) return;
+    try {
+      jobs = await listJobs(session.sessionId);
+    } catch {
+      jobs = [];
+    }
+  }
+
+  function trackJob(job, refreshTargets = []) {
+    upsertJob(job);
+    if (job?.jobId && refreshTargets.length) {
+      jobRefreshTargets.set(job.jobId, unique(refreshTargets));
+    }
+  }
+
+  function upsertJob(job) {
+    if (!job?.jobId) return;
+    const next = jobs.filter((item) => item.jobId !== job.jobId);
+    next.unshift(job);
+    jobs = next.slice(0, 8);
+  }
+
+  async function handleJobRefresh(job) {
+    if (job.status !== 'completed' && job.status !== 'failed' && job.status !== 'canceled') return;
+    const targets = jobRefreshTargets.get(job.jobId) ?? [job.targetId];
+    jobRefreshTargets.delete(job.jobId);
+    for (const target of targets.filter(Boolean)) {
+      try {
+        await provide(target);
+      } catch {
+        // The status event is still useful even if a folder refresh fails.
+      }
+    }
+  }
+
+  function updateStatusFromJob(job) {
+    if (job.status === 'completed') {
+      status = `${job.move ? 'Moved' : 'Copied'} ${job.sourceIds?.length || job.sourcePaths?.length || 1} item${(job.sourceIds?.length || job.sourcePaths?.length || 1) === 1 ? '' : 's'}`;
+      return;
+    }
+    if (job.status === 'failed') {
+      error = job.error || 'File transfer failed.';
+      status = 'Transfer failed';
+      return;
+    }
+    if (job.status === 'canceled') {
+      status = 'Transfer canceled';
+      return;
+    }
+    status = `${job.move ? 'Moving' : 'Copying'} ${formatBytes(job.transferredBytes)}${job.totalBytes ? ` / ${formatBytes(job.totalBytes)}` : ''}`;
+  }
+
+  async function cancelTransferJob(jobId) {
+    await runOperation(async () => {
+      await cancelJob(jobId);
+      status = 'Cancel requested';
+    });
+  }
+
+  function hasActiveJobs(items) {
+    return items.some((job) => job.status === 'queued' || job.status === 'running');
+  }
+
+  function publishActiveTransferState(active) {
+    if (active === activeJobState) return;
+    activeJobState = active;
+    transferShell?.dispatchEvent(new CustomEvent('bashes-file-transfer-active', {
+      bubbles: true,
+      detail: { resourceId: resource.id, active },
+    }));
+  }
+
+  function progressValue(job) {
+    if (!job?.totalBytes) return 0;
+    return Math.min(100, Math.round((job.transferredBytes / job.totalBytes) * 100));
+  }
+
+  function formatBytes(value) {
+    const bytes = Number(value || 0);
+    if (bytes < 1024) return `${bytes} B`;
+    const units = ['KB', 'MB', 'GB', 'TB'];
+    let current = bytes / 1024;
+    let index = 0;
+    while (current >= 1024 && index < units.length - 1) {
+      current /= 1024;
+      index += 1;
+    }
+    return `${current >= 10 ? current.toFixed(1) : current.toFixed(2)} ${units[index]}`;
   }
 
   function parentId(id) {
@@ -348,9 +473,10 @@
     const ids = transferIdsFromData(event.dataTransfer);
     if (ids.length) {
       await runOperation(async () => {
-        await copyItems(session.sessionId, ids, target, event.shiftKey);
-        await refreshAfterTransfer(ids, target, event.shiftKey);
-        status = `${event.shiftKey ? 'Moved' : 'Copied'} ${ids.length} item${ids.length === 1 ? '' : 's'}`;
+        const parents = unique([...ids.map(parentId), target]);
+        const job = await startCopyJob(session.sessionId, ids, target, event.shiftKey);
+        trackJob(job, parents);
+        status = `${event.shiftKey ? 'Moving' : 'Copying'} ${ids.length} item${ids.length === 1 ? '' : 's'}`;
       });
       return;
     }
@@ -358,16 +484,10 @@
     const files = [...(event.dataTransfer.files || [])];
     if (files.length) {
       await runOperation(async () => {
-        for (const file of files) {
-          await createItem(session.sessionId, target, {
-            name: file.name,
-            type: 'file',
-            size: file.size,
-            file,
-          });
-        }
-        await provide(target);
-        status = `Uploaded ${files.length} file${files.length === 1 ? '' : 's'}`;
+        const paths = await resolveDroppedFilePaths(files);
+        const job = await startUploadJob(session.sessionId, paths, target, false);
+        trackJob(job, [target]);
+        status = `Uploading ${files.length} file${files.length === 1 ? '' : 's'}`;
       });
     }
   }
@@ -419,13 +539,35 @@
   }
 </script>
 
-<div class="transfer-shell" class:busy class:dragging>
+<div class="transfer-shell" class:busy class:dragging bind:this={transferShell}>
   <div class="transfer-status">
     <span>{status}</span>
     {#if busy}<strong>Working...</strong>{/if}
   </div>
   {#if error}
     <p class="transfer-error">{error}</p>
+  {/if}
+  {#if jobs.length}
+    <div class="transfer-jobs" aria-live="polite">
+      {#each jobs.slice(0, 3) as job (job.jobId)}
+        <article class:active={job.status === 'queued' || job.status === 'running'} class="transfer-job">
+          <div class="transfer-job-header">
+            <span>{job.status}</span>
+            <strong>{progressValue(job)}%</strong>
+          </div>
+          <div class="transfer-job-current" title={job.current || job.targetId}>{job.current || job.targetId}</div>
+          <progress value={job.transferredBytes} max={job.totalBytes || 1}></progress>
+          <div class="transfer-job-footer">
+            <span>{formatBytes(job.transferredBytes)}{job.totalBytes ? ` / ${formatBytes(job.totalBytes)}` : ''}</span>
+            {#if job.status === 'queued' || job.status === 'running'}
+              <button type="button" onclick={() => cancelTransferJob(job.jobId)}>Cancel</button>
+            {:else if job.error}
+              <span class="transfer-job-error">{job.error}</span>
+            {/if}
+          </div>
+        </article>
+      {/each}
+    </div>
   {/if}
   {#if needsPassword && !session}
     <form class="transfer-auth" onsubmit={submitPassword}>

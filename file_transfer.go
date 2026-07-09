@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -70,6 +71,34 @@ type FileTransferCopyInput struct {
 	Move      bool     `json:"move"`
 }
 
+type FileTransferUploadInput struct {
+	SessionID string   `json:"sessionId"`
+	Paths     []string `json:"paths"`
+	TargetID  string   `json:"targetId"`
+	Move      bool     `json:"move"`
+}
+
+type FileTransferJobInfo struct {
+	JobID            string   `json:"jobId"`
+	SessionID        string   `json:"sessionId"`
+	ResourceID       string   `json:"resourceId"`
+	SourceIDs        []string `json:"sourceIds,omitempty"`
+	SourcePaths      []string `json:"sourcePaths,omitempty"`
+	TargetID         string   `json:"targetId"`
+	Move             bool     `json:"move"`
+	Status           string   `json:"status"`
+	TotalBytes       int64    `json:"totalBytes"`
+	TransferredBytes int64    `json:"transferredBytes"`
+	Current          string   `json:"current,omitempty"`
+	Error            string   `json:"error,omitempty"`
+	StartedAt        string   `json:"startedAt,omitempty"`
+	FinishedAt       string   `json:"finishedAt,omitempty"`
+}
+
+type FileTransferCancelJobInput struct {
+	JobID string `json:"jobId"`
+}
+
 type fileTransferSession struct {
 	id         string
 	resourceID string
@@ -79,6 +108,13 @@ type fileTransferSession struct {
 	client     *ssh.Client
 	sftp       *sftp.Client
 	mu         sync.Mutex
+}
+
+type fileTransferJob struct {
+	mu       sync.Mutex
+	info     FileTransferJobInfo
+	cancel   context.CancelFunc
+	lastEmit time.Time
 }
 
 func (a *App) StartFileTransfer(input SSHSessionInput) (FileTransferSessionInfo, error) {
@@ -137,6 +173,8 @@ func (a *App) StartFileTransfer(input SSHSessionInput) (FileTransferSessionInfo,
 }
 
 func (a *App) CloseFileTransfer(sessionID string) error {
+	a.cancelFileTransferJobsForSession(strings.TrimSpace(sessionID))
+
 	a.mu.Lock()
 	session := a.transfers[strings.TrimSpace(sessionID)]
 	delete(a.transfers, strings.TrimSpace(sessionID))
@@ -200,6 +238,133 @@ func (a *App) CopyFileTransferItems(input FileTransferCopyInput) error {
 	return nil
 }
 
+func (a *App) StartFileTransferCopyJob(input FileTransferCopyInput) (FileTransferJobInfo, error) {
+	session, err := a.fileTransfer(input.SessionID)
+	if err != nil {
+		return FileTransferJobInfo{}, err
+	}
+	if len(input.IDs) == 0 {
+		return FileTransferJobInfo{}, errors.New("no files selected for transfer")
+	}
+	if strings.TrimSpace(input.TargetID) == "" {
+		return FileTransferJobInfo{}, errors.New("transfer target is required")
+	}
+	if err := a.ensureNoActiveFileTransferJob(session.resourceID); err != nil {
+		return FileTransferJobInfo{}, err
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	job := &fileTransferJob{
+		cancel: cancel,
+		info: FileTransferJobInfo{
+			JobID:      fmt.Sprintf("file-job-%d", time.Now().UnixNano()),
+			SessionID:  session.id,
+			ResourceID: session.resourceID,
+			SourceIDs:  append([]string(nil), input.IDs...),
+			TargetID:   input.TargetID,
+			Move:       input.Move,
+			Status:     "queued",
+			StartedAt:  time.Now().Format(time.RFC3339),
+		},
+	}
+
+	a.mu.Lock()
+	a.transferJobs[job.info.JobID] = job
+	a.mu.Unlock()
+	a.emitFileTransferJob(job, true)
+
+	go a.runFileTransferCopyJob(ctx, session, job, input)
+	return job.snapshot(), nil
+}
+
+func (a *App) StartFileTransferUploadJob(input FileTransferUploadInput) (FileTransferJobInfo, error) {
+	session, err := a.fileTransfer(input.SessionID)
+	if err != nil {
+		return FileTransferJobInfo{}, err
+	}
+	if len(input.Paths) == 0 {
+		return FileTransferJobInfo{}, errors.New("no local files selected for upload")
+	}
+	if strings.TrimSpace(input.TargetID) == "" {
+		return FileTransferJobInfo{}, errors.New("upload target is required")
+	}
+	if err := a.ensureNoActiveFileTransferJob(session.resourceID); err != nil {
+		return FileTransferJobInfo{}, err
+	}
+
+	paths := make([]string, 0, len(input.Paths))
+	for _, value := range input.Paths {
+		cleaned := strings.TrimSpace(value)
+		if cleaned == "" {
+			continue
+		}
+		abs, err := filepath.Abs(cleaned)
+		if err != nil {
+			return FileTransferJobInfo{}, err
+		}
+		paths = append(paths, abs)
+	}
+	if len(paths) == 0 {
+		return FileTransferJobInfo{}, errors.New("no valid local files selected for upload")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	job := &fileTransferJob{
+		cancel: cancel,
+		info: FileTransferJobInfo{
+			JobID:       fmt.Sprintf("file-job-%d", time.Now().UnixNano()),
+			SessionID:   session.id,
+			ResourceID:  session.resourceID,
+			SourcePaths: paths,
+			TargetID:    input.TargetID,
+			Move:        input.Move,
+			Status:      "queued",
+			StartedAt:   time.Now().Format(time.RFC3339),
+		},
+	}
+
+	a.mu.Lock()
+	a.transferJobs[job.info.JobID] = job
+	a.mu.Unlock()
+	a.emitFileTransferJob(job, true)
+
+	go a.runFileTransferUploadJob(ctx, session, job, paths, input)
+	return job.snapshot(), nil
+}
+
+func (a *App) ListFileTransferJobs(sessionID string) ([]FileTransferJobInfo, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	out := []FileTransferJobInfo{}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, job := range a.transferJobs {
+		info := job.snapshot()
+		if info.SessionID == sessionID {
+			out = append(out, info)
+		}
+	}
+	return out, nil
+}
+
+func (a *App) CancelFileTransferJob(input FileTransferCancelJobInput) error {
+	a.mu.Lock()
+	job := a.transferJobs[strings.TrimSpace(input.JobID)]
+	a.mu.Unlock()
+	if job == nil {
+		return nil
+	}
+	job.cancel()
+	job.update(func(info *FileTransferJobInfo) {
+		if info.Status == "completed" || info.Status == "failed" {
+			return
+		}
+		info.Status = "canceled"
+		info.FinishedAt = time.Now().Format(time.RFC3339)
+	})
+	a.emitFileTransferJob(job, true)
+	return nil
+}
+
 func (a *App) fileTransfer(sessionID string) (*fileTransferSession, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -208,6 +373,122 @@ func (a *App) fileTransfer(sessionID string) (*fileTransferSession, error) {
 		return nil, fmt.Errorf("file transfer session %q not found", sessionID)
 	}
 	return session, nil
+}
+
+func (a *App) ensureNoActiveFileTransferJob(resourceID string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, job := range a.transferJobs {
+		info := job.snapshot()
+		if info.ResourceID == resourceID && isActiveFileTransferJob(info.Status) {
+			return fmt.Errorf("a file transfer is already running for %s", resourceID)
+		}
+	}
+	return nil
+}
+
+func (a *App) cancelFileTransferJobsForSession(sessionID string) {
+	a.mu.Lock()
+	jobs := make([]*fileTransferJob, 0)
+	for _, job := range a.transferJobs {
+		if job.snapshot().SessionID == sessionID {
+			jobs = append(jobs, job)
+		}
+	}
+	a.mu.Unlock()
+
+	for _, job := range jobs {
+		job.cancel()
+		job.update(func(info *FileTransferJobInfo) {
+			if info.Status == "completed" || info.Status == "failed" || info.Status == "canceled" {
+				return
+			}
+			info.Status = "canceled"
+			info.FinishedAt = time.Now().Format(time.RFC3339)
+		})
+		a.emitFileTransferJob(job, true)
+	}
+}
+
+func (a *App) runFileTransferCopyJob(ctx context.Context, session *fileTransferSession, job *fileTransferJob, input FileTransferCopyInput) {
+	job.update(func(info *FileTransferJobInfo) {
+		info.Status = "running"
+	})
+	a.emitFileTransferJob(job, true)
+
+	err := session.copyJob(ctx, job, input, func(force bool) {
+		a.emitFileTransferJob(job, force)
+	})
+	a.finishFileTransferJob(job, err)
+}
+
+func (a *App) runFileTransferUploadJob(ctx context.Context, session *fileTransferSession, job *fileTransferJob, sourcePaths []string, input FileTransferUploadInput) {
+	job.update(func(info *FileTransferJobInfo) {
+		info.Status = "running"
+	})
+	a.emitFileTransferJob(job, true)
+
+	err := session.uploadJob(ctx, job, sourcePaths, input, func(force bool) {
+		a.emitFileTransferJob(job, force)
+	})
+	a.finishFileTransferJob(job, err)
+}
+
+func (a *App) finishFileTransferJob(job *fileTransferJob, err error) {
+	job.update(func(info *FileTransferJobInfo) {
+		info.FinishedAt = time.Now().Format(time.RFC3339)
+		switch {
+		case err == nil && info.Status != "canceled":
+			info.Status = "completed"
+			info.Error = ""
+		case errors.Is(err, context.Canceled) || info.Status == "canceled":
+			info.Status = "canceled"
+			if info.Error == "" {
+				info.Error = "Transfer canceled."
+			}
+		default:
+			info.Status = "failed"
+			info.Error = err.Error()
+		}
+	})
+	a.emitFileTransferJob(job, true)
+}
+
+func (a *App) emitFileTransferJob(job *fileTransferJob, force bool) {
+	if !force && !job.shouldEmitProgress() {
+		return
+	}
+	a.emitData("file-transfer:job", job.snapshot())
+}
+
+func isActiveFileTransferJob(status string) bool {
+	return status == "queued" || status == "running"
+}
+
+func (j *fileTransferJob) snapshot() FileTransferJobInfo {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	info := j.info
+	info.SourceIDs = append([]string(nil), j.info.SourceIDs...)
+	info.SourcePaths = append([]string(nil), j.info.SourcePaths...)
+	return info
+}
+
+func (j *fileTransferJob) update(fn func(*FileTransferJobInfo)) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	fn(&j.info)
+}
+
+func (j *fileTransferJob) shouldEmitProgress() bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	now := time.Now()
+	if now.Sub(j.lastEmit) < 250*time.Millisecond {
+		return false
+	}
+	j.lastEmit = now
+	return true
 }
 
 func (s *fileTransferSession) info() FileTransferSessionInfo {
@@ -445,6 +726,109 @@ func (s *fileTransferSession) copy(sourceID string, targetID string, move bool) 
 	return nil
 }
 
+func (s *fileTransferSession) copyJob(ctx context.Context, job *fileTransferJob, input FileTransferCopyInput, emit func(bool)) error {
+	targetScope, targetRel, err := parseTransferID(input.TargetID)
+	if err != nil {
+		return err
+	}
+
+	type plannedCopy struct {
+		sourceID    string
+		sourceScope string
+		sourceRel   string
+		targetScope string
+		targetRel   string
+	}
+
+	plans := make([]plannedCopy, 0, len(input.IDs))
+	for _, sourceID := range input.IDs {
+		sourceScope, sourceRel, err := parseTransferID(sourceID)
+		if err != nil {
+			return err
+		}
+		if sourceRel == "" {
+			return errors.New("cannot transfer file transfer root")
+		}
+		plans = append(plans, plannedCopy{
+			sourceID:    sourceID,
+			sourceScope: sourceScope,
+			sourceRel:   sourceRel,
+			targetScope: targetScope,
+			targetRel:   path.Join(targetRel, path.Base(sourceRel)),
+		})
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var total int64
+	for _, plan := range plans {
+		size, err := s.transferSizeUnlocked(plan.sourceScope, plan.sourceRel)
+		if err != nil {
+			return err
+		}
+		total += size
+	}
+	job.update(func(info *FileTransferJobInfo) {
+		info.TotalBytes = total
+	})
+	emit(true)
+
+	for _, plan := range plans {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := s.copyUnlockedWithProgress(ctx, job, plan.sourceScope, plan.sourceRel, plan.targetScope, plan.targetRel, emit); err != nil {
+			return err
+		}
+		if input.Move {
+			if err := s.removeUnlocked(plan.sourceScope, plan.sourceRel); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (s *fileTransferSession) uploadJob(ctx context.Context, job *fileTransferJob, sourcePaths []string, input FileTransferUploadInput, emit func(bool)) error {
+	targetScope, targetRel, err := parseTransferID(input.TargetID)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var total int64
+	for _, sourcePath := range sourcePaths {
+		size, err := localAbsoluteTransferSize(sourcePath)
+		if err != nil {
+			return err
+		}
+		total += size
+	}
+	job.update(func(info *FileTransferJobInfo) {
+		info.TotalBytes = total
+	})
+	emit(true)
+
+	for _, sourcePath := range sourcePaths {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		name := filepath.Base(sourcePath)
+		if err := s.copyAbsoluteLocalWithProgress(ctx, job, sourcePath, targetScope, path.Join(targetRel, name), emit); err != nil {
+			return err
+		}
+		if input.Move {
+			if err := os.RemoveAll(sourcePath); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (s *fileTransferSession) copyUnlocked(sourceScope, sourceRel, targetScope, targetRel string) error {
 	sourceIsDir, err := s.isDir(sourceScope, sourceRel)
 	if err != nil {
@@ -482,6 +866,136 @@ func (s *fileTransferSession) copyUnlocked(sourceScope, sourceRel, targetScope, 
 	defer writer.Close()
 	_, err = io.Copy(writer, reader)
 	return err
+}
+
+func (s *fileTransferSession) copyUnlockedWithProgress(ctx context.Context, job *fileTransferJob, sourceScope, sourceRel, targetScope, targetRel string, emit func(bool)) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	sourceIsDir, err := s.isDir(sourceScope, sourceRel)
+	if err != nil {
+		return err
+	}
+	job.update(func(info *FileTransferJobInfo) {
+		info.Current = transferID(sourceScope, sourceRel)
+	})
+	emit(false)
+
+	if sourceIsDir {
+		if err := s.mkdir(targetScope, targetRel); err != nil {
+			return err
+		}
+		children, err := s.listUnlocked(sourceScope, sourceRel)
+		if err != nil {
+			return err
+		}
+		for _, child := range children {
+			_, childRel, err := parseTransferID(child.ID)
+			if err != nil {
+				return err
+			}
+			if err := s.copyUnlockedWithProgress(ctx, job, sourceScope, childRel, targetScope, path.Join(targetRel, path.Base(childRel)), emit); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	reader, err := s.openReader(sourceScope, sourceRel)
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+	writer, err := s.openWriter(targetScope, targetRel)
+	if err != nil {
+		return err
+	}
+	defer writer.Close()
+	return copyWithProgress(ctx, writer, reader, func(written int64) {
+		job.update(func(info *FileTransferJobInfo) {
+			info.TransferredBytes += written
+		})
+		emit(false)
+	})
+}
+
+func (s *fileTransferSession) copyAbsoluteLocalWithProgress(ctx context.Context, job *fileTransferJob, sourcePath, targetScope, targetRel string, emit func(bool)) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	info, err := os.Stat(sourcePath)
+	if err != nil {
+		return err
+	}
+	job.update(func(jobInfo *FileTransferJobInfo) {
+		jobInfo.Current = sourcePath
+	})
+	emit(false)
+
+	if info.IsDir() {
+		if err := s.mkdir(targetScope, targetRel); err != nil {
+			return err
+		}
+		entries, err := os.ReadDir(sourcePath)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			if err := s.copyAbsoluteLocalWithProgress(ctx, job, filepath.Join(sourcePath, entry.Name()), targetScope, path.Join(targetRel, entry.Name()), emit); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	reader, err := os.Open(sourcePath)
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+	writer, err := s.openWriter(targetScope, targetRel)
+	if err != nil {
+		return err
+	}
+	defer writer.Close()
+	return copyWithProgress(ctx, writer, reader, func(written int64) {
+		job.update(func(info *FileTransferJobInfo) {
+			info.TransferredBytes += written
+		})
+		emit(false)
+	})
+}
+
+func (s *fileTransferSession) transferSizeUnlocked(scope, rel string) (int64, error) {
+	sourceIsDir, err := s.isDir(scope, rel)
+	if err != nil {
+		return 0, err
+	}
+	if !sourceIsDir {
+		info, err := s.stat(scope, rel)
+		if err != nil {
+			return 0, err
+		}
+		return info.Size(), nil
+	}
+	children, err := s.listUnlocked(scope, rel)
+	if err != nil {
+		return 0, err
+	}
+	var total int64
+	for _, child := range children {
+		_, childRel, err := parseTransferID(child.ID)
+		if err != nil {
+			return 0, err
+		}
+		size, err := s.transferSizeUnlocked(scope, childRel)
+		if err != nil {
+			return 0, err
+		}
+		total += size
+	}
+	return total, nil
 }
 
 func (s *fileTransferSession) listUnlocked(scope string, rel string) ([]FileTransferEntry, error) {
@@ -566,6 +1080,25 @@ func (s *fileTransferSession) isDir(scope, rel string) (bool, error) {
 		return info.IsDir(), nil
 	default:
 		return false, fmt.Errorf("unsupported file transfer scope %q", scope)
+	}
+}
+
+func (s *fileTransferSession) stat(scope, rel string) (fs.FileInfo, error) {
+	switch scope {
+	case "local":
+		target, err := s.localPath(rel)
+		if err != nil {
+			return nil, err
+		}
+		return os.Stat(target)
+	case "remote":
+		target, err := s.remotePath(rel)
+		if err != nil {
+			return nil, err
+		}
+		return s.sftp.Stat(target)
+	default:
+		return nil, fmt.Errorf("unsupported file transfer scope %q", scope)
 	}
 }
 
@@ -743,6 +1276,60 @@ func entryFromInfo(scope, rel string, info fs.FileInfo) FileTransferEntry {
 		entry.Size = 0
 	}
 	return entry
+}
+
+func copyWithProgress(ctx context.Context, writer io.Writer, reader io.Reader, progress func(int64)) error {
+	buffer := make([]byte, 1024*1024)
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		n, readErr := reader.Read(buffer)
+		if n > 0 {
+			written, writeErr := writer.Write(buffer[:n])
+			if written > 0 {
+				progress(int64(written))
+			}
+			if writeErr != nil {
+				return writeErr
+			}
+			if written != n {
+				return io.ErrShortWrite
+			}
+		}
+		if readErr == io.EOF {
+			return nil
+		}
+		if readErr != nil {
+			return readErr
+		}
+	}
+}
+
+func localAbsoluteTransferSize(sourcePath string) (int64, error) {
+	info, err := os.Stat(sourcePath)
+	if err != nil {
+		return 0, err
+	}
+	if !info.IsDir() {
+		return info.Size(), nil
+	}
+	var total int64
+	err = filepath.WalkDir(sourcePath, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		total += info.Size()
+		return nil
+	})
+	return total, err
 }
 
 func writeLocalFile(target string, data string) error {

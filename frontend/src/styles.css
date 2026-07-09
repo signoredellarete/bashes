@@ -1029,6 +1029,8 @@ textarea {
   gap: 12px;
   border-bottom: 1px solid #dce1e6;
   padding: 10px 12px;
+  cursor: move;
+  user-select: none;
 }
 
 .file-transfer-header h3 {
@@ -1037,9 +1039,37 @@ textarea {
   font-size: 14px;
 }
 
+.file-transfer-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-transfer-header-actions .secondary {
+  min-height: 28px;
+  border: 1px solid #c7cfd8;
+  border-radius: 5px;
+  background: #f8fafb;
+  color: #53606f;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 9px;
+}
+
 .file-transfer-root {
+  display: grid;
+  height: 100%;
   min-width: 0;
   min-height: 0;
+}
+
+.file-transfer-workspace {
+  height: 100%;
+  min-height: 0;
+}
+
+.file-transfer-workspace[hidden] {
+  display: none;
 }
 
 .file-transfer-resize-handle {
@@ -1070,11 +1100,16 @@ textarea {
   user-select: none;
 }
 
+.dragging-file-transfer {
+  cursor: move;
+  user-select: none;
+}
+
 .transfer-shell {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   height: 100%;
   min-height: 0;
-  grid-template-rows: auto auto minmax(0, 1fr);
   background: #f8fafb;
 }
 
@@ -1109,6 +1144,90 @@ textarea {
   color: #8b332a;
   font-size: 12px;
   padding: 7px 10px;
+}
+
+.transfer-jobs {
+  display: grid;
+  gap: 6px;
+  max-height: 140px;
+  overflow: auto;
+  border-bottom: 1px solid #dce1e6;
+  background: #eef3f5;
+  padding: 8px 10px;
+}
+
+.transfer-job {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #d2dbe2;
+  border-radius: 6px;
+  background: #fff;
+  color: #53606f;
+  font-size: 12px;
+  padding: 7px 8px;
+}
+
+.transfer-job.active {
+  border-color: #80b9a3;
+}
+
+.transfer-job-header,
+.transfer-job-footer {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.transfer-job-header span {
+  text-transform: capitalize;
+}
+
+.transfer-job-current {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-job progress {
+  width: 100%;
+  height: 7px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 99px;
+}
+
+.transfer-job progress::-webkit-progress-bar {
+  background: #e2e8ee;
+}
+
+.transfer-job progress::-webkit-progress-value {
+  background: #2f8f63;
+}
+
+.transfer-job progress::-moz-progress-bar {
+  background: #2f8f63;
+}
+
+.transfer-job button {
+  min-height: 24px;
+  border: 1px solid #c7cfd8;
+  border-radius: 5px;
+  background: #fff;
+  color: #2f3945;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+.transfer-job-error {
+  min-width: 0;
+  overflow: hidden;
+  color: #8b332a;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .transfer-auth {
@@ -1176,6 +1295,7 @@ textarea {
 
 .transfer-manager {
   position: relative;
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
