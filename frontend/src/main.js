@@ -35,6 +35,7 @@ const state = {
   drawerHostId: null,
   editResourceId: null,
   confirmResolver: null,
+  editContextTarget: null,
   draggedHostId: null,
   lastSessionByResource: new Map(),
   sessionFocusHistory: [],
@@ -382,6 +383,11 @@ app.innerHTML = `
   </section>
 
   <div id="sidebar-tooltip" class="sidebar-tooltip" hidden></div>
+  <div id="edit-context-menu" class="edit-context-menu" hidden>
+    <button type="button" data-edit-command="cut">Cut</button>
+    <button type="button" data-edit-command="copy">Copy</button>
+    <button type="button" data-edit-command="paste">Paste</button>
+  </div>
 `;
 
 const stack = document.querySelector('#terminal-stack');
@@ -456,11 +462,18 @@ document.querySelectorAll('[data-close-app-modal]').forEach((element) => {
 });
 document.querySelector('#app-modal-primary').addEventListener('click', () => runAppModalAction('primary'));
 document.querySelector('#app-modal-secondary').addEventListener('click', () => runAppModalAction('secondary'));
+document.querySelector('#edit-context-menu').addEventListener('click', (event) => runEditContextCommand(event));
+document.addEventListener('contextmenu', (event) => openEditContextMenu(event));
+document.addEventListener('pointerdown', (event) => {
+  if (!event.target.closest?.('#edit-context-menu')) hideEditContextMenu();
+});
 window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !document.querySelector('#confirm-modal').hidden) {
     resolveConfirmModal(false);
   } else if (event.key === 'Escape' && !document.querySelector('#app-modal').hidden) {
     closeAppModal();
+  } else if (event.key === 'Escape') {
+    hideEditContextMenu();
   }
 });
 
@@ -1256,6 +1269,7 @@ function createSession(sessionID, resource, kind = 'ssh') {
   });
   pane.addEventListener('contextmenu', (event) => {
     event.preventDefault();
+    event.stopPropagation();
     readClipboard()
       .then((text) => {
         if (text) return apiWriteSSHSession(sessionID, text);
@@ -2311,6 +2325,93 @@ function resizeActiveSession() {
   apiResizeSSHSession(session.id, session.terminal.cols, session.terminal.rows).catch(() => {});
 }
 
+function openEditContextMenu(event) {
+  const target = editableContextTarget(event.target);
+  if (!target) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  state.editContextTarget = target;
+  const menu = document.querySelector('#edit-context-menu');
+  if (!menu) return;
+
+  const canWrite = !target.readOnly && !target.disabled;
+  menu.querySelector('[data-edit-command="cut"]').disabled = !canWrite;
+  menu.querySelector('[data-edit-command="paste"]').disabled = !canWrite;
+  menu.hidden = false;
+
+  const rect = menu.getBoundingClientRect();
+  const left = Math.min(event.clientX, window.innerWidth - rect.width - 8);
+  const top = Math.min(event.clientY, window.innerHeight - rect.height - 8);
+  menu.style.left = `${Math.max(8, left)}px`;
+  menu.style.top = `${Math.max(8, top)}px`;
+}
+
+function editableContextTarget(target) {
+  const element = target?.closest?.('input, textarea, [contenteditable="true"]');
+  if (!element || element.closest('.terminal-pane')) return null;
+  if (element.matches('input')) {
+    const type = (element.getAttribute('type') || 'text').toLowerCase();
+    if (['button', 'checkbox', 'color', 'file', 'hidden', 'radio', 'range', 'reset', 'submit'].includes(type)) return null;
+  }
+  return element;
+}
+
+async function runEditContextCommand(event) {
+  const button = event.target.closest?.('[data-edit-command]');
+  if (!button || button.disabled || !state.editContextTarget) return;
+  event.preventDefault();
+  event.stopPropagation();
+
+  const target = state.editContextTarget;
+  const command = button.dataset.editCommand;
+  try {
+    if (command === 'copy') {
+      await writeClipboard(selectedEditableText(target));
+    } else if (command === 'cut') {
+      await writeClipboard(selectedEditableText(target));
+      replaceEditableSelection(target, '');
+    } else if (command === 'paste') {
+      const text = await readClipboard();
+      if (text) replaceEditableSelection(target, text);
+    }
+  } finally {
+    target.focus();
+    hideEditContextMenu();
+  }
+}
+
+function hideEditContextMenu() {
+  const menu = document.querySelector('#edit-context-menu');
+  if (menu) menu.hidden = true;
+  state.editContextTarget = null;
+}
+
+function selectedEditableText(target) {
+  if (target.isContentEditable) {
+    return String(globalThis.getSelection?.() ?? '');
+  }
+  const start = target.selectionStart ?? 0;
+  const end = target.selectionEnd ?? start;
+  return target.value.slice(start, end);
+}
+
+function replaceEditableSelection(target, text) {
+  if (target.isContentEditable) {
+    document.execCommand('insertText', false, text);
+    target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+    return;
+  }
+  const start = target.selectionStart ?? target.value.length;
+  const end = target.selectionEnd ?? start;
+  const before = target.value.slice(0, start);
+  const after = target.value.slice(end);
+  target.value = `${before}${text}${after}`;
+  const next = start + text.length;
+  target.setSelectionRange(next, next);
+  target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: text ? 'insertText' : 'deleteByCut', data: text }));
+}
+
 function writeNotice(message) {
   const status = document.querySelector('#app-status');
   if (!status) return;
@@ -2319,12 +2420,19 @@ function writeNotice(message) {
 }
 
 async function writeClipboard(text) {
+  if (globalThis.runtime?.ClipboardSetText) {
+    const ok = await globalThis.runtime.ClipboardSetText(text);
+    if (ok !== false) return;
+  }
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);
   }
 }
 
 async function readClipboard() {
+  if (globalThis.runtime?.ClipboardGetText) {
+    return await globalThis.runtime.ClipboardGetText();
+  }
   if (navigator.clipboard?.readText) {
     return await navigator.clipboard.readText();
   }

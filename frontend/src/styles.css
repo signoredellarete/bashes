@@ -469,6 +469,38 @@ textarea {
   white-space: nowrap;
 }
 
+.edit-context-menu {
+  position: fixed;
+  z-index: 80;
+  display: grid;
+  min-width: 124px;
+  border: 1px solid #26313c;
+  border-radius: 6px;
+  background: #101418;
+  box-shadow: 0 12px 28px rgba(16, 20, 24, 0.24);
+  overflow: hidden;
+  padding: 4px;
+}
+
+.edit-context-menu button {
+  justify-content: start;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #f5f7fa;
+  padding: 6px 9px;
+  text-align: left;
+}
+
+.edit-context-menu button:hover:not(:disabled) {
+  background: #24313d;
+}
+
+.edit-context-menu button:disabled {
+  color: #6f7b86;
+  cursor: default;
+}
+
 .workspace {
   display: grid;
   min-width: 0;
