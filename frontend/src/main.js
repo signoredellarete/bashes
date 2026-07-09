@@ -23,6 +23,7 @@ const demoStore = {
 const state = {
   hosts: [],
   keys: [],
+  keySettings: { customDirectory: '' },
   tunnels: new Map(),
   localShellSupported: false,
   selectedId: null,
@@ -315,6 +316,15 @@ app.innerHTML = `
         <button type="submit">Generate</button>
       </form>
 
+      <form id="key-directory-form" class="compact-form">
+        <label>
+          <span>Custom Keys Directory</span>
+          <input name="directory" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="optional folder to scan" />
+        </label>
+        <button type="submit">Save</button>
+      </form>
+      <p class="inline-status" id="key-directory-status" hidden></p>
+
       <label>
         <span>Available Key</span>
         <select id="key-select"></select>
@@ -418,6 +428,7 @@ registerAuthChoiceSync(document.querySelector('#connect-form'));
 registerAuthChoiceSync(document.querySelector('#tunnel-form'));
 document.querySelector('#stop-tunnel').addEventListener('click', () => stopSelectedTunnel());
 document.querySelector('#key-generate-form').addEventListener('submit', (event) => submitGenerateKey(event));
+document.querySelector('#key-directory-form').addEventListener('submit', (event) => submitKeyDirectory(event));
 document.querySelector('#key-install-form').addEventListener('submit', (event) => submitInstallKey(event));
 document.querySelector('#key-select').addEventListener('change', () => renderSelectedPublicKey());
 document.querySelectorAll('[data-close-panel]').forEach((element) => {
@@ -455,6 +466,7 @@ window.addEventListener('keydown', (event) => {
 
 await loadCapabilities();
 await loadHosts();
+await loadKeySettings();
 await loadKeys();
 await loadTunnels();
 applySidebarState();
@@ -491,6 +503,11 @@ async function refreshHosts() {
 async function loadKeys() {
   state.keys = await apiListSSHKeys();
   renderKeyOptions();
+}
+
+async function loadKeySettings() {
+  state.keySettings = await apiGetSSHKeySettings();
+  renderKeySettings();
 }
 
 async function loadTunnels() {
@@ -649,6 +666,33 @@ async function submitGenerateKey(event) {
     document.querySelector('#key-select').value = keyChoiceValue({ ...key, source: 'bashes' });
     await renderSelectedPublicKey();
     writeNotice(`Generated SSH key ${key.name}.`);
+  });
+}
+
+async function submitKeyDirectory(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const directory = form.elements.directory.value.trim();
+
+  await withBusy(async () => {
+    try {
+      state.keySettings = await apiSaveSSHKeySettings({ customDirectory: directory });
+      renderKeySettings();
+      await loadKeys();
+      const customCount = state.keys.filter((key) => keySource(key) === 'custom').length;
+      if (state.keySettings.customDirectory && customCount === 0) {
+        setKeyDirectoryStatus('Saved, but no SSH keys were found in that directory.', 'pending');
+      } else if (state.keySettings.customDirectory) {
+        setKeyDirectoryStatus(`Saved. Found ${customCount} custom key${customCount === 1 ? '' : 's'}.`, 'success');
+      } else {
+        setKeyDirectoryStatus('Custom keys directory cleared.', 'success');
+      }
+    } catch (error) {
+      const message = `Could not save custom keys directory: ${error?.message ?? error}`;
+      setKeyDirectoryStatus(message, 'error');
+      writeNotice(message);
+      window.setTimeout(() => form.elements.directory.focus(), 0);
+    }
   });
 }
 
@@ -1569,7 +1613,9 @@ async function openKeysPanel() {
   const selected = findResource(state.selectedId)?.resource;
   if (isLocalResource(selected)) return;
 
+  await loadKeySettings();
   await loadKeys();
+  setKeyDirectoryStatus('', '');
   setKeyInstallStatus('', '');
   renderKeyInstallSummary();
   const panel = document.querySelector('#keys-panel');
@@ -1738,8 +1784,10 @@ function renderKeyOptions(select = document.querySelector('#key-select'), includ
 
   const bashesGroup = keyOptionGroup('Bashes keys', state.keys.filter((key) => keySource(key) === 'bashes'));
   const systemGroup = keyOptionGroup('System keys (~/.ssh)', state.keys.filter((key) => keySource(key) === 'system'));
+  const customGroup = keyOptionGroup('Custom keys directory', state.keys.filter((key) => keySource(key) === 'custom'));
   if (bashesGroup) options.push(bashesGroup);
   if (systemGroup) options.push(systemGroup);
+  if (customGroup) options.push(customGroup);
 
   select.replaceChildren(...options);
   renderSelectedPublicKey();
@@ -1764,12 +1812,13 @@ function keySource(key) {
 }
 
 function keyChoiceValue(key) {
-  if (keySource(key) === 'system') return `path:${key.privateKey || ''}`;
+  if (keySource(key) === 'system' || keySource(key) === 'custom') return `path:${key.privateKey || ''}`;
   return `bashes:${key.name || ''}`;
 }
 
 function keyOptionLabel(key) {
   if (keySource(key) === 'system') return `${key.name} - ${key.privateKey}`;
+  if (keySource(key) === 'custom') return `${key.name} - ${key.privateKey}`;
   return key.name;
 }
 
@@ -1801,6 +1850,13 @@ function authInputFromForm(form) {
 
   const keyChoice = selectedKeyChoice(form.elements.keyName);
   if (keyChoice?.source === 'system') {
+    return {
+      keyName: '',
+      privateKeyPath: keyChoice.privateKey,
+      privateKeyPassphrase: form.elements.privateKeyPassphrase.value,
+    };
+  }
+  if (keyChoice?.source === 'custom') {
     return {
       keyName: '',
       privateKeyPath: keyChoice.privateKey,
@@ -1856,7 +1912,7 @@ function selectedKeyChoice(select) {
   if (key) return key;
   if (select.value.startsWith('path:')) {
     const privateKey = select.value.slice('path:'.length);
-    return { source: 'system', name: privateKey.split(/[\\/]/).pop(), privateKey, publicKey: `${privateKey}.pub` };
+    return { source: 'path', name: privateKey.split(/[\\/]/).pop(), privateKey, publicKey: `${privateKey}.pub` };
   }
   if (select.value.startsWith('bashes:')) {
     const name = select.value.slice('bashes:'.length);
@@ -1866,7 +1922,7 @@ function selectedKeyChoice(select) {
 }
 
 function installInputFromKeyChoice(keyChoice) {
-  if (keyChoice.source === 'system') {
+  if (keyChoice.source === 'system' || keyChoice.source === 'custom' || keyChoice.source === 'path') {
     return {
       keyName: '',
       privateKeyPath: keyChoice.privateKey,
@@ -1878,7 +1934,9 @@ function installInputFromKeyChoice(keyChoice) {
 
 function keyChoiceLabel(keyChoice) {
   if (!keyChoice) return '';
-  return keyChoice.source === 'system' ? keyChoice.privateKey : keyChoice.name;
+  return keyChoice.source === 'system' || keyChoice.source === 'custom' || keyChoice.source === 'path'
+    ? keyChoice.privateKey
+    : keyChoice.name;
 }
 
 function authInputFromPreference(resource) {
@@ -1904,7 +1962,7 @@ async function renderSelectedPublicKey() {
     return;
   }
   try {
-    output.value = keyChoice.source === 'system'
+    output.value = keyChoice.source === 'system' || keyChoice.source === 'custom' || keyChoice.source === 'path'
       ? await apiReadSSHPublicKeyPath(keyChoice.publicKey || keyChoice.privateKey)
       : await apiReadSSHPublicKey(keyChoice.name);
     setKeyInstallStatus('', '');
@@ -1923,6 +1981,21 @@ function renderKeyInstallSummary() {
   summary.textContent = selected && !isLocalResource(selected)
     ? `Install selected key on ${selected.user}@${selected.ip || selected.hostname}:${selected.port}`
     : 'Select a host or subsystem to install the key.';
+}
+
+function renderKeySettings() {
+  const form = document.querySelector('#key-directory-form');
+  if (!form) return;
+  form.elements.directory.value = state.keySettings?.customDirectory || '';
+}
+
+function setKeyDirectoryStatus(message, kind) {
+  const status = document.querySelector('#key-directory-status');
+  if (!status) return;
+  status.textContent = message;
+  status.title = message;
+  status.hidden = !message;
+  status.dataset.kind = kind;
 }
 
 function setKeyInstallStatus(message, kind) {
@@ -2614,6 +2687,19 @@ async function apiListSSHKeys() {
   const api = wailsAPI();
   if (api?.ListSSHKeys) return (await api.ListSSHKeys()) ?? [];
   return clone(demoStore.keys);
+}
+
+async function apiGetSSHKeySettings() {
+  const api = wailsAPI();
+  if (api?.GetSSHKeySettings) return await api.GetSSHKeySettings();
+  return { customDirectory: localStorage.getItem('bashes.keys.customDirectory') || '' };
+}
+
+async function apiSaveSSHKeySettings(input) {
+  const api = wailsAPI();
+  if (api?.SaveSSHKeySettings) return await api.SaveSSHKeySettings(input);
+  localStorage.setItem('bashes.keys.customDirectory', input.customDirectory || '');
+  return { customDirectory: input.customDirectory || '' };
 }
 
 async function apiGenerateSSHKey(input) {

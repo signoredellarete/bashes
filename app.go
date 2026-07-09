@@ -182,6 +182,10 @@ type SSHKeyInfo struct {
 	Source     string `json:"source"`
 }
 
+type SSHKeySettings struct {
+	CustomDirectory string `json:"customDirectory"`
+}
+
 type GenerateSSHKeyInput struct {
 	Name string `json:"name"`
 }
@@ -566,6 +570,16 @@ func (a *App) ListSSHKeys() ([]SSHKeyInfo, error) {
 		return nil, err
 	}
 	keys = append(keys, systemKeys...)
+	settings, err := a.GetSSHKeySettings()
+	if err != nil {
+		return nil, err
+	}
+	customKeys, err := listCustomSSHKeys(settings.CustomDirectory)
+	if err != nil {
+		return nil, err
+	}
+	keys = append(keys, customKeys...)
+	keys = dedupeSSHKeys(keys)
 	sort.SliceStable(keys, func(i, j int) bool {
 		if keys[i].Source != keys[j].Source {
 			return keys[i].Source < keys[j].Source
@@ -573,6 +587,56 @@ func (a *App) ListSSHKeys() ([]SSHKeyInfo, error) {
 		return strings.ToLower(keys[i].Name) < strings.ToLower(keys[j].Name)
 	})
 	return keys, nil
+}
+
+func (a *App) GetSSHKeySettings() (SSHKeySettings, error) {
+	data, err := os.ReadFile(a.settingsPath())
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return SSHKeySettings{}, nil
+		}
+		return SSHKeySettings{}, err
+	}
+	var settings SSHKeySettings
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return SSHKeySettings{}, fmt.Errorf("decode settings: %w", err)
+	}
+	settings.CustomDirectory = strings.TrimSpace(settings.CustomDirectory)
+	return settings, nil
+}
+
+func (a *App) SaveSSHKeySettings(input SSHKeySettings) (SSHKeySettings, error) {
+	settings := SSHKeySettings{
+		CustomDirectory: strings.TrimSpace(input.CustomDirectory),
+	}
+	if settings.CustomDirectory != "" {
+		dir := expandHome(settings.CustomDirectory)
+		info, err := os.Stat(dir)
+		if err != nil {
+			return SSHKeySettings{}, fmt.Errorf("read custom keys directory: %w", err)
+		}
+		if !info.IsDir() {
+			return SSHKeySettings{}, fmt.Errorf("custom keys path is not a directory: %s", settings.CustomDirectory)
+		}
+		settings.CustomDirectory = dir
+	}
+
+	if err := os.MkdirAll(filepath.Dir(a.settingsPath()), 0o700); err != nil {
+		return SSHKeySettings{}, err
+	}
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return SSHKeySettings{}, err
+	}
+	tempPath := a.settingsPath() + ".tmp"
+	if err := os.WriteFile(tempPath, append(data, '\n'), 0o600); err != nil {
+		return SSHKeySettings{}, err
+	}
+	if err := os.Rename(tempPath, a.settingsPath()); err != nil {
+		_ = os.Remove(tempPath)
+		return SSHKeySettings{}, err
+	}
+	return settings, nil
 }
 
 func (a *App) listManagedSSHKeys() ([]SSHKeyInfo, error) {
@@ -607,10 +671,22 @@ func listSystemSSHKeys() ([]SSHKeyInfo, error) {
 		return []SSHKeyInfo{}, nil
 	}
 
-	dir := filepath.Join(home, ".ssh")
+	return listSSHKeysInDirectory(filepath.Join(home, ".ssh"), "system", true)
+}
+
+func listCustomSSHKeys(dir string) ([]SSHKeyInfo, error) {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return []SSHKeyInfo{}, nil
+	}
+	return listSSHKeysInDirectory(dir, "custom", false)
+}
+
+func listSSHKeysInDirectory(dir string, source string, ignoreMissing bool) ([]SSHKeyInfo, error) {
+	dir = expandHome(dir)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if ignoreMissing && errors.Is(err, os.ErrNotExist) {
 			return []SSHKeyInfo{}, nil
 		}
 		return nil, err
@@ -637,10 +713,27 @@ func listSystemSSHKeys() ([]SSHKeyInfo, error) {
 			Name:       entry.Name(),
 			PrivateKey: privatePath,
 			PublicKey:  publicPath,
-			Source:     "system",
+			Source:     source,
 		})
 	}
 	return keys, nil
+}
+
+func dedupeSSHKeys(keys []SSHKeyInfo) []SSHKeyInfo {
+	seen := map[string]struct{}{}
+	deduped := make([]SSHKeyInfo, 0, len(keys))
+	for _, key := range keys {
+		identity := key.Source + ":" + key.Name
+		if key.PrivateKey != "" {
+			identity = filepath.Clean(expandHome(key.PrivateKey))
+		}
+		if _, exists := seen[identity]; exists {
+			continue
+		}
+		seen[identity] = struct{}{}
+		deduped = append(deduped, key)
+	}
+	return deduped
 }
 
 func isLikelySSHPrivateKeyName(name string) bool {
@@ -1994,6 +2087,10 @@ func userHomeDir() string {
 
 func (a *App) keysDir() string {
 	return filepath.Join(filepath.Dir(a.dataPath), "keys")
+}
+
+func (a *App) settingsPath() string {
+	return filepath.Join(filepath.Dir(a.dataPath), "settings.json")
 }
 
 func (a *App) publicKeyPath(name string) string {

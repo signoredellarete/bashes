@@ -147,6 +147,43 @@ func TestListSystemSSHKeysIncludesDefaultSSHDirectory(t *testing.T) {
 	}
 }
 
+func TestListSSHKeysIncludesCustomDirectorySetting(t *testing.T) {
+	app := NewApp(filepath.Join(t.TempDir(), "data", "hosts.json"))
+	customDir := filepath.Join(t.TempDir(), "mobaxterm-keys")
+	if err := os.MkdirAll(customDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(custom keys) error = %v", err)
+	}
+	privatePath := filepath.Join(customDir, "moba.ppk")
+	publicPath := privatePath + ".pub"
+	if err := os.WriteFile(privatePath, []byte("private"), 0o600); err != nil {
+		t.Fatalf("WriteFile(private) error = %v", err)
+	}
+	if err := os.WriteFile(publicPath, []byte("ssh-rsa test"), 0o644); err != nil {
+		t.Fatalf("WriteFile(public) error = %v", err)
+	}
+	if _, err := app.SaveSSHKeySettings(SSHKeySettings{CustomDirectory: customDir}); err != nil {
+		t.Fatalf("SaveSSHKeySettings() error = %v", err)
+	}
+
+	keys, err := app.ListSSHKeys()
+	if err != nil {
+		t.Fatalf("ListSSHKeys() error = %v", err)
+	}
+	var found *SSHKeyInfo
+	for i := range keys {
+		if keys[i].PrivateKey == privatePath {
+			found = &keys[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("custom key %q not found in %+v", privatePath, keys)
+	}
+	if found.Source != "custom" || found.Name != "moba.ppk" || found.PublicKey != publicPath {
+		t.Fatalf("custom key = %+v, want custom source and paths", *found)
+	}
+}
+
 func TestNormalizeTunnelInputDefaultsToLocalSocks(t *testing.T) {
 	input := SSHTunnelInput{LocalPort: 1080}
 	if err := normalizeTunnelInput(&input); err != nil {
