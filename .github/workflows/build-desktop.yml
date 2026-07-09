@@ -438,8 +438,9 @@ jobs:
           {
             printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
             printf '## RELEASE NOTES\n\n'
-            printf -- '- Add periodic update checks while Bashes remains open.\n'
-            printf -- '- Keep update notifications limited to one alert per released version.\n\n'
+            printf -- '- Add a localhost shell card backed by a native PTY on Linux and macOS.\n'
+            printf -- '- Open an initial local shell tab by default where supported.\n'
+            printf -- '- Keep the localhost card out of hosts.json and hidden on Windows for now.\n\n'
             printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
 
