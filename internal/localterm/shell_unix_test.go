@@ -47,15 +47,20 @@ func TestStartShellRunsInteractiveCommand(t *testing.T) {
 	}
 }
 
-func TestLocalShellCommandUsesLoginShellOnDarwinOnly(t *testing.T) {
+func TestLocalShellCommandUsesLoginShellOnUnixDesktops(t *testing.T) {
 	darwin := localShellCommand("/bin/zsh", "darwin")
 	if darwin.Args[0] != "-zsh" {
 		t.Fatalf("darwin shell argv[0] = %q, want -zsh", darwin.Args[0])
 	}
 
 	linux := localShellCommand("/bin/bash", "linux")
-	if linux.Args[0] != "/bin/bash" {
-		t.Fatalf("linux shell argv[0] = %q, want /bin/bash", linux.Args[0])
+	if linux.Args[0] != "-bash" {
+		t.Fatalf("linux shell argv[0] = %q, want -bash", linux.Args[0])
+	}
+
+	other := localShellCommand("/bin/sh", "freebsd")
+	if other.Args[0] != "/bin/sh" {
+		t.Fatalf("other unix shell argv[0] = %q, want /bin/sh", other.Args[0])
 	}
 }
 

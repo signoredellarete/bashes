@@ -121,7 +121,7 @@ func (s *Shell) closeFile() error {
 
 func localShellCommand(shellPath string, goos string) *exec.Cmd {
 	cmd := exec.Command(shellPath)
-	if goos == "darwin" {
+	if goos == "darwin" || goos == "linux" {
 		cmd.Args[0] = "-" + filepath.Base(shellPath)
 	}
 	return cmd
