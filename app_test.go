@@ -116,6 +116,37 @@ func TestGenerateSSHKeyUsesNextDefaultName(t *testing.T) {
 	}
 }
 
+func TestListSystemSSHKeysIncludesDefaultSSHDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	sshDir := filepath.Join(home, ".ssh")
+	if err := os.MkdirAll(sshDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(.ssh) error = %v", err)
+	}
+	privatePath := filepath.Join(sshDir, "id_ed25519")
+	publicPath := privatePath + ".pub"
+	if err := os.WriteFile(privatePath, []byte("private"), 0o600); err != nil {
+		t.Fatalf("WriteFile(private) error = %v", err)
+	}
+	if err := os.WriteFile(publicPath, []byte("ssh-ed25519 test"), 0o644); err != nil {
+		t.Fatalf("WriteFile(public) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sshDir, "known_hosts"), []byte("ignored"), 0o644); err != nil {
+		t.Fatalf("WriteFile(known_hosts) error = %v", err)
+	}
+
+	keys, err := listSystemSSHKeys()
+	if err != nil {
+		t.Fatalf("listSystemSSHKeys() error = %v", err)
+	}
+	if len(keys) != 1 {
+		t.Fatalf("len(keys) = %d, want 1: %+v", len(keys), keys)
+	}
+	if keys[0].Source != "system" || keys[0].Name != "id_ed25519" || keys[0].PrivateKey != privatePath || keys[0].PublicKey != publicPath {
+		t.Fatalf("system key = %+v, want id_ed25519 paths", keys[0])
+	}
+}
+
 func TestNormalizeTunnelInputDefaultsToLocalSocks(t *testing.T) {
 	input := SSHTunnelInput{LocalPort: 1080}
 	if err := normalizeTunnelInput(&input); err != nil {

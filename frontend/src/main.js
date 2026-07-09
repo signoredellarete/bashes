@@ -183,7 +183,7 @@ app.innerHTML = `
       <p class="inline-status" id="connect-status" hidden></p>
 
       <label>
-        <span>Bashes Key</span>
+        <span>Private Key</span>
         <select name="keyName"></select>
       </label>
       <label>
@@ -191,8 +191,8 @@ app.innerHTML = `
         <input name="password" type="password" autocomplete="current-password" />
       </label>
       <label>
-        <span>Private Key Path</span>
-        <input name="privateKeyPath" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="optional path on this machine" />
+        <span>Custom Key Path</span>
+        <input name="privateKeyPath" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="optional private key path" />
       </label>
       <label>
         <span>Key Passphrase</span>
@@ -253,7 +253,7 @@ app.innerHTML = `
         </label>
       </div>
       <label>
-        <span>Bashes Key</span>
+        <span>Private Key</span>
         <select name="keyName"></select>
       </label>
       <label>
@@ -261,8 +261,8 @@ app.innerHTML = `
         <input name="password" type="password" autocomplete="current-password" />
       </label>
       <label>
-        <span>Private Key Path</span>
-        <input name="privateKeyPath" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="optional path on this machine" />
+        <span>Custom Key Path</span>
+        <input name="privateKeyPath" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="optional private key path" />
       </label>
       <label>
         <span>Key Passphrase</span>
@@ -316,7 +316,7 @@ app.innerHTML = `
       </form>
 
       <label>
-        <span>Existing Key</span>
+        <span>Available Key</span>
         <select id="key-select"></select>
       </label>
       <label>
@@ -646,9 +646,8 @@ async function submitGenerateKey(event) {
     const key = await apiGenerateSSHKey({ name: form.elements.name.value.trim() });
     form.reset();
     await loadKeys();
-    document.querySelector('#key-select').value = key.name;
+    document.querySelector('#key-select').value = keyChoiceValue({ ...key, source: 'bashes' });
     await renderSelectedPublicKey();
-    prepareKeyGenerationName();
     writeNotice(`Generated SSH key ${key.name}.`);
   });
 }
@@ -656,33 +655,34 @@ async function submitGenerateKey(event) {
 async function submitInstallKey(event) {
   event.preventDefault();
   const selected = findResource(state.selectedId)?.resource;
-  const keyName = document.querySelector('#key-select').value;
+  const keyChoice = selectedKeyChoice(document.querySelector('#key-select'));
   if (!selected || isLocalResource(selected)) {
     setKeyInstallStatus('Select a host or subsystem before installing a key.', 'error');
     writeNotice('Select a host or subsystem before installing a key.');
     return;
   }
-  if (!keyName) {
+  if (!keyChoice) {
     setKeyInstallStatus('Select or generate an SSH key before installing it.', 'error');
     writeNotice('Select or generate an SSH key before installing it.');
     return;
   }
 
   const form = event.currentTarget;
-  setKeyInstallStatus(`Installing key ${keyName} on ${selected.hostname} ...`, 'pending');
+  const keyLabel = keyChoiceLabel(keyChoice);
+  setKeyInstallStatus(`Installing key ${keyLabel} on ${selected.hostname} ...`, 'pending');
   await withBusy(async () => {
     try {
       await apiInstallSSHKey({
         resourceId: selected.id,
-        keyName,
+        ...installInputFromKeyChoice(keyChoice),
         password: form.elements.password.value,
         trustHostKey: form.elements.trustHostKey.checked,
       });
       form.reset();
       form.elements.trustHostKey.checked = true;
       await refreshHosts();
-      setKeyInstallStatus(`Installed key ${keyName} on ${selected.hostname}.`, 'success');
-      writeNotice(`Installed key ${keyName} on ${selected.hostname}.`);
+      setKeyInstallStatus(`Installed key ${keyLabel} on ${selected.hostname}.`, 'success');
+      writeNotice(`Installed key ${keyLabel} on ${selected.hostname}.`);
     } catch (error) {
       const message = keyInstallErrorMessage(error, selected);
       setKeyInstallStatus(message, 'error');
@@ -1572,7 +1572,6 @@ async function openKeysPanel() {
   await loadKeys();
   setKeyInstallStatus('', '');
   renderKeyInstallSummary();
-  prepareKeyGenerationName();
   const panel = document.querySelector('#keys-panel');
   panel.hidden = false;
   requestAnimationFrame(() => panel.classList.add('open'));
@@ -1733,17 +1732,45 @@ function renderKeyOptions(select = document.querySelector('#key-select'), includ
   if (includeEmpty) {
     const empty = document.createElement('option');
     empty.value = '';
-    empty.textContent = 'Use agent/default/path';
+    empty.textContent = 'Use password/agent or custom path';
     options.push(empty);
   }
-  for (const key of state.keys) {
-    const option = document.createElement('option');
-    option.value = key.name;
-    option.textContent = key.name;
-    options.push(option);
-  }
+
+  const bashesGroup = keyOptionGroup('Bashes keys', state.keys.filter((key) => keySource(key) === 'bashes'));
+  const systemGroup = keyOptionGroup('System keys (~/.ssh)', state.keys.filter((key) => keySource(key) === 'system'));
+  if (bashesGroup) options.push(bashesGroup);
+  if (systemGroup) options.push(systemGroup);
+
   select.replaceChildren(...options);
   renderSelectedPublicKey();
+}
+
+function keyOptionGroup(label, keys) {
+  if (keys.length === 0) return null;
+  const group = document.createElement('optgroup');
+  group.label = label;
+  for (const key of keys) {
+    const option = document.createElement('option');
+    option.value = keyChoiceValue(key);
+    option.textContent = keyOptionLabel(key);
+    option.title = key.privateKey || key.name;
+    group.append(option);
+  }
+  return group;
+}
+
+function keySource(key) {
+  return key?.source || 'bashes';
+}
+
+function keyChoiceValue(key) {
+  if (keySource(key) === 'system') return `path:${key.privateKey || ''}`;
+  return `bashes:${key.name || ''}`;
+}
+
+function keyOptionLabel(key) {
+  if (keySource(key) === 'system') return `${key.name} - ${key.privateKey}`;
+  return key.name;
 }
 
 function registerAuthChoiceSync(form) {
@@ -1772,8 +1799,24 @@ function authInputFromForm(form) {
     };
   }
 
+  const keyChoice = selectedKeyChoice(form.elements.keyName);
+  if (keyChoice?.source === 'system') {
+    return {
+      keyName: '',
+      privateKeyPath: keyChoice.privateKey,
+      privateKeyPassphrase: form.elements.privateKeyPassphrase.value,
+    };
+  }
+  if (keyChoice?.source === 'bashes') {
+    return {
+      keyName: keyChoice.name,
+      privateKeyPath: '',
+      privateKeyPassphrase: form.elements.privateKeyPassphrase.value,
+    };
+  }
+
   return {
-    keyName: form.elements.keyName.value,
+    keyName: '',
     privateKeyPath: '',
     privateKeyPassphrase: form.elements.privateKeyPassphrase.value,
   };
@@ -1787,51 +1830,55 @@ function applyConnectDefaults(form, resource) {
     form.elements.trustHostKey.checked = true;
   }
   if (auth.method === 'key' && auth.keyName) {
-    const hasKey = [...form.elements.keyName.options].some((option) => option.value === auth.keyName);
+    const value = `bashes:${auth.keyName}`;
+    const hasKey = [...form.elements.keyName.options].some((option) => option.value === value);
     if (hasKey) {
-      form.elements.keyName.value = auth.keyName;
+      form.elements.keyName.value = value;
       form.elements.privateKeyPath.value = '';
     }
   }
   if (auth.method === 'path' && auth.privateKeyPath) {
-    form.elements.keyName.value = '';
-    form.elements.privateKeyPath.value = auth.privateKeyPath;
+    const value = `path:${auth.privateKeyPath}`;
+    const hasPath = [...form.elements.keyName.options].some((option) => option.value === value);
+    if (hasPath) {
+      form.elements.keyName.value = value;
+      form.elements.privateKeyPath.value = '';
+    } else {
+      form.elements.keyName.value = '';
+      form.elements.privateKeyPath.value = auth.privateKeyPath;
+    }
   }
 }
 
-function prepareKeyGenerationName() {
-  const form = document.querySelector('#key-generate-form');
-  if (!form) return;
-
-  const selected = findResource(state.selectedId)?.resource;
-  const base = keyNameBaseForResource(selected);
-  const name = uniqueKeyNameSuggestion(base);
-  form.elements.name.value = name;
-  form.elements.name.placeholder = name;
-}
-
-function keyNameBaseForResource(resource) {
-  if (!resource || isLocalResource(resource)) return 'bashes';
-  return sanitizeKeyNameClient(`${resource.hostname || resource.name || 'bashes'}-key`) || 'bashes';
-}
-
-function uniqueKeyNameSuggestion(base) {
-  const normalized = sanitizeKeyNameClient(base) || 'bashes';
-  const existing = new Set(state.keys.map((key) => key.name));
-  if (!existing.has(normalized)) return normalized;
-
-  for (let index = 2; index < 1000; index += 1) {
-    const candidate = `${normalized}-${index}`;
-    if (!existing.has(candidate)) return candidate;
+function selectedKeyChoice(select) {
+  if (!select?.value) return null;
+  const key = state.keys.find((item) => keyChoiceValue(item) === select.value);
+  if (key) return key;
+  if (select.value.startsWith('path:')) {
+    const privateKey = select.value.slice('path:'.length);
+    return { source: 'system', name: privateKey.split(/[\\/]/).pop(), privateKey, publicKey: `${privateKey}.pub` };
   }
-  return `${normalized}-${Date.now()}`;
+  if (select.value.startsWith('bashes:')) {
+    const name = select.value.slice('bashes:'.length);
+    return { source: 'bashes', name };
+  }
+  return null;
 }
 
-function sanitizeKeyNameClient(name) {
-  return String(name || '')
-    .trim()
-    .replace(/[^A-Za-z0-9_.-]+/g, '-')
-    .replace(/^[.-]+|[.-]+$/g, '');
+function installInputFromKeyChoice(keyChoice) {
+  if (keyChoice.source === 'system') {
+    return {
+      keyName: '',
+      privateKeyPath: keyChoice.privateKey,
+      publicKeyPath: keyChoice.publicKey || keyChoice.privateKey,
+    };
+  }
+  return { keyName: keyChoice.name };
+}
+
+function keyChoiceLabel(keyChoice) {
+  if (!keyChoice) return '';
+  return keyChoice.source === 'system' ? keyChoice.privateKey : keyChoice.name;
 }
 
 function authInputFromPreference(resource) {
@@ -1851,16 +1898,19 @@ async function renderSelectedPublicKey() {
   const select = document.querySelector('#key-select');
   const output = document.querySelector('#public-key');
   if (!select || !output) return;
-  if (!select.value) {
+  const keyChoice = selectedKeyChoice(select);
+  if (!keyChoice) {
     output.value = '';
     return;
   }
   try {
-    output.value = await apiReadSSHPublicKey(select.value);
+    output.value = keyChoice.source === 'system'
+      ? await apiReadSSHPublicKeyPath(keyChoice.publicKey || keyChoice.privateKey)
+      : await apiReadSSHPublicKey(keyChoice.name);
     setKeyInstallStatus('', '');
   } catch (error) {
     output.value = '';
-    const message = `Could not read SSH key ${select.value}: ${error?.message ?? error}`;
+    const message = `Could not read SSH key ${keyChoiceLabel(keyChoice)}: ${error?.message ?? error}`;
     setKeyInstallStatus(message, 'error');
     writeNotice(message);
   }
@@ -2569,7 +2619,7 @@ async function apiListSSHKeys() {
 async function apiGenerateSSHKey(input) {
   const api = wailsAPI();
   if (api?.GenerateSSHKey) return await api.GenerateSSHKey(input);
-  const key = { name: input.name || `bashes-${Date.now()}`, privateKey: '', publicKey: '' };
+  const key = { name: input.name || `bashes-${Date.now()}`, privateKey: '', publicKey: '', source: 'bashes' };
   demoStore.keys.push(key);
   return clone(key);
 }
@@ -2578,6 +2628,12 @@ async function apiReadSSHPublicKey(name) {
   const api = wailsAPI();
   if (api?.ReadSSHPublicKey) return await api.ReadSSHPublicKey(name);
   return `ssh-ed25519 demo ${name}`;
+}
+
+async function apiReadSSHPublicKeyPath(path) {
+  const api = wailsAPI();
+  if (api?.ReadSSHPublicKeyPath) return await api.ReadSSHPublicKeyPath(path);
+  return `ssh-ed25519 demo ${path}`;
 }
 
 async function apiInstallSSHKey(input) {

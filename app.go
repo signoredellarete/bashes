@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	goruntime "runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -178,6 +179,7 @@ type SSHKeyInfo struct {
 	Name       string `json:"name"`
 	PrivateKey string `json:"privateKey"`
 	PublicKey  string `json:"publicKey"`
+	Source     string `json:"source"`
 }
 
 type GenerateSSHKeyInput struct {
@@ -187,6 +189,7 @@ type GenerateSSHKeyInput struct {
 type InstallSSHKeyInput struct {
 	ResourceID           string `json:"resourceId"`
 	KeyName              string `json:"keyName"`
+	PublicKeyPath        string `json:"publicKeyPath,omitempty"`
 	Password             string `json:"password,omitempty"`
 	PrivateKeyPath       string `json:"privateKeyPath,omitempty"`
 	PrivateKeyPassphrase string `json:"privateKeyPassphrase,omitempty"`
@@ -554,6 +557,25 @@ func (a *App) ImportDatabase(path string) error {
 }
 
 func (a *App) ListSSHKeys() ([]SSHKeyInfo, error) {
+	keys, err := a.listManagedSSHKeys()
+	if err != nil {
+		return nil, err
+	}
+	systemKeys, err := listSystemSSHKeys()
+	if err != nil {
+		return nil, err
+	}
+	keys = append(keys, systemKeys...)
+	sort.SliceStable(keys, func(i, j int) bool {
+		if keys[i].Source != keys[j].Source {
+			return keys[i].Source < keys[j].Source
+		}
+		return strings.ToLower(keys[i].Name) < strings.ToLower(keys[j].Name)
+	})
+	return keys, nil
+}
+
+func (a *App) listManagedSSHKeys() ([]SSHKeyInfo, error) {
 	dir := a.keysDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -573,9 +595,64 @@ func (a *App) ListSSHKeys() ([]SSHKeyInfo, error) {
 			Name:       name,
 			PrivateKey: filepath.Join(dir, name),
 			PublicKey:  filepath.Join(dir, entry.Name()),
+			Source:     "bashes",
 		})
 	}
 	return keys, nil
+}
+
+func listSystemSSHKeys() ([]SSHKeyInfo, error) {
+	home := userHomeDir()
+	if home == "" {
+		return []SSHKeyInfo{}, nil
+	}
+
+	dir := filepath.Join(home, ".ssh")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return []SSHKeyInfo{}, nil
+		}
+		return nil, err
+	}
+
+	keys := []SSHKeyInfo{}
+	for _, entry := range entries {
+		if entry.IsDir() || strings.HasSuffix(entry.Name(), ".pub") {
+			continue
+		}
+		privatePath := filepath.Join(dir, entry.Name())
+		publicPath := privatePath + ".pub"
+		hasPublic := false
+		if _, err := os.Stat(publicPath); err == nil {
+			hasPublic = true
+		}
+		if !hasPublic && !isLikelySSHPrivateKeyName(entry.Name()) {
+			continue
+		}
+		if !hasPublic {
+			publicPath = ""
+		}
+		keys = append(keys, SSHKeyInfo{
+			Name:       entry.Name(),
+			PrivateKey: privatePath,
+			PublicKey:  publicPath,
+			Source:     "system",
+		})
+	}
+	return keys, nil
+}
+
+func isLikelySSHPrivateKeyName(name string) bool {
+	lower := strings.ToLower(name)
+	if strings.HasPrefix(lower, "known_hosts") {
+		return false
+	}
+	switch lower {
+	case "config", "authorized_keys", "allowed_signers", "revoked_keys", "environment":
+		return false
+	}
+	return strings.HasPrefix(lower, "id_") || strings.HasSuffix(lower, ".ppk")
 }
 
 func (a *App) GenerateSSHKey(input GenerateSSHKeyInput) (SSHKeyInfo, error) {
@@ -617,7 +694,7 @@ func (a *App) GenerateSSHKey(input GenerateSSHKeyInput) (SSHKeyInfo, error) {
 		return SSHKeyInfo{}, err
 	}
 
-	return SSHKeyInfo{Name: name, PrivateKey: privatePath, PublicKey: publicPath}, nil
+	return SSHKeyInfo{Name: name, PrivateKey: privatePath, PublicKey: publicPath, Source: "bashes"}, nil
 }
 
 func (a *App) ReadSSHPublicKey(name string) (string, error) {
@@ -628,6 +705,43 @@ func (a *App) ReadSSHPublicKey(name string) (string, error) {
 	return string(key), nil
 }
 
+func (a *App) ReadSSHPublicKeyPath(path string) (string, error) {
+	return readPublicKeyPath(path)
+}
+
+func readPublicKeyPath(path string) (string, error) {
+	path = expandHome(path)
+	if strings.TrimSpace(path) == "" {
+		return "", errors.New("ssh public key path is empty")
+	}
+	if strings.HasSuffix(path, ".pub") {
+		key, err := os.ReadFile(path)
+		if err != nil {
+			return "", err
+		}
+		return string(key), nil
+	}
+
+	publicPath := path + ".pub"
+	key, err := os.ReadFile(publicPath)
+	if err == nil {
+		return string(key), nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+
+	privateKey, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	signer, err := parsePrivateKey(privateKey, "")
+	if err != nil {
+		return "", fmt.Errorf("read public key from private key: %w", err)
+	}
+	return string(ssh.MarshalAuthorizedKey(signer.PublicKey())), nil
+}
+
 func (a *App) resolveSessionKeyPath(input SSHSessionInput) SSHSessionInput {
 	if strings.TrimSpace(input.PrivateKeyPath) == "" && strings.TrimSpace(input.KeyName) != "" {
 		input.PrivateKeyPath = filepath.Join(a.keysDir(), sanitizeKeyName(input.KeyName))
@@ -636,10 +750,11 @@ func (a *App) resolveSessionKeyPath(input SSHSessionInput) SSHSessionInput {
 }
 
 func (a *App) InstallSSHKey(input InstallSSHKeyInput) error {
-	publicKey, err := a.ReadSSHPublicKey(input.KeyName)
+	publicKey, err := a.installablePublicKey(input)
 	if err != nil {
 		return err
 	}
+
 	resource, err := a.resourceByID(input.ResourceID)
 	if err != nil {
 		return err
@@ -672,11 +787,31 @@ func (a *App) InstallSSHKey(input InstallSSHKeyInput) error {
 	if err != nil {
 		return fmt.Errorf("install ssh key: %w: %s", err, strings.TrimSpace(string(output)))
 	}
+	if strings.TrimSpace(input.PrivateKeyPath) != "" {
+		return a.service.SetResourceAuth(input.ResourceID, domain.Auth{
+			Method:         domain.AuthMethodPath,
+			PrivateKeyPath: expandHome(input.PrivateKeyPath),
+			TrustHostKey:   input.TrustHostKey,
+		})
+	}
 	return a.service.SetResourceAuth(input.ResourceID, domain.Auth{
 		Method:       domain.AuthMethodKey,
 		KeyName:      sanitizeKeyName(input.KeyName),
 		TrustHostKey: input.TrustHostKey,
 	})
+}
+
+func (a *App) installablePublicKey(input InstallSSHKeyInput) (string, error) {
+	if strings.TrimSpace(input.PublicKeyPath) != "" {
+		return readPublicKeyPath(input.PublicKeyPath)
+	}
+	if strings.TrimSpace(input.PrivateKeyPath) != "" {
+		return readPublicKeyPath(input.PrivateKeyPath)
+	}
+	if strings.TrimSpace(input.KeyName) != "" {
+		return a.ReadSSHPublicKey(input.KeyName)
+	}
+	return "", errors.New("select or generate an SSH key before installing it")
 }
 
 type SSHSessionInput struct {
