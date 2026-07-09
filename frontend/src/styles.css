@@ -567,6 +567,18 @@ textarea {
   align-items: center;
 }
 
+.session-tab-wrap.dragging-tab {
+  opacity: 0.55;
+}
+
+.session-tab-wrap.drop-before {
+  box-shadow: -3px 0 0 #2f8f63;
+}
+
+.session-tab-wrap.drop-after {
+  box-shadow: 3px 0 0 #2f8f63;
+}
+
 .session-tab,
 .tab-close {
   min-height: 30px;
@@ -584,6 +596,14 @@ textarea {
   border-radius: 6px 0 0 0;
   padding: 5px 7px;
   text-align: left;
+}
+
+.session-tab[draggable="true"] {
+  cursor: grab;
+}
+
+.session-tab[draggable="true"]:active {
+  cursor: grabbing;
 }
 
 .session-tab span {

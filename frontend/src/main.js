@@ -37,6 +37,7 @@ const state = {
   confirmResolver: null,
   editContextTarget: null,
   draggedHostId: null,
+  draggedSessionId: null,
   lastSessionByResource: new Map(),
   sessionFocusHistory: [],
   sessions: new Map(),
@@ -1377,6 +1378,7 @@ function renderTabs() {
     const tab = document.createElement('button');
     tab.type = 'button';
     tab.className = `session-tab ${session.id === state.activeSessionId ? 'active' : ''} ${session.closed ? 'closed' : ''} ${session.pending ? 'pending' : ''}`;
+    tab.draggable = true;
     tab.innerHTML = '<span></span><strong></strong>';
     tab.querySelector('span').textContent = session.closed ? 'closed' : session.pending ? 'new' : terminalKindLabel(session.kind);
     tab.querySelector('strong').textContent = session.title;
@@ -1388,6 +1390,8 @@ function renderTabs() {
       scheduleTerminalFit();
       focusActiveTerminal();
     });
+    tab.addEventListener('dragstart', (event) => startSessionTabDrag(event, session.id));
+    tab.addEventListener('dragend', () => endSessionTabDrag());
 
     const close = document.createElement('button');
     close.type = 'button';
@@ -1401,6 +1405,10 @@ function renderTabs() {
 
     const wrapper = document.createElement('div');
     wrapper.className = 'session-tab-wrap';
+    wrapper.dataset.sessionId = session.id;
+    wrapper.addEventListener('dragover', (event) => previewSessionTabDrop(event, wrapper));
+    wrapper.addEventListener('dragleave', () => clearSessionTabDropPreview(wrapper));
+    wrapper.addEventListener('drop', (event) => dropSessionTab(event, wrapper));
     wrapper.append(tab, close);
     return wrapper;
   }));
@@ -1408,6 +1416,66 @@ function renderTabs() {
   document.querySelectorAll('.terminal-pane').forEach((pane) => {
     pane.hidden = pane.dataset.sessionId !== state.activeSessionId;
   });
+}
+
+function startSessionTabDrag(event, sessionId) {
+  state.draggedSessionId = sessionId;
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', sessionId);
+  event.currentTarget.closest('.session-tab-wrap')?.classList.add('dragging-tab');
+}
+
+function endSessionTabDrag() {
+  state.draggedSessionId = null;
+  document.querySelectorAll('.session-tab-wrap.dragging-tab, .session-tab-wrap.drop-before, .session-tab-wrap.drop-after').forEach((tab) => {
+    tab.classList.remove('dragging-tab', 'drop-before', 'drop-after');
+  });
+}
+
+function previewSessionTabDrop(event, wrapper) {
+  if (!state.draggedSessionId) return;
+  const targetSessionId = wrapper.dataset.sessionId;
+  if (!targetSessionId || targetSessionId === state.draggedSessionId) return;
+  event.preventDefault();
+  const after = dropAfterTab(event, wrapper);
+  wrapper.classList.toggle('drop-before', !after);
+  wrapper.classList.toggle('drop-after', after);
+}
+
+function clearSessionTabDropPreview(wrapper) {
+  wrapper.classList.remove('drop-before', 'drop-after');
+}
+
+function dropSessionTab(event, wrapper) {
+  if (!state.draggedSessionId) return;
+  const targetSessionId = wrapper.dataset.sessionId;
+  if (!targetSessionId || targetSessionId === state.draggedSessionId) return;
+  event.preventDefault();
+  reorderSessionTabs(state.draggedSessionId, targetSessionId, dropAfterTab(event, wrapper));
+  endSessionTabDrag();
+  renderTabs();
+  focusActiveTerminal();
+}
+
+function dropAfterTab(event, wrapper) {
+  const rect = wrapper.getBoundingClientRect();
+  return event.clientX > rect.left + rect.width / 2;
+}
+
+function reorderSessionTabs(draggedSessionId, targetSessionId, after) {
+  const order = [...state.sessions.keys()];
+  const from = order.indexOf(draggedSessionId);
+  if (from < 0 || !order.includes(targetSessionId)) return;
+  order.splice(from, 1);
+  let insertAt = order.indexOf(targetSessionId);
+  if (after) insertAt += 1;
+  order.splice(insertAt, 0, draggedSessionId);
+  const reordered = new Map();
+  for (const id of order) {
+    const session = state.sessions.get(id);
+    if (session) reordered.set(id, session);
+  }
+  state.sessions = reordered;
 }
 
 function openResourcePanel(mode, hostID = '') {

@@ -41,6 +41,7 @@
   let cleanupJobEvents = () => {};
   let jobs = [];
   let jobRefreshTargets = new Map();
+  let jobSpeedSamples = new Map();
   let pointerDrag = null;
   let dragGhost = null;
   let dragGhostX = 0;
@@ -269,6 +270,7 @@
 
   function upsertJob(job) {
     if (!job?.jobId) return;
+    updateJobSpeed(job);
     const next = jobs.filter((item) => item.jobId !== job.jobId);
     next.unshift(job);
     jobs = next.slice(0, 8);
@@ -289,6 +291,7 @@
 
   function dismissJob(jobId) {
     jobs = jobs.filter((job) => job.jobId !== jobId);
+    jobSpeedSamples.delete(jobId);
   }
 
   function updateStatusFromJob(job) {
@@ -341,6 +344,39 @@
 
   function progressBarMax(job) {
     return job?.totalBytes || 1;
+  }
+
+  function updateJobSpeed(job) {
+    const now = Date.now();
+    const bytes = Number(job.transferredBytes || 0);
+    const previous = jobSpeedSamples.get(job.jobId);
+    if (!previous) {
+      jobSpeedSamples.set(job.jobId, { lastAt: now, lastBytes: bytes, speed: 0, samples: [] });
+      return;
+    }
+    const elapsed = (now - previous.lastAt) / 1000;
+    const delta = bytes - previous.lastBytes;
+    if (elapsed <= 0 || delta < 0) {
+      previous.lastAt = now;
+      previous.lastBytes = bytes;
+      return;
+    }
+    if (delta > 0 && (job.status === 'queued' || job.status === 'running')) {
+      const samples = [...previous.samples, delta / elapsed].slice(-5);
+      previous.samples = samples;
+      previous.speed = samples.reduce((sum, value) => sum + value, 0) / samples.length;
+    }
+    previous.lastAt = now;
+    previous.lastBytes = bytes;
+  }
+
+  function jobSpeed(job) {
+    return jobSpeedSamples.get(job?.jobId)?.speed || 0;
+  }
+
+  function formatSpeed(job) {
+    const speed = jobSpeed(job);
+    return speed > 0 ? `${formatBytes(speed)}/s` : '--';
   }
 
   function formatBytes(value) {
@@ -721,7 +757,7 @@
           </div>
           <progress value={progressBarValue(job)} max={progressBarMax(job)}></progress>
           <div class="transfer-job-footer">
-            <span>{formatBytes(job.transferredBytes)}{job.totalBytes ? ` / ${formatBytes(job.totalBytes)}` : ''}</span>
+            <span>{formatBytes(job.transferredBytes)}{job.totalBytes ? ` / ${formatBytes(job.totalBytes)}` : ''} · {formatSpeed(job)}</span>
             {#if job.status === 'queued' || job.status === 'running'}
               <button type="button" onclick={() => cancelTransferJob(job.jobId)}>Cancel</button>
             {:else}
