@@ -369,9 +369,12 @@ app.innerHTML = `
   <section id="app-modal" class="app-modal" hidden>
     <div class="app-modal-scrim" data-close-app-modal></div>
     <section class="app-modal-card" role="dialog" aria-modal="true" aria-labelledby="app-modal-title" aria-describedby="app-modal-message">
-      <header>
-        <p class="eyebrow" id="app-modal-kicker">Bashes</p>
-        <h3 id="app-modal-title">Bashes</h3>
+      <header class="app-modal-header">
+        <div>
+          <p class="eyebrow" id="app-modal-kicker">Bashes</p>
+          <h3 id="app-modal-title">Bashes</h3>
+        </div>
+        <button class="close-panel" type="button" data-close-app-modal title="Close">X</button>
       </header>
       <p id="app-modal-message"></p>
       <dl id="app-modal-details"></dl>
@@ -826,6 +829,7 @@ function resolveConfirmModal(confirmed) {
 
   modal.classList.remove('open');
   modal.hidden = true;
+  restoreTerminalFocusAfterOverlay();
 
   const resolve = state.confirmResolver;
   state.confirmResolver = null;
@@ -879,6 +883,7 @@ function closeAppModal() {
   modal.classList.remove('open');
   modal.hidden = true;
   appModalActions = {};
+  restoreTerminalFocusAfterOverlay();
 }
 
 async function stopSelectedTunnel() {
@@ -1487,6 +1492,7 @@ function closeResourcePanel() {
   state.drawerMode = null;
   state.drawerHostId = null;
   state.editResourceId = null;
+  restoreTerminalFocusAfterOverlay();
 }
 
 async function openConnectPanel(statusMessage = '', statusKind = '') {
@@ -1528,6 +1534,7 @@ function closeConnectPanel() {
   panel.classList.remove('open');
   panel.hidden = true;
   setConnectStatus('', '');
+  restoreTerminalFocusAfterOverlay();
 }
 
 async function openTunnelPanel() {
@@ -1559,6 +1566,7 @@ function closeTunnelPanel() {
   const panel = document.querySelector('#tunnel-panel');
   panel.classList.remove('open');
   panel.hidden = true;
+  restoreTerminalFocusAfterOverlay();
 }
 
 function updateTunnelSummary() {
@@ -1641,6 +1649,7 @@ function closeKeysPanel() {
   const panel = document.querySelector('#keys-panel');
   panel.classList.remove('open');
   panel.hidden = true;
+  restoreTerminalFocusAfterOverlay();
 }
 
 async function openFileTransferModal() {
@@ -1671,6 +1680,7 @@ function closeFileTransferModal() {
   const panel = document.querySelector('#file-transfer-modal');
   panel.classList.remove('open');
   panel.hidden = true;
+  restoreTerminalFocusAfterOverlay();
 }
 
 function registerFileTransferModalResize() {
@@ -2287,6 +2297,21 @@ function focusActiveTerminal() {
   requestAnimationFrame(() => session.terminal.focus());
 }
 
+function restoreTerminalFocusAfterOverlay() {
+  window.setTimeout(() => {
+    requestAnimationFrame(() => {
+      if (hasOpenBlockingOverlay()) return;
+      focusActiveTerminal();
+    });
+  }, 0);
+}
+
+function hasOpenBlockingOverlay() {
+  return Boolean(document.querySelector(
+    '.slide-panel:not([hidden]), .confirm-modal:not([hidden]), .app-modal:not([hidden]), .file-transfer-modal:not([hidden])',
+  ));
+}
+
 function fitActiveTerminal() {
   const session = state.sessions.get(state.activeSessionId);
   if (!session?.fitAddon || !session.terminal) return;
@@ -2488,6 +2513,10 @@ function registerAppEvents() {
     const imported = event?.imported ?? 0;
     const skipped = event?.skipped ?? 0;
     writeNotice(`Imported ${imported} host${imported === 1 ? '' : 's'} from hosts file. Skipped ${skipped}.`);
+    restoreTerminalFocusAfterOverlay();
+  });
+  eventsOn('database:hosts-file-preview', (event) => {
+    showHostsFileImportPreview(event);
   });
   eventsOn('app:about', (info) => showAboutModal(info));
   eventsOn('app:update-check', (event) => {
@@ -2509,6 +2538,42 @@ function clearAllSessionsFromUI() {
   state.activeSessionId = null;
   renderTabs();
   renderSelection();
+}
+
+function showHostsFileImportPreview(result) {
+  const hosts = result?.hosts ?? [];
+  const details = [
+    ['Hosts file', result?.path ?? ''],
+    ['Default SSH user', result?.user ?? ''],
+    ['Skipped duplicates', String(result?.skipped ?? 0)],
+    ...hosts.map((host, index) => [
+      `Host ${index + 1}`,
+      `${host.user}@${host.hostname}:${host.port}${host.ip ? ` (${host.ip})` : ''}`,
+    ]),
+  ];
+
+  showAppModal({
+    kicker: 'Tools',
+    title: 'Import From Hosts File',
+    message: hosts.length > 0
+      ? `${hosts.length} host${hosts.length === 1 ? '' : 's'} will be imported.`
+      : 'No new remote hosts were found.',
+    details,
+    primaryLabel: hosts.length > 0 ? 'Import' : 'OK',
+    primaryAction: hosts.length > 0 ? () => applyHostsFileImport() : null,
+    secondaryLabel: hosts.length > 0 ? 'Cancel' : '',
+  });
+}
+
+async function applyHostsFileImport() {
+  await withBusy(async () => {
+    const result = await apiImportFromHostsFile();
+    await refreshHosts();
+    const imported = result?.imported ?? 0;
+    const skipped = result?.skipped ?? 0;
+    writeNotice(`Imported ${imported} host${imported === 1 ? '' : 's'} from hosts file. Skipped ${skipped}.`);
+    restoreTerminalFocusAfterOverlay();
+  });
 }
 
 function showAboutModal(info) {
@@ -2808,6 +2873,12 @@ async function apiSaveSSHKeySettings(input) {
   if (api?.SaveSSHKeySettings) return await api.SaveSSHKeySettings(input);
   localStorage.setItem('bashes.keys.customDirectory', input.customDirectory || '');
   return { customDirectory: input.customDirectory || '' };
+}
+
+async function apiImportFromHostsFile() {
+  const api = wailsAPI();
+  if (api?.ImportFromHostsFile) return await api.ImportFromHostsFile();
+  return { imported: 0, skipped: 0, hosts: [], hostnames: [] };
 }
 
 async function apiGenerateSSHKey(input) {

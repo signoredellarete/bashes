@@ -221,11 +221,19 @@ type UpdateInfo struct {
 }
 
 type HostsFileImportResult struct {
-	Path      string   `json:"path"`
-	Imported  int      `json:"imported"`
-	Skipped   int      `json:"skipped"`
-	User      string   `json:"user"`
-	Hostnames []string `json:"hostnames"`
+	Path      string                  `json:"path"`
+	Imported  int                     `json:"imported"`
+	Skipped   int                     `json:"skipped"`
+	User      string                  `json:"user"`
+	Hostnames []string                `json:"hostnames"`
+	Hosts     []HostsFileImportTarget `json:"hosts"`
+}
+
+type HostsFileImportTarget struct {
+	Hostname string `json:"hostname"`
+	IP       string `json:"ip"`
+	User     string `json:"user"`
+	Port     int    `json:"port"`
 }
 
 type hostsFileEntry struct {
@@ -305,29 +313,51 @@ func (a *App) ImportFromHostsFile() (HostsFileImportResult, error) {
 	)
 }
 
+func (a *App) PreviewImportFromHostsFile() (HostsFileImportResult, error) {
+	result, _, err := a.prepareHostsFileImport(
+		hostsFilePathForOS(goruntime.GOOS, getenv),
+		defaultSSHUserForOS(goruntime.GOOS, getenv),
+		sshConfigPathForOS(goruntime.GOOS, userHomeDir()),
+	)
+	return result, err
+}
+
 func (a *App) importFromHostsFile(path string, user string, sshConfigPath string) (HostsFileImportResult, error) {
+	result, data, err := a.prepareHostsFileImport(path, user, sshConfigPath)
+	if err != nil {
+		return result, err
+	}
+	if result.Imported == 0 {
+		return result, nil
+	}
+	if err := store.NewRepository(a.dataPath).Save(data); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+func (a *App) prepareHostsFileImport(path string, user string, sshConfigPath string) (HostsFileImportResult, domain.Store, error) {
 	result := HostsFileImportResult{
 		Path: path,
 		User: user,
 	}
 	if strings.TrimSpace(path) == "" {
-		return result, errors.New("hosts file path is required")
+		return result, domain.Store{}, errors.New("hosts file path is required")
 	}
 	if strings.TrimSpace(user) == "" {
-		return result, errors.New("default SSH user is required")
+		return result, domain.Store{}, errors.New("default SSH user is required")
 	}
 
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return result, fmt.Errorf("read hosts file: %w", err)
+		return result, domain.Store{}, fmt.Errorf("read hosts file: %w", err)
 	}
 	entries := parseHostsFile(raw)
 	sshConfig := loadSimpleSSHConfig(sshConfigPath)
 
-	repo := store.NewRepository(a.dataPath)
-	data, err := repo.Load()
+	data, err := store.NewRepository(a.dataPath).Load()
 	if err != nil {
-		return result, err
+		return result, domain.Store{}, err
 	}
 
 	seenHosts, seenIPs := existingHostKeys(data.Hosts)
@@ -364,15 +394,15 @@ func (a *App) importFromHostsFile(path string, user string, sshConfigPath string
 		seenIPs[ipKey] = struct{}{}
 		result.Imported++
 		result.Hostnames = append(result.Hostnames, host.Hostname)
+		result.Hosts = append(result.Hosts, HostsFileImportTarget{
+			Hostname: host.Hostname,
+			IP:       host.IP,
+			User:     host.User,
+			Port:     host.Port,
+		})
 	}
 
-	if result.Imported == 0 {
-		return result, nil
-	}
-	if err := repo.Save(data); err != nil {
-		return result, err
-	}
-	return result, nil
+	return result, data, nil
 }
 
 func parseHostsFile(data []byte) []hostsFileEntry {
@@ -1601,18 +1631,12 @@ func (a *App) importDatabaseFromMenu() {
 }
 
 func (a *App) importHostsFileFromMenu() {
-	result, err := a.ImportFromHostsFile()
+	result, err := a.PreviewImportFromHostsFile()
 	if err != nil {
 		a.showErrorDialog("Import from hosts file", err)
 		return
 	}
-
-	message := fmt.Sprintf("Read hosts file:\n%s\n\nImported: %d\nSkipped duplicates: %d\nDefault SSH user: %s", result.Path, result.Imported, result.Skipped, result.User)
-	if result.Imported == 0 {
-		message += "\n\nNo new remote hosts were found."
-	}
-	a.showInfoDialog("Import from hosts file", message)
-	a.emitData("database:hosts-file-imported", result)
+	a.emitData("database:hosts-file-preview", result)
 }
 
 func (a *App) showAboutFromMenu() {

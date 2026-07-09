@@ -514,6 +514,9 @@ func TestImportFromHostsFileAddsNewHostsAndSkipsDuplicates(t *testing.T) {
 	if result.Imported != 2 || result.Skipped != 1 {
 		t.Fatalf("import result = %+v, want imported=2 skipped=1", result)
 	}
+	if len(result.Hosts) != 2 || result.Hosts[0].Hostname != "imported-one" || result.Hosts[0].User != "deploy" {
+		t.Fatalf("import result hosts = %+v, want imported host details", result.Hosts)
+	}
 
 	hosts, err := app.ListHosts()
 	if err != nil {
@@ -527,6 +530,32 @@ func TestImportFromHostsFileAddsNewHostsAndSkipsDuplicates(t *testing.T) {
 	}
 	if hosts[2].Hostname != "imported-two" {
 		t.Fatalf("second imported host = %+v, want imported-two", hosts[2])
+	}
+}
+
+func TestPreviewImportFromHostsFileDoesNotSaveHosts(t *testing.T) {
+	dir := t.TempDir()
+	app := NewApp(filepath.Join(dir, "hosts.json"))
+
+	hostsFile := filepath.Join(dir, "system-hosts")
+	if err := os.WriteFile(hostsFile, []byte("10.0.0.20 preview-one\n"), 0o600); err != nil {
+		t.Fatalf("write hosts file: %v", err)
+	}
+
+	result, _, err := app.prepareHostsFileImport(hostsFile, "deploy", "")
+	if err != nil {
+		t.Fatalf("prepareHostsFileImport() error = %v", err)
+	}
+	if result.Imported != 1 || len(result.Hosts) != 1 || result.Hosts[0].Hostname != "preview-one" {
+		t.Fatalf("preview result = %+v, want one preview host", result)
+	}
+
+	hosts, err := app.ListHosts()
+	if err != nil {
+		t.Fatalf("ListHosts() error = %v", err)
+	}
+	if len(hosts) != 0 {
+		t.Fatalf("preview saved hosts unexpectedly: %+v", hosts)
 	}
 }
 

@@ -911,6 +911,13 @@ textarea {
   transition: opacity 120ms ease, transform 120ms ease;
 }
 
+.app-modal-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
 .app-modal.open .app-modal-card {
   transform: translateY(0) scale(1);
   opacity: 1;
@@ -937,9 +944,11 @@ textarea {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 6px 10px;
+  max-height: min(48vh, 360px);
   border: 1px solid #dce1e6;
   border-radius: 6px;
   background: #f5f7f9;
+  overflow: auto;
   padding: 9px;
   font-size: 12px;
 }
