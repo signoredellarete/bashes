@@ -42,6 +42,9 @@
   let jobs = [];
   let jobRefreshTargets = new Map();
   let pointerDrag = null;
+  let dragGhost = null;
+  let dragGhostX = 0;
+  let dragGhostY = 0;
   let activeJobState = false;
 
   $: publishActiveTransferState(hasActiveJobs(jobs));
@@ -494,8 +497,11 @@
       dragging = true;
       dragDepth = 1;
       status = `Dragging ${pointerDrag.ids.length} item${pointerDrag.ids.length === 1 ? '' : 's'}`;
+      dragGhost = buildDragGhost(pointerDrag.ids);
       document.body.classList.add('dragging-file-transfer-item');
     }
+    dragGhostX = event.clientX + 12;
+    dragGhostY = event.clientY + 12;
     pointerDrag.shiftKey = event.shiftKey;
     event.preventDefault();
     event.stopPropagation();
@@ -530,12 +536,24 @@
 
   function cleanupPointerDrag() {
     pointerDrag = null;
+    dragGhost = null;
     dragging = false;
     dragDepth = 0;
     document.body.classList.remove('dragging-file-transfer-item');
     window.removeEventListener('pointermove', handlePointerMove, true);
     window.removeEventListener('pointerup', handlePointerUp, true);
     window.removeEventListener('pointercancel', handlePointerCancel, true);
+  }
+
+  function buildDragGhost(ids) {
+    const first = ids?.[0] ?? '';
+    const item = first ? api?.getFile(first) : null;
+    const type = item?.type === 'folder' ? 'folder' : 'file';
+    return {
+      count: ids?.length ?? 0,
+      name: displayName(first),
+      type,
+    };
   }
 
   function handleDragStart(event) {
@@ -669,6 +687,18 @@
     return id?.startsWith('/local/') || id?.startsWith('/remote/');
   }
 </script>
+
+{#if dragGhost}
+  <div
+    class="transfer-drag-ghost"
+    style={`transform: translate3d(${dragGhostX}px, ${dragGhostY}px, 0);`}
+    aria-hidden="true"
+  >
+    <span class={`transfer-drag-ghost-icon ${dragGhost.type}`}></span>
+    <span>{dragGhost.name}</span>
+    {#if dragGhost.count > 1}<strong>{dragGhost.count}</strong>{/if}
+  </div>
+{/if}
 
 <div class="transfer-shell" class:busy class:dragging bind:this={transferShell}>
   <div class="transfer-status">

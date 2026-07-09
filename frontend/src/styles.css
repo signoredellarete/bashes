@@ -1115,6 +1115,89 @@ textarea {
   user-select: none;
 }
 
+.transfer-drag-ghost {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 80;
+  display: inline-flex;
+  max-width: 260px;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(127, 147, 165, 0.45);
+  border-radius: 6px;
+  background: rgba(31, 41, 51, 0.92);
+  box-shadow: 0 8px 24px rgba(16, 20, 24, 0.28);
+  color: #eef4f8;
+  font-size: 12px;
+  pointer-events: none;
+  padding: 6px 9px;
+}
+
+.transfer-drag-ghost span:not(.transfer-drag-ghost-icon) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-drag-ghost strong {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 99px;
+  background: #2f8f63;
+  color: #fff;
+  font-size: 11px;
+}
+
+.transfer-drag-ghost-icon {
+  position: relative;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+}
+
+.transfer-drag-ghost-icon.file::before {
+  position: absolute;
+  inset: 1px 3px 1px 2px;
+  border: 1px solid #9fb0bf;
+  border-radius: 2px;
+  background: #eef4f8;
+  content: "";
+}
+
+.transfer-drag-ghost-icon.file::after {
+  position: absolute;
+  top: 1px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  background: linear-gradient(135deg, #c9d6df 50%, transparent 50%);
+  content: "";
+}
+
+.transfer-drag-ghost-icon.folder::before {
+  position: absolute;
+  inset: 5px 1px 3px;
+  border: 1px solid #c88a28;
+  border-radius: 2px;
+  background: #f7ca6b;
+  content: "";
+}
+
+.transfer-drag-ghost-icon.folder::after {
+  position: absolute;
+  top: 3px;
+  left: 2px;
+  width: 8px;
+  height: 5px;
+  border-radius: 2px 2px 0 0;
+  background: #f2b84b;
+  content: "";
+}
+
 .transfer-shell {
   display: flex;
   flex-direction: column;
