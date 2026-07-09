@@ -438,10 +438,8 @@ jobs:
           {
             printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
             printf '## RELEASE NOTES\n\n'
-            printf -- '- Add SSH key discovery from the system .ssh directory and an optional custom keys directory.\n'
-            printf -- '- Improve SSH key selection so managed keys, system keys and custom key paths stay distinct.\n'
-            printf -- '- Fix clipboard paste in the terminal on Linux by using the native Wails clipboard API.\n'
-            printf -- '- Add a compact cut/copy/paste context menu for editable fields in the app.\n\n'
+            printf -- '- Start localhost shell sessions as login shells on macOS and Linux.\n'
+            printf -- '- Make the localhost shell environment closer to the user terminal app, including PATH initialization from profile files.\n\n'
             printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
 
