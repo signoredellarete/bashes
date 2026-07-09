@@ -67,6 +67,14 @@ func TestAuthPreferenceFromSessionInput(t *testing.T) {
 	if auth == nil || auth.Method != domain.AuthMethodPassword {
 		t.Fatalf("Auth preference from password input = %+v", auth)
 	}
+
+	auth = authPreferenceFromSessionInput(SSHSessionInput{
+		KeyName:        "bashes-main",
+		PrivateKeyPath: "/home/user/.ssh/id_ed25519",
+	})
+	if auth == nil || auth.Method != domain.AuthMethodPath || auth.PrivateKeyPath != "/home/user/.ssh/id_ed25519" {
+		t.Fatalf("Auth preference with path and key input = %+v, want path preference", auth)
+	}
 }
 
 func TestResolveSessionKeyPathUsesAppDataDirectory(t *testing.T) {
@@ -79,6 +87,32 @@ func TestResolveSessionKeyPathUsesAppDataDirectory(t *testing.T) {
 	}
 	if input.KeyName != "bashes-main" {
 		t.Fatalf("KeyName = %q, want original key name preserved", input.KeyName)
+	}
+}
+
+func TestGenerateSSHKeyUsesNextDefaultName(t *testing.T) {
+	app := NewApp(filepath.Join(t.TempDir(), "data", "hosts.json"))
+
+	first, err := app.GenerateSSHKey(GenerateSSHKeyInput{})
+	if err != nil {
+		t.Fatalf("GenerateSSHKey(first) error = %v", err)
+	}
+	second, err := app.GenerateSSHKey(GenerateSSHKeyInput{})
+	if err != nil {
+		t.Fatalf("GenerateSSHKey(second) error = %v", err)
+	}
+
+	if first.Name != "bashes" {
+		t.Fatalf("first key name = %q, want bashes", first.Name)
+	}
+	if second.Name != "bashes-2" {
+		t.Fatalf("second key name = %q, want bashes-2", second.Name)
+	}
+	if _, err := os.Stat(first.PrivateKey); err != nil {
+		t.Fatalf("first private key missing: %v", err)
+	}
+	if _, err := os.Stat(second.PrivateKey); err != nil {
+		t.Fatalf("second private key missing: %v", err)
 	}
 }
 

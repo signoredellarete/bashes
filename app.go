@@ -580,13 +580,14 @@ func (a *App) ListSSHKeys() ([]SSHKeyInfo, error) {
 
 func (a *App) GenerateSSHKey(input GenerateSSHKeyInput) (SSHKeyInfo, error) {
 	name := sanitizeKeyName(input.Name)
-	if name == "" {
-		name = "bashes"
-	}
+	hasExplicitName := name != ""
 
 	dir := a.keysDir()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return SSHKeyInfo{}, err
+	}
+	if !hasExplicitName {
+		name = nextAvailableSSHKeyName(dir, "bashes")
 	}
 
 	privatePath := filepath.Join(dir, name)
@@ -1477,12 +1478,12 @@ func hasExplicitAuth(input SSHSessionInput) bool {
 func authPreferenceFromSessionInput(input SSHSessionInput) *domain.Auth {
 	auth := domain.Auth{TrustHostKey: input.TrustHostKey}
 	switch {
-	case strings.TrimSpace(input.KeyName) != "":
-		auth.Method = domain.AuthMethodKey
-		auth.KeyName = sanitizeKeyName(input.KeyName)
 	case strings.TrimSpace(input.PrivateKeyPath) != "":
 		auth.Method = domain.AuthMethodPath
 		auth.PrivateKeyPath = strings.TrimSpace(input.PrivateKeyPath)
+	case strings.TrimSpace(input.KeyName) != "":
+		auth.Method = domain.AuthMethodKey
+		auth.KeyName = sanitizeKeyName(input.KeyName)
 	case strings.TrimSpace(input.Password) != "":
 		auth.Method = domain.AuthMethodPassword
 	default:
@@ -1868,6 +1869,22 @@ func sanitizeKeyName(name string) string {
 	name = strings.TrimSpace(name)
 	name = regexp.MustCompile(`[^A-Za-z0-9_.-]+`).ReplaceAllString(name, "-")
 	return strings.Trim(name, ".-")
+}
+
+func nextAvailableSSHKeyName(dir string, base string) string {
+	name := sanitizeKeyName(base)
+	if name == "" {
+		name = "bashes"
+	}
+	if _, err := os.Stat(filepath.Join(dir, name)); errors.Is(err, os.ErrNotExist) {
+		return name
+	}
+	for index := 2; ; index++ {
+		candidate := fmt.Sprintf("%s-%d", name, index)
+		if _, err := os.Stat(filepath.Join(dir, candidate)); errors.Is(err, os.ErrNotExist) {
+			return candidate
+		}
+	}
 }
 
 func shellQuote(value string) string {

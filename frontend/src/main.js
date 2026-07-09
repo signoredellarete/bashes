@@ -414,6 +414,8 @@ document.querySelector('#connect-form').addEventListener('submit', (event) => su
 document.querySelector('#tunnel-form').addEventListener('submit', (event) => submitTunnel(event));
 document.querySelector('#tunnel-form').addEventListener('input', () => updateTunnelSummary());
 document.querySelector('#tunnel-form').elements.type.addEventListener('change', () => updateTunnelMode());
+registerAuthChoiceSync(document.querySelector('#connect-form'));
+registerAuthChoiceSync(document.querySelector('#tunnel-form'));
 document.querySelector('#stop-tunnel').addEventListener('click', () => stopSelectedTunnel());
 document.querySelector('#key-generate-form').addEventListener('submit', (event) => submitGenerateKey(event));
 document.querySelector('#key-install-form').addEventListener('submit', (event) => submitInstallKey(event));
@@ -539,15 +541,14 @@ async function submitConnect(event) {
   const form = event.currentTarget;
   await withBusy(async () => {
     const target = `${selected.user}@${selected.ip || selected.hostname}:${selected.port}`;
+    const auth = authInputFromForm(form);
     setConnectStatus('', '');
     writeNotice(`Connecting to ${target} ...`);
     try {
       const sessionID = await apiStartSSHSession({
         resourceId: selected.id,
-        keyName: form.elements.keyName.value,
+        ...auth,
         password: form.elements.password.value,
-        privateKeyPath: form.elements.privateKeyPath.value.trim(),
-        privateKeyPassphrase: form.elements.privateKeyPassphrase.value,
         trustHostKey: form.elements.trustHostKey.checked,
         cols: 120,
         rows: 32,
@@ -580,6 +581,7 @@ async function submitTunnel(event) {
 
   const form = event.currentTarget;
   await withBusy(async () => {
+    const auth = authInputFromForm(form);
     const tunnel = await apiStartSSHTunnel({
       resourceId: selected.id,
       type: form.elements.type.value,
@@ -587,10 +589,8 @@ async function submitTunnel(event) {
       localPort: Number.parseInt(form.elements.localPort.value, 10),
       remoteHost: form.elements.remoteHost.value.trim(),
       remotePort: Number.parseInt(form.elements.remotePort.value, 10),
-      keyName: form.elements.keyName.value,
+      ...auth,
       password: form.elements.password.value,
-      privateKeyPath: form.elements.privateKeyPath.value.trim(),
-      privateKeyPassphrase: form.elements.privateKeyPassphrase.value,
       trustHostKey: form.elements.trustHostKey.checked,
     });
     state.tunnels.set(tunnel.tunnelId, tunnel);
@@ -648,6 +648,7 @@ async function submitGenerateKey(event) {
     await loadKeys();
     document.querySelector('#key-select').value = key.name;
     await renderSelectedPublicKey();
+    prepareKeyGenerationName();
     writeNotice(`Generated SSH key ${key.name}.`);
   });
 }
@@ -1571,6 +1572,7 @@ async function openKeysPanel() {
   await loadKeys();
   setKeyInstallStatus('', '');
   renderKeyInstallSummary();
+  prepareKeyGenerationName();
   const panel = document.querySelector('#keys-panel');
   panel.hidden = false;
   requestAnimationFrame(() => panel.classList.add('open'));
@@ -1744,6 +1746,39 @@ function renderKeyOptions(select = document.querySelector('#key-select'), includ
   renderSelectedPublicKey();
 }
 
+function registerAuthChoiceSync(form) {
+  if (!form?.elements?.keyName || !form?.elements?.privateKeyPath) return;
+
+  form.elements.privateKeyPath.addEventListener('input', () => {
+    if (form.elements.privateKeyPath.value.trim()) {
+      form.elements.keyName.value = '';
+    }
+  });
+
+  form.elements.keyName.addEventListener('change', () => {
+    if (form.elements.keyName.value) {
+      form.elements.privateKeyPath.value = '';
+    }
+  });
+}
+
+function authInputFromForm(form) {
+  const privateKeyPath = form.elements.privateKeyPath.value.trim();
+  if (privateKeyPath) {
+    return {
+      keyName: '',
+      privateKeyPath,
+      privateKeyPassphrase: form.elements.privateKeyPassphrase.value,
+    };
+  }
+
+  return {
+    keyName: form.elements.keyName.value,
+    privateKeyPath: '',
+    privateKeyPassphrase: form.elements.privateKeyPassphrase.value,
+  };
+}
+
 function applyConnectDefaults(form, resource) {
   const auth = resource?.auth;
   if (!auth) return;
@@ -1753,11 +1788,50 @@ function applyConnectDefaults(form, resource) {
   }
   if (auth.method === 'key' && auth.keyName) {
     const hasKey = [...form.elements.keyName.options].some((option) => option.value === auth.keyName);
-    if (hasKey) form.elements.keyName.value = auth.keyName;
+    if (hasKey) {
+      form.elements.keyName.value = auth.keyName;
+      form.elements.privateKeyPath.value = '';
+    }
   }
   if (auth.method === 'path' && auth.privateKeyPath) {
+    form.elements.keyName.value = '';
     form.elements.privateKeyPath.value = auth.privateKeyPath;
   }
+}
+
+function prepareKeyGenerationName() {
+  const form = document.querySelector('#key-generate-form');
+  if (!form) return;
+
+  const selected = findResource(state.selectedId)?.resource;
+  const base = keyNameBaseForResource(selected);
+  const name = uniqueKeyNameSuggestion(base);
+  form.elements.name.value = name;
+  form.elements.name.placeholder = name;
+}
+
+function keyNameBaseForResource(resource) {
+  if (!resource || isLocalResource(resource)) return 'bashes';
+  return sanitizeKeyNameClient(`${resource.hostname || resource.name || 'bashes'}-key`) || 'bashes';
+}
+
+function uniqueKeyNameSuggestion(base) {
+  const normalized = sanitizeKeyNameClient(base) || 'bashes';
+  const existing = new Set(state.keys.map((key) => key.name));
+  if (!existing.has(normalized)) return normalized;
+
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${normalized}-${index}`;
+    if (!existing.has(candidate)) return candidate;
+  }
+  return `${normalized}-${Date.now()}`;
+}
+
+function sanitizeKeyNameClient(name) {
+  return String(name || '')
+    .trim()
+    .replace(/[^A-Za-z0-9_.-]+/g, '-')
+    .replace(/^[.-]+|[.-]+$/g, '');
 }
 
 function authInputFromPreference(resource) {
