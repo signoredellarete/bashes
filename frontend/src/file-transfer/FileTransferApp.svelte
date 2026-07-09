@@ -187,6 +187,10 @@
 
   async function runTransfer(event, move) {
     await runOperation(async () => {
+      if (!canTransferToTarget(event.ids, event.target)) {
+        status = 'Choose a different destination';
+        return;
+      }
       const parents = unique([...event.ids.map(parentId), event.target]);
       const job = await startCopyJob(session.sessionId, event.ids, event.target, move);
       trackJob(job, parents);
@@ -322,8 +326,18 @@
   }
 
   function progressValue(job) {
+    if (job?.status === 'completed' && !job?.totalBytes) return 100;
     if (!job?.totalBytes) return 0;
     return Math.min(100, Math.round((job.transferredBytes / job.totalBytes) * 100));
+  }
+
+  function progressBarValue(job) {
+    if (job?.status === 'completed' && !job?.totalBytes) return 1;
+    return job?.transferredBytes || 0;
+  }
+
+  function progressBarMax(job) {
+    return job?.totalBytes || 1;
   }
 
   function formatBytes(value) {
@@ -497,6 +511,10 @@
     const targetElement = document.elementFromPoint(event.clientX, event.clientY);
     const target = dropTargetFromElement(targetElement);
     if (!target || !session?.sessionId) return;
+    if (!canTransferToTarget(drag.ids, target)) {
+      status = 'Choose a different destination';
+      return;
+    }
     await runOperation(async () => {
       const parents = unique([...drag.ids.map(parentId), target]);
       const job = await startCopyJob(session.sessionId, drag.ids, target, drag.shiftKey);
@@ -561,6 +579,10 @@
     const ids = transferIdsFromData(event.dataTransfer);
     if (ids.length) {
       await runOperation(async () => {
+        if (!canTransferToTarget(ids, target)) {
+          status = 'Choose a different destination';
+          return;
+        }
         const parents = unique([...ids.map(parentId), target]);
         const job = await startCopyJob(session.sessionId, ids, target, event.shiftKey);
         trackJob(job, parents);
@@ -612,11 +634,28 @@
     const state = api?.getState();
     if (!state) return null;
     const panelElement = element?.closest?.('[data-panel]');
-    const panelIndex = Number(panelElement?.dataset.panel ?? state.activePanel ?? 0);
+    if (!panelElement) return null;
+    const panelIndex = Number(panelElement.dataset.panel);
     const panel = state.panels[panelIndex];
+    if (!panel) return null;
     const id = transferIdFromElement(element);
     const item = id ? api.getFile(id) : null;
     return item?.type === 'folder' ? id : panel?.path;
+  }
+
+  function canTransferToTarget(ids, target) {
+    if (!ids?.length || !target) return false;
+    return ids.some((id) => {
+      if (!id || id === target) return false;
+      if (transferScope(id) === transferScope(target) && parentId(id) === target) return false;
+      if (transferScope(id) === transferScope(target) && target.startsWith(`${id}/`)) return false;
+      return true;
+    });
+  }
+
+  function transferScope(id) {
+    const parts = String(id || '').split('/');
+    return parts.length > 1 ? parts[1] : '';
   }
 
   function transferIdFromElement(element) {
@@ -650,7 +689,7 @@
           <div class="transfer-job-current" title={job.current || job.sourceIds?.[0] || job.sourcePaths?.[0] || job.targetId}>
             {displayName(job.current || job.sourceIds?.[0] || job.sourcePaths?.[0] || job.targetId)}
           </div>
-          <progress value={job.transferredBytes} max={job.totalBytes || 1}></progress>
+          <progress value={progressBarValue(job)} max={progressBarMax(job)}></progress>
           <div class="transfer-job-footer">
             <span>{formatBytes(job.transferredBytes)}{job.totalBytes ? ` / ${formatBytes(job.totalBytes)}` : ''}</span>
             {#if job.status === 'queued' || job.status === 'running'}

@@ -1341,19 +1341,26 @@ textarea {
   max-width: calc(50% - 5px);
 }
 
+.transfer-shell.dragging .transfer-manager {
+  outline: 1px dashed #2f6f73;
+  outline-offset: -8px;
+}
+
 .transfer-shell.dragging .transfer-manager::after {
   position: absolute;
-  inset: 10px;
+  right: 14px;
+  bottom: 14px;
   z-index: 5;
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
   border: 1px dashed #2f6f73;
-  border-radius: 8px;
-  background: rgba(237, 248, 240, 0.68);
+  border-radius: 5px;
+  background: rgba(237, 248, 240, 0.9);
   color: #1f6f3d;
-  content: "Drop files here";
+  content: "Drop on target panel";
   font-size: 13px;
   font-weight: 600;
+  padding: 6px 9px;
   pointer-events: none;
 }
 
