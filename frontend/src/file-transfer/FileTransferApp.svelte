@@ -397,8 +397,15 @@
   function scheduleDraggableRefresh() {
     requestAnimationFrame(() => {
       if (!managerElement) return;
-      managerElement.querySelectorAll('[data-id^=":/local/"], [data-id^=":/remote/"]').forEach((item) => {
+      const selectors = [
+        '[data-id^=":/local/"]',
+        '[data-id^=":/remote/"]',
+        '[data-row-id^=":/local/"]',
+        '[data-row-id^=":/remote/"]',
+      ].join(', ');
+      managerElement.querySelectorAll(selectors).forEach((item) => {
         item.draggable = true;
+        item.setAttribute('draggable', 'true');
       });
     });
   }
@@ -528,8 +535,8 @@
   }
 
   function transferIdFromElement(element) {
-    const node = element?.closest?.('[data-id]');
-    const raw = node?.dataset?.id;
+    const node = element?.closest?.('[data-id], [data-row-id]');
+    const raw = node?.dataset?.id || node?.dataset?.rowId;
     if (!raw?.startsWith(':')) return null;
     return raw.slice(1);
   }
