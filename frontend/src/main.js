@@ -24,6 +24,7 @@ const state = {
   hosts: [],
   keys: [],
   tunnels: new Map(),
+  localShellSupported: false,
   selectedId: null,
   activeSessionId: null,
   terminalFontSize: 13,
@@ -41,7 +42,21 @@ const state = {
 };
 
 const FILE_TRANSFER_ENABLED = true;
+const LOCAL_RESOURCE_ID = '__bashes_localhost__';
 let unmountFileTransfer = null;
+
+function localResource() {
+  return {
+    id: LOCAL_RESOURCE_ID,
+    type: 'local',
+    hostname: 'localhost',
+    ip: '',
+    port: 0,
+    user: 'local',
+    subsystems: [],
+    local: true,
+  };
+}
 
 const app = document.querySelector('#app');
 
@@ -387,7 +402,7 @@ document.querySelector('#open-file-transfer').addEventListener('click', () => op
 document.querySelector('#edit-resource').addEventListener('click', () => openEditPanel());
 document.querySelector('#header-add-subsystem').addEventListener('click', () => {
   const selected = findResource(state.selectedId);
-  if (selected) openResourcePanel('subsystem', selected.resource.id);
+  if (selected && !isLocalResource(selected.resource)) openResourcePanel('subsystem', selected.resource.id);
 });
 document.querySelector('#connect').addEventListener('click', () => openConnectPanel());
 document.querySelector('#disconnect').addEventListener('click', () => disconnectActiveSession());
@@ -436,11 +451,17 @@ window.addEventListener('keydown', (event) => {
   }
 });
 
+await loadCapabilities();
 await loadHosts();
 await loadKeys();
 await loadTunnels();
 applySidebarState();
+await openInitialLocalSession();
 schedulePeriodicUpdateCheck();
+
+async function loadCapabilities() {
+  state.localShellSupported = await apiSupportsLocalShell();
+}
 
 async function loadHosts() {
   await withBusy(async () => {
@@ -456,7 +477,9 @@ async function refreshHosts() {
   } else if (state.selectedId && !findResource(state.selectedId)) {
     state.selectedId = null;
   }
-  if (!state.selectedId && !activeSession && state.hosts.length > 0) {
+  if (!state.selectedId && !activeSession && state.localShellSupported) {
+    state.selectedId = LOCAL_RESOURCE_ID;
+  } else if (!state.selectedId && !activeSession && state.hosts.length > 0) {
     state.selectedId = state.hosts[0].id;
   }
   renderHosts(searchInput.value);
@@ -507,6 +530,11 @@ async function submitConnect(event) {
   event.preventDefault();
   const selected = findResource(state.selectedId)?.resource;
   if (!selected) return;
+  if (isLocalResource(selected)) {
+    await quickConnect(selected);
+    closeConnectPanel();
+    return;
+  }
 
   const form = event.currentTarget;
   await withBusy(async () => {
@@ -541,6 +569,7 @@ async function submitTunnel(event) {
   event.preventDefault();
   const selected = findResource(state.selectedId)?.resource;
   if (!selected) return;
+  if (isLocalResource(selected)) return;
 
   const active = tunnelForResource(selected.id);
   if (active) {
@@ -574,6 +603,17 @@ async function submitTunnel(event) {
 async function quickConnect(resource) {
   await withBusy(async () => {
     try {
+      if (isLocalResource(resource)) {
+        writeNotice('Starting local shell ...');
+        const sessionID = await apiStartLocalSession({
+          cols: 120,
+          rows: 32,
+        });
+        createSession(sessionID, resource, 'local');
+        resizeActiveSession();
+        return;
+      }
+
       writeNotice(`Connecting to ${resource.user}@${resource.ip || resource.hostname}:${resource.port} ...`);
       const sessionID = await apiStartSSHSession({
         resourceId: resource.id,
@@ -588,6 +628,11 @@ async function quickConnect(resource) {
     } catch (error) {
       const message = connectErrorMessage(error, resource);
       writeNotice(message);
+      if (isLocalResource(resource)) {
+        const pending = pendingSessionForResource(resource.id);
+        if (pending) removeSessionFromUI(pending.id);
+        return;
+      }
       await openConnectPanel(message, 'error');
     }
   });
@@ -611,7 +656,7 @@ async function submitInstallKey(event) {
   event.preventDefault();
   const selected = findResource(state.selectedId)?.resource;
   const keyName = document.querySelector('#key-select').value;
-  if (!selected) {
+  if (!selected || isLocalResource(selected)) {
     setKeyInstallStatus('Select a host or subsystem before installing a key.', 'error');
     writeNotice('Select a host or subsystem before installing a key.');
     return;
@@ -649,6 +694,7 @@ async function submitInstallKey(event) {
 async function deleteSelectedResource() {
   const selected = findResource(state.selectedId);
   if (!selected) return;
+  if (isLocalResource(selected.resource)) return;
   if (!(await confirmDeleteResource(selected))) return;
 
   await withBusy(async () => {
@@ -853,6 +899,9 @@ function renderHosts(filter = '') {
   const canReorder = query === '';
   const rows = [];
 
+  if (state.localShellSupported) {
+    rows.push(resourceRow(localResource(), 'local', 0, LOCAL_RESOURCE_ID, false));
+  }
   for (const host of state.hosts) {
     rows.push(...resourceRows(host, 'host', 0, host.id, canReorder));
   }
@@ -872,10 +921,11 @@ function resourceRows(resource, type, depth, rootHostId, canReorder) {
 function resourceRow(resource, type, depth = 0, rootHostId = resource.id, canReorder = true) {
   const row = document.createElement('div');
   row.className = `host-row ${depth > 0 ? 'child' : ''}`;
+  if (isLocalResource(resource)) row.classList.add('local-row');
   row.dataset.id = resource.id;
   row.dataset.rootHostId = rootHostId;
   row.style.setProperty('--tree-offset', `${depth * 18}px`);
-  const target = `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`;
+  const target = resourceTarget(resource);
   const tooltip = `${resource.hostname} - ${target}`;
   const tunnel = tunnelForResource(resource.id);
 
@@ -883,7 +933,7 @@ function resourceRow(resource, type, depth = 0, rootHostId = resource.id, canReo
   selectButton.type = 'button';
   selectButton.className = 'host-select';
   if (tunnel) selectButton.classList.add('tunnel-active');
-  selectButton.draggable = canReorder;
+  selectButton.draggable = canReorder && !isLocalResource(resource);
   selectButton.title = tooltip;
   selectButton.dataset.tooltip = tooltip;
   selectButton.innerHTML = `
@@ -913,7 +963,7 @@ function resourceRow(resource, type, depth = 0, rootHostId = resource.id, canReo
   selectButton.addEventListener('dblclick', async () => {
     state.selectedId = resource.id;
     const realSessions = realSessionsForResource(resource.id);
-    if (realSessions.length > 0) {
+    if (realSessions.length > 0 && !isLocalResource(resource)) {
       selectResource(resource);
       await openConnectPanel();
       return;
@@ -925,7 +975,7 @@ function resourceRow(resource, type, depth = 0, rootHostId = resource.id, canReo
   selectButton.addEventListener('focus', () => showSidebarTooltip(selectButton));
   selectButton.addEventListener('mouseleave', () => hideSidebarTooltip());
   selectButton.addEventListener('blur', () => hideSidebarTooltip());
-  if (canReorder) {
+  if (canReorder && !isLocalResource(resource)) {
     selectButton.addEventListener('dragstart', (event) => startHostDrag(event, rootHostId));
     selectButton.addEventListener('dragend', () => endHostDrag());
     selectButton.addEventListener('dragover', (event) => previewHostDrop(event, row));
@@ -1078,14 +1128,16 @@ function createPendingTab(resource) {
   const pane = document.createElement('section');
   pane.className = 'terminal-pane pending-pane';
   pane.dataset.sessionId = sessionID;
-  pane.textContent = `Ready to connect to ${resource.user}@${resource.ip || resource.hostname}:${resource.port}`;
+  pane.textContent = isLocalResource(resource)
+    ? 'Ready to start local shell'
+    : `Ready to connect to ${resource.user}@${resource.ip || resource.hostname}:${resource.port}`;
   stack.append(pane);
 
   state.sessions.set(sessionID, {
     id: sessionID,
     resourceId: resource.id,
     title: `${resource.hostname} new`,
-    target: `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`,
+    target: resourceTarget(resource),
     element: pane,
     pending: true,
     closed: false,
@@ -1118,7 +1170,7 @@ function selectResource(resource) {
   }
 }
 
-function createSession(sessionID, resource) {
+function createSession(sessionID, resource, kind = 'ssh') {
   const pending = pendingSessionForResource(resource.id);
   if (pending?.pending) {
     pending.element.remove();
@@ -1149,7 +1201,7 @@ function createSession(sessionID, resource) {
   installTerminalKeyRepeatFallback(terminal, sessionID);
   terminal.onData((data) => {
     apiWriteSSHSession(sessionID, data).catch((error) => {
-      writeNotice(`SSH input error: ${error?.message ?? error}`);
+      writeNotice(`${terminalKindLabel(kind)} input error: ${error?.message ?? error}`);
     });
   });
   terminal.onSelectionChange(() => {
@@ -1171,7 +1223,8 @@ function createSession(sessionID, resource) {
     resourceId: resource.id,
     title: sessionTitle(resource.hostname, ordinal),
     ordinal,
-    target: `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`,
+    target: resourceTarget(resource),
+    kind,
     terminal,
     fitAddon,
     element: pane,
@@ -1179,7 +1232,7 @@ function createSession(sessionID, resource) {
   });
   flushPendingSSHOutput(sessionID);
   setActiveSession(sessionID);
-  writeNotice(`Connected to ${resource.user}@${resource.ip || resource.hostname}:${resource.port}`);
+  writeNotice(isLocalResource(resource) ? 'Local shell started.' : `Connected to ${resource.user}@${resource.ip || resource.hostname}:${resource.port}`);
   renderTabs();
   renderSelection();
   scheduleTerminalFit();
@@ -1197,7 +1250,8 @@ function installTerminalKeyRepeatFallback(terminal, sessionID) {
 
     event.preventDefault();
     apiWriteSSHSession(sessionID, data).catch((error) => {
-      writeNotice(`SSH input error: ${error?.message ?? error}`);
+      const session = state.sessions.get(sessionID);
+      writeNotice(`${terminalKindLabel(session?.kind)} input error: ${error?.message ?? error}`);
     });
     return false;
   });
@@ -1254,7 +1308,7 @@ function renderTabs() {
     tab.type = 'button';
     tab.className = `session-tab ${session.id === state.activeSessionId ? 'active' : ''} ${session.closed ? 'closed' : ''} ${session.pending ? 'pending' : ''}`;
     tab.innerHTML = '<span></span><strong></strong>';
-    tab.querySelector('span').textContent = session.closed ? 'closed' : session.pending ? 'new' : 'ssh';
+    tab.querySelector('span').textContent = session.closed ? 'closed' : session.pending ? 'new' : terminalKindLabel(session.kind);
     tab.querySelector('strong').textContent = session.title;
     tab.addEventListener('click', () => {
       if (!session.pending) clearPendingTabs(session.resourceId);
@@ -1379,6 +1433,10 @@ function closeResourcePanel() {
 async function openConnectPanel(statusMessage = '', statusKind = '') {
   const selected = findResource(state.selectedId)?.resource;
   if (!selected) return;
+  if (isLocalResource(selected)) {
+    await quickConnect(selected);
+    return;
+  }
 
   await loadKeys();
   const panel = document.querySelector('#connect-panel');
@@ -1416,6 +1474,7 @@ function closeConnectPanel() {
 async function openTunnelPanel() {
   const selected = findResource(state.selectedId)?.resource;
   if (!selected) return;
+  if (isLocalResource(selected)) return;
 
   await loadKeys();
   await loadTunnels();
@@ -1506,6 +1565,9 @@ function updateTunnelMode() {
 }
 
 async function openKeysPanel() {
+  const selected = findResource(state.selectedId)?.resource;
+  if (isLocalResource(selected)) return;
+
   await loadKeys();
   setKeyInstallStatus('', '');
   renderKeyInstallSummary();
@@ -1524,6 +1586,7 @@ async function openFileTransferModal() {
   if (!FILE_TRANSFER_ENABLED) return;
   const selected = findResource(state.selectedId)?.resource;
   if (!selected) return;
+  if (isLocalResource(selected)) return;
 
   const panel = document.querySelector('#file-transfer-modal');
   const title = document.querySelector('#file-transfer-title');
@@ -1627,7 +1690,7 @@ function renderSelection() {
   if (activeSession) {
     title.textContent = activeSession.target;
   } else if (selected) {
-    title.textContent = `${selected.resource.user}@${selected.resource.hostname}`;
+    title.textContent = isLocalResource(selected.resource) ? 'localhost' : `${selected.resource.user}@${selected.resource.hostname}`;
   } else {
     title.textContent = 'No session selected';
   }
@@ -1646,17 +1709,18 @@ function renderSelection() {
     return;
   }
 
+  const localSelected = isLocalResource(selected.resource);
   addSubsystem.hidden = false;
-  edit.disabled = state.busy || !selected;
-  addSubsystem.disabled = state.busy || !selected;
-  keys.disabled = state.busy || !selected;
+  edit.disabled = state.busy || !selected || localSelected;
+  addSubsystem.disabled = state.busy || !selected || localSelected;
+  keys.disabled = state.busy || !selected || localSelected;
   fileTransfer.hidden = !FILE_TRANSFER_ENABLED;
-  fileTransfer.disabled = state.busy || !selected || !FILE_TRANSFER_ENABLED;
-  tunnel.disabled = state.busy || !selected;
+  fileTransfer.disabled = state.busy || !selected || localSelected || !FILE_TRANSFER_ENABLED;
+  tunnel.disabled = state.busy || !selected || localSelected;
   connect.textContent = realSessionsForResource(selected.resource.id).length > 0 ? 'New Session' : 'Connect';
   connect.disabled = state.busy || !selected;
   disconnect.disabled = state.busy || !activeSession;
-  remove.disabled = state.busy || !selected;
+  remove.disabled = state.busy || !selected || localSelected;
   renderKeyInstallSummary();
   renderTunnelStatus();
 }
@@ -1732,7 +1796,7 @@ function renderKeyInstallSummary() {
   const summary = document.querySelector('#key-install-summary');
   if (!summary) return;
   const selected = findResource(state.selectedId)?.resource;
-  summary.textContent = selected
+  summary.textContent = selected && !isLocalResource(selected)
     ? `Install selected key on ${selected.user}@${selected.ip || selected.hostname}:${selected.port}`
     : 'Select a host or subsystem to install the key.';
 }
@@ -1757,6 +1821,9 @@ function setConnectStatus(message, kind) {
 
 function connectErrorMessage(error, resource) {
   const detail = String(error?.message ?? error ?? '').trim();
+  if (isLocalResource(resource)) {
+    return `Could not start local shell: ${detail || 'unknown error'}`;
+  }
   const target = `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`;
   if (isAuthError(error)) {
     return `Could not authenticate to ${target}. Enter the remote password or configure a valid SSH key.`;
@@ -1806,7 +1873,7 @@ function renderTunnelStatus() {
   if (!status || !stop || !start) return;
 
   const selected = findResource(state.selectedId)?.resource;
-  const tunnel = selected ? tunnelForResource(selected.id) : null;
+  const tunnel = selected && !isLocalResource(selected) ? tunnelForResource(selected.id) : null;
   status.hidden = !tunnel;
   status.textContent = tunnel
     ? `${tunnelLabel(tunnel.type)} active on ${tunnel.localAddress} -> ${tunnel.forwardTarget || tunnel.target}`
@@ -1822,6 +1889,9 @@ function tunnelLabel(type) {
 }
 
 function findResource(id) {
+  if (state.localShellSupported && id === LOCAL_RESOURCE_ID) {
+    return { type: 'local', resource: localResource(), parent: null };
+  }
   for (const host of state.hosts) {
     if (host.id === id) return { type: 'host', resource: host, parent: null };
     const found = findNestedResource(host.subsystems ?? [], id, host);
@@ -1871,11 +1941,32 @@ function sessionTitle(hostname, ordinal) {
   return ordinal > 1 ? `${hostname} #${ordinal}` : hostname;
 }
 
+function resourceTarget(resource) {
+  if (isLocalResource(resource)) return 'Local shell';
+  return `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`;
+}
+
+function terminalKindLabel(kind = 'ssh') {
+  return kind === 'local' ? 'local' : 'ssh';
+}
+
+function isLocalResource(resourceOrId) {
+  const id = typeof resourceOrId === 'string' ? resourceOrId : resourceOrId?.id;
+  return id === LOCAL_RESOURCE_ID;
+}
+
+async function openInitialLocalSession() {
+  if (!state.localShellSupported || state.sessions.size > 0) return;
+  await quickConnect(localResource());
+}
+
 function tunnelForResource(resourceId) {
+  if (resourceId === LOCAL_RESOURCE_ID) return null;
   return [...state.tunnels.values()].find((tunnel) => tunnel.resourceId === resourceId);
 }
 
 function tunnelsForResource(resourceId) {
+  if (resourceId === LOCAL_RESOURCE_ID) return [];
   return [...state.tunnels.values()].filter((tunnel) => tunnel.resourceId === resourceId);
 }
 
@@ -2230,6 +2321,12 @@ async function apiCheckForUpdate() {
   };
 }
 
+async function apiSupportsLocalShell() {
+  const api = wailsAPI();
+  if (api?.SupportsLocalShell) return Boolean(await api.SupportsLocalShell());
+  return false;
+}
+
 async function apiAddHost(input) {
   const api = wailsAPI();
   if (api?.AddHost) return await api.AddHost(input);
@@ -2336,6 +2433,12 @@ async function apiStartSSHSession(input) {
   const api = wailsAPI();
   if (api?.StartSSHSession) return await api.StartSSHSession(input);
   return `demo-session-${Date.now()}`;
+}
+
+async function apiStartLocalSession(input) {
+  const api = wailsAPI();
+  if (api?.StartLocalSession) return await api.StartLocalSession(input);
+  throw new Error('Local shell is available only in the desktop app.');
 }
 
 async function apiWriteSSHSession(sessionID, data) {

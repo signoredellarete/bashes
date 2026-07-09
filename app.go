@@ -23,6 +23,7 @@ import (
 
 	"github.com/signoredellarete/bashes/internal/application"
 	"github.com/signoredellarete/bashes/internal/domain"
+	"github.com/signoredellarete/bashes/internal/localterm"
 	"github.com/signoredellarete/bashes/internal/remotessh"
 	"github.com/signoredellarete/bashes/internal/store"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -712,16 +713,27 @@ type SSHTunnelInfo struct {
 	StartedAt     string `json:"startedAt"`
 }
 
+type LocalSessionInput struct {
+	Cols int `json:"cols"`
+	Rows int `json:"rows"`
+}
+
 type SSHEvent struct {
 	SessionID string `json:"sessionId"`
 	Data      string `json:"data,omitempty"`
 	Message   string `json:"message,omitempty"`
 }
 
+type terminalShell interface {
+	Resize(remotessh.TerminalSize) error
+	Wait() error
+	Close() error
+}
+
 type sshSession struct {
 	id     string
 	client *ssh.Client
-	shell  *remotessh.Shell
+	shell  terminalShell
 	stdin  *io.PipeWriter
 	cancel context.CancelFunc
 }
@@ -791,6 +803,49 @@ func (a *App) StartSSHSession(input SSHSessionInput) (string, error) {
 	go monitorSSHKeepAlive(runtimeCtx, client, func(err error) {
 		_ = session.shell.Close()
 		session.client.Close()
+	})
+	go a.waitForShell(runtimeCtx, session)
+
+	return sessionID, nil
+}
+
+func (a *App) SupportsLocalShell() bool {
+	return goruntime.GOOS != "windows"
+}
+
+func (a *App) StartLocalSession(input LocalSessionInput) (string, error) {
+	if !a.SupportsLocalShell() {
+		return "", errors.New("local shell is not supported on Windows yet")
+	}
+
+	stdinReader, stdinWriter := io.Pipe()
+	sessionID := fmt.Sprintf("local-%d", time.Now().UnixNano())
+	shell, err := localterm.StartShell(localterm.ShellOptions{
+		Size:   remotessh.TerminalSize{Cols: input.Cols, Rows: input.Rows},
+		Stdin:  stdinReader,
+		Stdout: eventWriter{app: a, sessionID: sessionID},
+		Stderr: eventWriter{app: a, sessionID: sessionID},
+	})
+	if err != nil {
+		stdinWriter.Close()
+		return "", err
+	}
+
+	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
+	session := &sshSession{
+		id:     sessionID,
+		shell:  shell,
+		stdin:  stdinWriter,
+		cancel: runtimeCancel,
+	}
+
+	a.mu.Lock()
+	a.sessions[sessionID] = session
+	a.mu.Unlock()
+
+	a.emit("ssh:status", SSHEvent{
+		SessionID: sessionID,
+		Message:   "Local shell started",
 	})
 	go a.waitForShell(runtimeCtx, session)
 
@@ -1023,8 +1078,10 @@ func (a *App) StopSSHSession(sessionID string) error {
 	session.cancel()
 	session.stdin.Close()
 	session.shell.Close()
-	session.client.Close()
-	a.emit("ssh:closed", SSHEvent{SessionID: sessionID, Message: "SSH session closed"})
+	if session.client != nil {
+		session.client.Close()
+	}
+	a.emit("ssh:closed", SSHEvent{SessionID: sessionID, Message: sessionClosedMessage(session)})
 	return nil
 }
 
@@ -1128,7 +1185,9 @@ func (a *App) waitForShell(ctx context.Context, session *sshSession) {
 
 	session.cancel()
 	session.stdin.Close()
-	session.client.Close()
+	if session.client != nil {
+		session.client.Close()
+	}
 
 	if wasStopped {
 		return
@@ -1138,7 +1197,14 @@ func (a *App) waitForShell(ctx context.Context, session *sshSession) {
 		a.emit("ssh:closed", SSHEvent{SessionID: session.id, Message: err.Error()})
 		return
 	}
-	a.emit("ssh:closed", SSHEvent{SessionID: session.id, Message: "SSH session closed"})
+	a.emit("ssh:closed", SSHEvent{SessionID: session.id, Message: sessionClosedMessage(session)})
+}
+
+func sessionClosedMessage(session *sshSession) string {
+	if session != nil && session.client == nil {
+		return "Local shell closed"
+	}
+	return "SSH session closed"
 }
 
 func (a *App) session(sessionID string) (*sshSession, error) {

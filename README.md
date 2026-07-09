@@ -4,7 +4,7 @@ Bashes is a fast desktop application for managing remote servers from one local 
 
 It lets you keep an ordered list of hosts and related subsystems, open SSH terminal sessions in tabs, manage connection details, and keep the application data in plain JSON so it remains easy to inspect, back up and move between machines.
 
-The app is built with Wails, Go and a Vite frontend. The terminal surface uses `xterm.js`; SSH sessions are handled by the Go backend.
+The app is built with Wails, Go and a Vite frontend. The terminal surface uses `xterm.js`; SSH and local shell sessions are handled by the Go backend.
 
 ## Features
 
@@ -14,6 +14,7 @@ The app is built with Wails, Go and a Vite frontend. The terminal surface uses `
 - Drag-and-drop ordering of host blocks in the sidebar; subsystem drags move the parent host block with all children.
 - Contextual actions for the selected resource: edit, add subsystem, key management, delete and connect.
 - Tabbed terminal area for multiple SSH sessions, including multiple sessions to the same resource.
+- Local `localhost` shell tab on Linux and macOS, backed by a native PTY and not stored in `hosts.json`.
 - Temporary tabs when selecting a resource before connecting.
 - Double-click a host or subsystem card to start an SSH connection.
 - Terminal text selection copies to the clipboard.
@@ -25,7 +26,7 @@ The app is built with Wails, Go and a Vite frontend. The terminal surface uses `
 - Native Tools menu actions for exporting and importing the JSON datastore.
 - Native Tools menu action for importing SSH host entries from the operating system hosts file.
 - Native Help menu actions for About, README and GitHub Releases.
-- Daily update check with an in-app notification when a newer GitHub release is available.
+- Startup and periodic update checks with an in-app notification when a newer GitHub release is available.
 - Ed25519 SSH key generation from inside the app.
 - Public key installation on a remote host or subsystem.
 - Plain JSON datastore with validation, backups and atomic writes.

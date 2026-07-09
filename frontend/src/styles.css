@@ -217,6 +217,21 @@ textarea {
   box-shadow: inset 3px 0 0 #2f6f73;
 }
 
+.host-row.local-row .host-select {
+  border-color: #efb36b;
+  background: linear-gradient(180deg, #fffaf4 0%, #fff 100%);
+}
+
+.host-row.local-row.selected .host-select {
+  border-color: #df7f28;
+  box-shadow: inset 3px 0 0 #df7f28;
+}
+
+.host-row.local-row .type {
+  background: #fff0de;
+  color: #b85d16;
+}
+
 .host-row.dragging-block .host-select {
   opacity: 0.52;
 }
@@ -390,6 +405,10 @@ textarea {
 
 #app.sidebar-collapsed .host-row.child .host-select {
   border-style: dashed;
+}
+
+#app.sidebar-collapsed .host-row.local-row .host-select {
+  border-style: solid;
 }
 
 #app.sidebar-collapsed .type {
