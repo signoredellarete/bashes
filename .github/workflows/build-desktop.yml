@@ -52,6 +52,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends imagemagick
+          command -v magick || command -v convert
 
       - name: Generate icons from source
         run: scripts/generate-icons.sh
