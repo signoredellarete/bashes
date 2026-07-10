@@ -4,6 +4,10 @@ import '@xterm/xterm/css/xterm.css';
 import bashesLogo from './assets/bashes.png';
 import './styles.css';
 
+const DEFAULT_TERMINAL_FONT_SIZE = 13;
+const DEFAULT_TERMINAL_FONT_FAMILY = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
+const DEFAULT_TERMINAL_SCROLLBACK = 100000;
+
 const demoStore = {
   hosts: [
     {
@@ -28,7 +32,10 @@ const state = {
   localShellSupported: false,
   selectedId: null,
   activeSessionId: null,
-  terminalFontSize: 13,
+  terminalFontSize: readNumberSetting('bashes.terminalFontSize', DEFAULT_TERMINAL_FONT_SIZE, 10, 22),
+  terminalFontFamily: readStringSetting('bashes.terminalFontFamily', DEFAULT_TERMINAL_FONT_FAMILY),
+  terminalScrollback: readNumberSetting('bashes.terminalScrollback', DEFAULT_TERMINAL_SCROLLBACK, 1000, 500000),
+  terminalCopyOnSelect: readBooleanSetting('bashes.terminalCopyOnSelect', true),
   sidebarCollapsed: localStorage.getItem('bashes.sidebarCollapsed') === 'true',
   busy: false,
   drawerMode: null,
@@ -130,6 +137,7 @@ app.innerHTML = `
     <footer class="workspace-footer">
       <p id="app-status" class="app-status" aria-live="polite"></p>
       <button id="message-log-button" class="status-log-button" type="button" title="Show message log">Log</button>
+      <button id="open-settings-panel" class="status-log-button" type="button" title="Settings">Settings</button>
       <div class="terminal-font-controls" aria-label="Terminal font size">
         <button id="decrease-terminal-font" type="button" title="Decrease terminal font size">-</button>
         <span aria-hidden="true">A</span>
@@ -203,14 +211,23 @@ app.innerHTML = `
       <p class="inline-status" id="connect-status" hidden></p>
 
       <label>
-        <span>Private Key</span>
+        <span>Authentication</span>
+        <select name="authMethod">
+          <option value="agent">Agent / system keys</option>
+          <option value="password">Password</option>
+          <option value="key">Existing key</option>
+          <option value="path">Key file</option>
+        </select>
+      </label>
+      <label data-auth-field="key">
+        <span>Existing Key</span>
         <select name="keyName"></select>
       </label>
-      <label>
+      <label data-auth-field="password">
         <span>Password</span>
         <input name="password" type="password" autocomplete="current-password" />
       </label>
-      <label>
+      <label data-auth-field="path">
         <span class="field-label-with-help">
           Custom Key Path
           <span class="field-help-trigger" role="button" tabindex="0" aria-label="Custom key path help" aria-expanded="false">?</span>
@@ -218,7 +235,7 @@ app.innerHTML = `
         </span>
         <input name="privateKeyPath" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="optional private key path" />
       </label>
-      <label>
+      <label data-auth-field="key-passphrase">
         <span>Key Passphrase</span>
         <input name="privateKeyPassphrase" type="password" autocomplete="off" />
       </label>
@@ -277,14 +294,23 @@ app.innerHTML = `
         </label>
       </div>
       <label>
-        <span>Private Key</span>
+        <span>Authentication</span>
+        <select name="authMethod">
+          <option value="agent">Agent / system keys</option>
+          <option value="password">Password</option>
+          <option value="key">Existing key</option>
+          <option value="path">Key file</option>
+        </select>
+      </label>
+      <label data-auth-field="key">
+        <span>Existing Key</span>
         <select name="keyName"></select>
       </label>
-      <label>
+      <label data-auth-field="password">
         <span>Password</span>
         <input name="password" type="password" autocomplete="current-password" />
       </label>
-      <label>
+      <label data-auth-field="path">
         <span class="field-label-with-help">
           Custom Key Path
           <span class="field-help-trigger" role="button" tabindex="0" aria-label="Custom key path help" aria-expanded="false">?</span>
@@ -292,7 +318,7 @@ app.innerHTML = `
         </span>
         <input name="privateKeyPath" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="optional private key path" />
       </label>
-      <label>
+      <label data-auth-field="key-passphrase">
         <span>Key Passphrase</span>
         <input name="privateKeyPassphrase" type="password" autocomplete="off" />
       </label>
@@ -305,6 +331,43 @@ app.innerHTML = `
         <button class="secondary" type="button" data-close-tunnel>Close</button>
         <button id="stop-tunnel" class="secondary" type="button" disabled>Stop</button>
         <button id="start-tunnel" type="submit">Start Tunnel</button>
+      </footer>
+    </form>
+  </section>
+
+  <section id="settings-panel" class="slide-panel" hidden>
+    <div class="panel-scrim" data-close-settings></div>
+    <form id="settings-form" class="panel-card">
+      <header class="panel-header">
+        <div>
+          <p class="eyebrow">Bashes</p>
+          <h3>Settings</h3>
+        </div>
+        <button class="close-panel" type="button" data-close-settings title="Close">${ICON_CLOSE}</button>
+      </header>
+
+      <div class="form-grid">
+        <label>
+          <span>Terminal Font Size</span>
+          <input name="terminalFontSize" type="number" min="10" max="22" step="1" />
+        </label>
+        <label>
+          <span>Scrollback Lines</span>
+          <input name="terminalScrollback" type="number" min="1000" max="500000" step="1000" />
+        </label>
+      </div>
+      <label>
+        <span>Terminal Font Family</span>
+        <input name="terminalFontFamily" autocomplete="off" spellcheck="false" />
+      </label>
+      <label class="checkbox-row">
+        <input name="terminalCopyOnSelect" type="checkbox" />
+        <span>Copy selected terminal text to clipboard</span>
+      </label>
+
+      <footer class="panel-actions">
+        <button class="secondary" type="button" data-close-settings>Cancel</button>
+        <button type="submit">Save Settings</button>
       </footer>
     </form>
   </section>
@@ -456,11 +519,13 @@ document.querySelector('#connect').addEventListener('click', () => openConnectPa
 document.querySelector('#disconnect').addEventListener('click', () => disconnectActiveSession());
 document.querySelector('#delete-resource').addEventListener('click', () => deleteSelectedResource());
 document.querySelector('#message-log-button').addEventListener('click', () => showMessageLog());
+document.querySelector('#open-settings-panel').addEventListener('click', () => openSettingsPanel());
 document.querySelector('#decrease-terminal-font').addEventListener('click', () => adjustTerminalFontSize(-1));
 document.querySelector('#increase-terminal-font').addEventListener('click', () => adjustTerminalFontSize(1));
 document.querySelector('#resource-form').addEventListener('submit', (event) => submitResource(event));
 document.querySelector('#connect-form').addEventListener('submit', (event) => submitConnect(event));
 document.querySelector('#tunnel-form').addEventListener('submit', (event) => submitTunnel(event));
+document.querySelector('#settings-form').addEventListener('submit', (event) => submitSettings(event));
 document.querySelector('#tunnel-form').addEventListener('input', () => updateTunnelSummary());
 document.querySelector('#tunnel-form').elements.type.addEventListener('change', () => updateTunnelMode());
 registerAuthChoiceSync(document.querySelector('#connect-form'));
@@ -478,6 +543,9 @@ document.querySelectorAll('[data-close-connect]').forEach((element) => {
 });
 document.querySelectorAll('[data-close-tunnel]').forEach((element) => {
   element.addEventListener('click', () => closeTunnelPanel());
+});
+document.querySelectorAll('[data-close-settings]').forEach((element) => {
+  element.addEventListener('click', () => closeSettingsPanel());
 });
 document.querySelectorAll('[data-close-keys]').forEach((element) => {
   element.addEventListener('click', () => closeKeysPanel());
@@ -516,6 +584,8 @@ window.addEventListener('keydown', (event) => {
     resolveConfirmModal(false);
   } else if (event.key === 'Escape' && !document.querySelector('#app-modal').hidden) {
     closeAppModal();
+  } else if (event.key === 'Escape' && !document.querySelector('#settings-panel').hidden) {
+    closeSettingsPanel();
   } else if (event.key === 'Escape') {
     closeFieldHelpPopovers();
     hideEditContextMenu();
@@ -641,7 +711,6 @@ async function submitConnect(event) {
       const sessionID = await startSSHSessionWithHostKeyPrompt({
         resourceId: selected.id,
         ...auth,
-        password: form.elements.password.value,
         trustHostKey: form.elements.trustHostKey.checked,
         cols: 120,
         rows: 32,
@@ -684,7 +753,6 @@ async function submitTunnel(event) {
         remoteHost: form.elements.remoteHost.value.trim(),
         remotePort: Number.parseInt(form.elements.remotePort.value, 10),
         ...auth,
-        password: form.elements.password.value,
         trustHostKey: form.elements.trustHostKey.checked,
       }, selected);
       state.tunnels.set(tunnel.tunnelId, tunnel);
@@ -981,6 +1049,7 @@ async function stopSession(sessionID) {
   removeSessionFromUI(sessionID);
   if (session && !session.pending && !session.closed) {
     await apiStopSSHSession(sessionID);
+    writeNotice(`${terminalKindLabel(session.kind)} session disconnected: ${session.title}.`);
   }
 }
 
@@ -1339,8 +1408,9 @@ function createSession(sessionID, resource, kind = 'ssh') {
   const terminal = new Terminal({
     cursorBlink: true,
     convertEol: true,
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+    fontFamily: state.terminalFontFamily,
     fontSize: state.terminalFontSize,
+    scrollback: state.terminalScrollback,
     theme: {
       background: '#101418',
       foreground: '#d7dde5',
@@ -1359,6 +1429,7 @@ function createSession(sessionID, resource, kind = 'ssh') {
     });
   });
   terminal.onSelectionChange(() => {
+    if (!state.terminalCopyOnSelect) return;
     const selected = terminal.getSelection();
     if (!selected) return;
     writeClipboard(selected).catch(() => {});
@@ -1683,6 +1754,10 @@ async function openConnectPanel(statusMessage = '', statusKind = '') {
     `${realSessionCount > 0 ? 'New session: ' : ''}${selected.user}@${selected.ip || selected.hostname}:${selected.port}`;
   form.querySelector('button[type="submit"]').textContent = 'Connect';
   setConnectStatus(statusMessage, statusKind);
+  if (statusKind === 'error' && isAuthMessage(statusMessage) && (!selected.auth?.method || selected.auth.method === 'password')) {
+    form.elements.authMethod.value = 'password';
+    updateAuthFields(form);
+  }
   panel.hidden = false;
   requestAnimationFrame(() => panel.classList.add('open'));
   focusConnectPasswordInput(form);
@@ -1691,8 +1766,16 @@ async function openConnectPanel(statusMessage = '', statusKind = '') {
 function focusConnectPasswordInput(form) {
   window.setTimeout(() => {
     requestAnimationFrame(() => {
-      form.elements.password.focus();
-      form.elements.password.select();
+      const method = form.elements.authMethod?.value || 'agent';
+      const target = method === 'password'
+        ? form.elements.password
+        : method === 'key'
+          ? form.elements.keyName
+          : method === 'path'
+            ? form.elements.privateKeyPath
+            : form.elements.authMethod;
+      target?.focus();
+      target?.select?.();
     });
   }, 0);
 }
@@ -2110,28 +2193,64 @@ function keyOptionLabel(key) {
 }
 
 function registerAuthChoiceSync(form) {
-  if (!form?.elements?.keyName || !form?.elements?.privateKeyPath) return;
+  if (!form?.elements?.authMethod) return;
 
-  form.elements.privateKeyPath.addEventListener('input', () => {
+  form.elements.authMethod.addEventListener('change', () => {
+    updateAuthFields(form);
+  });
+
+  form.elements.privateKeyPath?.addEventListener('input', () => {
     if (form.elements.privateKeyPath.value.trim()) {
+      form.elements.authMethod.value = 'path';
       form.elements.keyName.value = '';
+      updateAuthFields(form);
     }
   });
 
-  form.elements.keyName.addEventListener('change', () => {
+  form.elements.keyName?.addEventListener('change', () => {
     if (form.elements.keyName.value) {
+      form.elements.authMethod.value = 'key';
       form.elements.privateKeyPath.value = '';
+      updateAuthFields(form);
     }
+  });
+
+  updateAuthFields(form);
+}
+
+function updateAuthFields(form) {
+  const method = form.elements.authMethod?.value || 'agent';
+  form.querySelectorAll('[data-auth-field]').forEach((field) => {
+    const type = field.dataset.authField;
+    field.hidden = !(type === method || (type === 'key-passphrase' && (method === 'key' || method === 'path')));
   });
 }
 
 function authInputFromForm(form) {
-  const privateKeyPath = form.elements.privateKeyPath.value.trim();
-  if (privateKeyPath) {
+  const method = form.elements.authMethod?.value || 'agent';
+  if (method === 'password') {
+    return {
+      password: form.elements.password.value,
+      keyName: '',
+      privateKeyPath: '',
+      privateKeyPassphrase: '',
+    };
+  }
+
+  if (method === 'path') {
+    const privateKeyPath = form.elements.privateKeyPath.value.trim();
     return {
       keyName: '',
       privateKeyPath,
       privateKeyPassphrase: form.elements.privateKeyPassphrase.value,
+    };
+  }
+
+  if (method === 'agent') {
+    return {
+      keyName: '',
+      privateKeyPath: '',
+      privateKeyPassphrase: '',
     };
   }
 
@@ -2161,21 +2280,33 @@ function authInputFromForm(form) {
   return {
     keyName: '',
     privateKeyPath: '',
-    privateKeyPassphrase: form.elements.privateKeyPassphrase.value,
+    privateKeyPassphrase: '',
   };
 }
 
 function applyConnectDefaults(form, resource) {
   const auth = resource?.auth;
-  if (!auth) return;
+  form.elements.authMethod.value = 'agent';
+  form.elements.keyName.value = '';
+  form.elements.privateKeyPath.value = '';
+  form.elements.password.value = '';
+  form.elements.privateKeyPassphrase.value = '';
+  if (!auth) {
+    updateAuthFields(form);
+    return;
+  }
 
   if (auth.trustHostKey) {
     form.elements.trustHostKey.checked = true;
+  }
+  if (auth.method === 'password') {
+    form.elements.authMethod.value = 'password';
   }
   if (auth.method === 'key' && auth.keyName) {
     const value = `bashes:${auth.keyName}`;
     const hasKey = [...form.elements.keyName.options].some((option) => option.value === value);
     if (hasKey) {
+      form.elements.authMethod.value = 'key';
       form.elements.keyName.value = value;
       form.elements.privateKeyPath.value = '';
     }
@@ -2184,13 +2315,16 @@ function applyConnectDefaults(form, resource) {
     const value = `path:${auth.privateKeyPath}`;
     const hasPath = [...form.elements.keyName.options].some((option) => option.value === value);
     if (hasPath) {
+      form.elements.authMethod.value = 'key';
       form.elements.keyName.value = value;
       form.elements.privateKeyPath.value = '';
     } else {
+      form.elements.authMethod.value = 'path';
       form.elements.keyName.value = '';
       form.elements.privateKeyPath.value = auth.privateKeyPath;
     }
   }
+  updateAuthFields(form);
 }
 
 function selectedKeyChoice(select) {
@@ -2398,6 +2532,10 @@ function parseHostKeyMismatchError(error) {
 function isAuthError(error) {
   const detail = String(error?.message ?? error ?? '');
   return /unable to authenticate|no supported methods|no SSH authentication method|handshake failed|permission denied/i.test(detail);
+}
+
+function isAuthMessage(message) {
+  return /authenticate|authentication|password|SSH key|permission denied/i.test(String(message ?? ''));
 }
 
 function keyInstallErrorMessage(error, resource) {
@@ -2628,15 +2766,89 @@ async function runAutomaticUpdateCheck() {
   }
 }
 
-function adjustTerminalFontSize(delta) {
-  state.terminalFontSize = Math.min(22, Math.max(10, state.terminalFontSize + delta));
+function openSettingsPanel() {
+  renderSettingsForm();
+  const panel = document.querySelector('#settings-panel');
+  panel.hidden = false;
+  requestAnimationFrame(() => panel.classList.add('open'));
+  window.setTimeout(() => {
+    document.querySelector('#settings-form').elements.terminalFontSize.focus();
+  }, 0);
+}
+
+function closeSettingsPanel() {
+  const panel = document.querySelector('#settings-panel');
+  panel.classList.remove('open');
+  panel.hidden = true;
+  restoreTerminalFocusAfterOverlay();
+}
+
+function renderSettingsForm() {
+  const form = document.querySelector('#settings-form');
+  form.elements.terminalFontSize.value = String(state.terminalFontSize);
+  form.elements.terminalScrollback.value = String(state.terminalScrollback);
+  form.elements.terminalFontFamily.value = state.terminalFontFamily;
+  form.elements.terminalCopyOnSelect.checked = state.terminalCopyOnSelect;
+}
+
+function submitSettings(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  state.terminalFontSize = clampNumber(form.elements.terminalFontSize.value, 10, 22, DEFAULT_TERMINAL_FONT_SIZE);
+  state.terminalScrollback = clampNumber(form.elements.terminalScrollback.value, 1000, 500000, DEFAULT_TERMINAL_SCROLLBACK);
+  state.terminalFontFamily = form.elements.terminalFontFamily.value.trim() || DEFAULT_TERMINAL_FONT_FAMILY;
+  state.terminalCopyOnSelect = form.elements.terminalCopyOnSelect.checked;
+  saveTerminalSettings();
+  applyTerminalSettings();
+  writeNotice('Settings saved.');
+  closeSettingsPanel();
+}
+
+function applyTerminalSettings() {
   for (const session of state.sessions.values()) {
-    if (session.terminal) {
-      session.terminal.options.fontSize = state.terminalFontSize;
-    }
+    if (!session.terminal) continue;
+    session.terminal.options.fontSize = state.terminalFontSize;
+    session.terminal.options.fontFamily = state.terminalFontFamily;
+    session.terminal.options.scrollback = state.terminalScrollback;
   }
   scheduleTerminalFit();
   focusActiveTerminal();
+}
+
+function saveTerminalSettings() {
+  localStorage.setItem('bashes.terminalFontSize', String(state.terminalFontSize));
+  localStorage.setItem('bashes.terminalFontFamily', state.terminalFontFamily);
+  localStorage.setItem('bashes.terminalScrollback', String(state.terminalScrollback));
+  localStorage.setItem('bashes.terminalCopyOnSelect', String(state.terminalCopyOnSelect));
+}
+
+function readNumberSetting(key, fallback, min, max) {
+  return clampNumber(localStorage.getItem(key), min, max, fallback);
+}
+
+function readStringSetting(key, fallback) {
+  const value = localStorage.getItem(key);
+  return value?.trim() || fallback;
+}
+
+function readBooleanSetting(key, fallback) {
+  const value = localStorage.getItem(key);
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return fallback;
+}
+
+function clampNumber(value, min, max, fallback) {
+  const number = Number.parseInt(value, 10);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(Math.max(number, min), max);
+}
+
+function adjustTerminalFontSize(delta) {
+  state.terminalFontSize = clampNumber(state.terminalFontSize + delta, 10, 22, DEFAULT_TERMINAL_FONT_SIZE);
+  saveTerminalSettings();
+  applyTerminalSettings();
+  if (!document.querySelector('#settings-panel').hidden) renderSettingsForm();
 }
 
 function focusActiveTerminal() {
@@ -2799,6 +3011,7 @@ function recordNotice(message, level) {
 }
 
 function notify(message, level = 'info') {
+  if (level !== 'error') return;
   const stack = document.querySelector('#toast-stack');
   if (!stack) return;
   const toast = document.createElement('article');
@@ -2812,8 +3025,7 @@ function notify(message, level = 'info') {
   close.addEventListener('click', () => toast.remove());
   toast.append(text, close);
   stack.prepend(toast);
-  const timeout = level === 'error' ? 10000 : 4000;
-  window.setTimeout(() => toast.remove(), timeout);
+  window.setTimeout(() => toast.remove(), 10000);
 }
 
 function showMessageLog() {

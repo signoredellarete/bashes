@@ -81,7 +81,9 @@ textarea {
 }
 
 .sidebar-toggle {
-  display: grid;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 28px;
   height: 28px;
   margin-left: auto;
@@ -91,10 +93,12 @@ textarea {
   background: #fff;
   color: #2f3945;
   cursor: pointer;
+  font-family: "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols 2", system-ui, sans-serif;
   font-size: 15px;
   font-weight: 700;
   line-height: 1;
   padding: 0;
+  text-align: center;
 }
 
 .sidebar-toggle:hover {
@@ -636,11 +640,15 @@ textarea {
 }
 
 .tab-close {
+  display: grid;
+  place-items: center;
   border-left: 0;
   border-radius: 0 6px 0 0;
+  font-family: "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols 2", system-ui, sans-serif;
   padding: 0;
   font-size: 14px;
   font-weight: 600;
+  line-height: 1;
 }
 
 .terminal-stack {
@@ -850,13 +858,19 @@ textarea {
 }
 
 .close-panel {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
   border: 0 !important;
   background: transparent !important;
   color: #2f3945 !important;
-  padding: 0 2px !important;
+  padding: 0 !important;
+  font-family: "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols 2", system-ui, sans-serif;
   font-size: 24px !important;
   font-weight: 600;
-  line-height: 1;
+  line-height: 1 !important;
+  text-align: center;
 }
 
 .close-panel:hover {
@@ -1815,6 +1829,7 @@ textarea {
   background: transparent;
   color: #66717f;
   cursor: pointer;
+  font-family: "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols 2", system-ui, sans-serif;
   font-size: 14px;
   line-height: 1;
   padding: 0;

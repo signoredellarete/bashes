@@ -166,11 +166,11 @@ Il documento è organizzato per priorità. Ogni voce indica: dove sta il problem
 
 **Dove:** `frontend/src/main.js`, `writeNotice`; markup `#app-status` nel footer.
 
-**Stato fix:** risolto. `writeNotice` mantiene ancora la riga di stato, ma ora registra gli ultimi messaggi in un log consultabile dal footer e mostra toast a comparsa con severità `info`/`success`/`warning`/`error`; gli errori restano visibili più a lungo e sono chiudibili.
+**Stato fix:** risolto. `writeNotice` mantiene ancora la riga di stato, registra gli ultimi messaggi in un log consultabile dal footer e mostra toast a comparsa solo per gli errori; i messaggi informativi e di successo restano nel log senza popup.
 
 **Problema originale:** ogni messaggio — dal banale "Host order updated" al critico "Error: ssh: unable to authenticate" — finiva nella stessa riga piccola in basso a sinistra, dove il messaggio successivo sovrascriveva il precedente. Un errore di connessione poteva sparire in un attimo, e l'utente non aveva modo di rileggerlo.
 
-**Come correggere:** introdurre un piccolo sistema di notifiche a comparsa (toast) senza librerie esterne: un contenitore fisso in alto a destra; `notify(message, level)` crea un elemento con stile diverso per `info`/`success`/`error`; gli errori restano visibili finché non vengono chiusi (o almeno 10 secondi), le info spariscono dopo 3–4 secondi. Mantenere la riga di stato per i messaggi passivi (es. stato tunnel), ma instradare tutti gli errori sui toast. In più, tenere un log degli ultimi N messaggi consultabile da un'icona nel footer.
+**Come correggere:** introdurre un piccolo sistema di notifiche a comparsa (toast) senza librerie esterne: un contenitore fisso in alto a destra; `notify(message, level)` mostra popup solo per gli errori, lasciandoli visibili per almeno 10 secondi e chiudibili manualmente. Mantenere la riga di stato per i messaggi passivi (es. stato tunnel), ma registrare tutti i messaggi nel log consultabile dal footer.
 
 ### 3.5 Ridimensionamento del terminale con correzioni manuali — PRIORITÀ BASSA
 
@@ -222,6 +222,8 @@ Documentare le scorciatoie in un tooltip o in un pannello "?".
 
 ### 4.2 Pannello di connessione: scegliere il metodo, non compilare quattro campi — impatto alto
 
+**Stato fix:** risolto. I form Connect e Tunnel hanno un selettore di autenticazione e mostrano solo i campi rilevanti per password, chiave esistente, path manuale o agent/chiavi di sistema. Le preferenze salvate preselezionano il metodo corretto.
+
 Il form Connect mostra insieme "Bashes Key", "Password", "Private Key Path" e "Key Passphrase". Non è chiaro quale campo serva né cosa succede se se ne compilano due (il backend ha una precedenza interna che l'utente non conosce).
 
 **Implementazione suggerita:** in cima al form un selettore "Metodo di autenticazione" (radio o select) con voci: `Password`, `Chiave Bashes`, `File di chiave`, `Agent/chiavi di sistema`. Mostrare solo i campi del metodo scelto. Preselezionare il metodo dalla preferenza salvata (`resource.auth.method`, già disponibile) — oggi la preferenza "password" salvata non preseleziona nulla. Stesso trattamento per il form Tunnel (che duplica gli stessi campi: estrarre un blocco riutilizzabile).
@@ -258,6 +260,8 @@ Il backend supporta più tunnel per risorsa, ma la UI ne permette uno solo (`tun
 - **Riga di stato:** oggi il footer è quasi vuoto; con i toast del punto 3.4 può ospitare informazioni utili permanenti: numero sessioni attive, numero tunnel attivi, versione dell'app.
 
 ### 4.8 Impostazioni minime dell'app — impatto medio
+
+**Stato fix:** risolto in forma minimale. Il footer apre un pannello Settings con font size, font family, scrollback e comportamento copy-on-select; le preferenze sono salvate in `localStorage` e applicate ai terminali esistenti e nuovi. Lo scrollback di default è 100000 righe.
 
 Non esiste un pannello impostazioni. Le richieste tipiche che arriveranno subito: dimensione/famiglia font del terminale, scrollback (oggi fisso al default di xterm, 1000 righe: poco per uso reale — portarlo ad almeno 10.000 configurabile), tema, comportamento della copia su selezione (alcuni la detestano), keepalive on/off.
 
