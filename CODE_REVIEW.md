@@ -12,7 +12,7 @@ Il documento è organizzato per priorità. Ogni voce indica: dove sta il problem
 | # | Problema | Tipo | Priorità | Fix |
 |---|----------|------|----------|-----|
 | 2.1 | La verifica della chiave host del server è di fatto disattivata | Sicurezza | Alta | Fatto |
-| 2.2 | Copia di una cartella dentro sé stessa causa un ciclo infinito | Bug | Alta | Da fare |
+| 2.2 | Copia di una cartella dentro sé stessa causa un ciclo infinito | Bug | Alta | Fatto |
 | 2.3 | Caratteri accentati/Unicode possono arrivare corrotti nel terminale | Bug | Alta | Da fare |
 | 2.4 | Scritture concorrenti su hosts.json possono perdere dati | Bug | Alta | Da fare |
 | 2.5 | Percorso chiavi errato (`data/keys`) in un ramo di fallback | Bug | Media | Fatto |

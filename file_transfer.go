@@ -713,6 +713,9 @@ func (s *fileTransferSession) copy(sourceID string, targetID string, move bool) 
 
 	name := path.Base(sourceRel)
 	destinationRel := path.Join(targetRel, name)
+	if err := validateCopyDestination(sourceScope, sourceRel, targetScope, destinationRel); err != nil {
+		return err
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -756,6 +759,11 @@ func (s *fileTransferSession) copyJob(ctx context.Context, job *fileTransferJob,
 			targetScope: targetScope,
 			targetRel:   path.Join(targetRel, path.Base(sourceRel)),
 		})
+	}
+	for _, plan := range plans {
+		if err := validateCopyDestination(plan.sourceScope, plan.sourceRel, plan.targetScope, plan.targetRel); err != nil {
+			return err
+		}
 	}
 
 	s.mu.Lock()
@@ -918,6 +926,21 @@ func (s *fileTransferSession) copyUnlockedWithProgress(ctx context.Context, job 
 		})
 		emit(false)
 	})
+}
+
+func validateCopyDestination(sourceScope, sourceRel, targetScope, targetRel string) error {
+	if sourceScope != targetScope {
+		return nil
+	}
+	sourceRel = cleanRelative(sourceRel)
+	targetRel = cleanRelative(targetRel)
+	if sourceRel == "" {
+		return errors.New("cannot transfer file transfer root")
+	}
+	if targetRel == sourceRel || strings.HasPrefix(targetRel, strings.TrimRight(sourceRel, "/")+"/") {
+		return errors.New("cannot copy an item into itself")
+	}
+	return nil
 }
 
 func (s *fileTransferSession) copyAbsoluteLocalWithProgress(ctx context.Context, job *fileTransferJob, sourcePath, targetScope, targetRel string, emit func(bool)) error {
