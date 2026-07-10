@@ -518,8 +518,8 @@ jobs:
           {
             printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
             printf '## RELEASE NOTES\n\n'
-            printf -- '- Fixes macOS release packaging when capitalizing the app bundle name on case-insensitive filesystems.\n'
-            printf -- '- Keeps the macOS Dock label capitalized as Bashes.\n\n'
+            printf -- '- Fixes terminal viewport sizing so the last row stays above the footer/status bar.\n'
+            printf -- '- Moves terminal padding to the outer stack so xterm-fit measures the usable terminal area correctly.\n\n'
             printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
 

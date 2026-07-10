@@ -657,6 +657,7 @@ textarea {
   min-height: 0;
   overflow: hidden;
   background: #101418;
+  padding: 10px 14px 18px 10px;
 }
 
 .terminal-stack > * {
@@ -669,7 +670,7 @@ textarea {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  padding: 10px 14px 10px 10px;
+  padding: 0;
 }
 
 .terminal-pane.closed-pane {
