@@ -759,8 +759,7 @@ textarea {
   padding: 9px 10px;
 }
 
-.field-help-trigger:hover + .field-help-popover,
-.field-help-trigger:focus + .field-help-popover {
+.field-help-trigger[aria-expanded='true'] + .field-help-popover {
   display: block;
 }
 

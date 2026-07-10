@@ -197,7 +197,7 @@ app.innerHTML = `
       <label>
         <span class="field-label-with-help">
           Custom Key Path
-          <button class="field-help-trigger" type="button" aria-label="Custom key path help">?</button>
+          <button class="field-help-trigger" type="button" aria-label="Custom key path help" aria-expanded="false">?</button>
           <span class="field-help-popover">
             Select the private key file, not the .pub file.
             Linux/macOS: ~/.ssh/id_ed25519
@@ -276,7 +276,7 @@ app.innerHTML = `
       <label>
         <span class="field-label-with-help">
           Custom Key Path
-          <button class="field-help-trigger" type="button" aria-label="Custom key path help">?</button>
+          <button class="field-help-trigger" type="button" aria-label="Custom key path help" aria-expanded="false">?</button>
           <span class="field-help-popover">
             Select the private key file, not the .pub file.
             Linux/macOS: ~/.ssh/id_ed25519
@@ -488,12 +488,16 @@ document.querySelector('#confirm-accept').addEventListener('click', () => resolv
 document.querySelectorAll('[data-close-app-modal]').forEach((element) => {
   element.addEventListener('click', () => closeAppModal());
 });
+document.querySelectorAll('.field-help-trigger').forEach((button) => {
+  button.addEventListener('click', (event) => toggleFieldHelp(event));
+});
 document.querySelector('#app-modal-primary').addEventListener('click', () => runAppModalAction('primary'));
 document.querySelector('#app-modal-secondary').addEventListener('click', () => runAppModalAction('secondary'));
 document.querySelector('#edit-context-menu').addEventListener('click', (event) => runEditContextCommand(event));
 document.addEventListener('contextmenu', (event) => openEditContextMenu(event));
 document.addEventListener('pointerdown', (event) => {
   if (!event.target.closest?.('#edit-context-menu')) hideEditContextMenu();
+  if (!event.target.closest?.('.field-label-with-help')) closeFieldHelpPopovers();
 });
 window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !document.querySelector('#confirm-modal').hidden) {
@@ -501,6 +505,7 @@ window.addEventListener('keydown', (event) => {
   } else if (event.key === 'Escape' && !document.querySelector('#app-modal').hidden) {
     closeAppModal();
   } else if (event.key === 'Escape') {
+    closeFieldHelpPopovers();
     hideEditContextMenu();
   }
 });
@@ -508,6 +513,24 @@ window.addEventListener('keydown', (event) => {
 await loadCapabilities();
 await loadHosts();
 await loadKeySettings();
+
+function toggleFieldHelp(event) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  const button = event.currentTarget;
+  const willOpen = button.getAttribute('aria-expanded') !== 'true';
+  closeFieldHelpPopovers(button);
+  button.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+}
+
+function closeFieldHelpPopovers(except = null) {
+  document.querySelectorAll('.field-help-trigger[aria-expanded="true"]').forEach((button) => {
+    if (button !== except) {
+      button.setAttribute('aria-expanded', 'false');
+    }
+  });
+}
 await loadKeys();
 await loadTunnels();
 applySidebarState();
