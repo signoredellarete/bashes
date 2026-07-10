@@ -41,13 +41,47 @@ jobs:
       - name: Build frontend
         run: npm run build --prefix frontend
 
-  linux-desktop:
-    name: Linux desktop build
+  icons:
+    name: Generate app icons
     runs-on: ubuntu-22.04
-    needs: test
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Install ImageMagick
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends imagemagick
+
+      - name: Generate icons from source
+        run: scripts/generate-icons.sh
+
+      - name: Upload generated icons
+        uses: actions/upload-artifact@v6
+        with:
+          name: bashes-generated-icons
+          path: |
+            build/appicon.png
+            build/windows/icon.ico
+            frontend/src/assets/bashes.png
+            icons/hicolor
+          if-no-files-found: error
+
+  linux-desktop:
+    name: Linux desktop build
+    runs-on: ubuntu-22.04
+    needs:
+      - test
+      - icons
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Download generated icons
+        uses: actions/download-artifact@v7
+        with:
+          name: bashes-generated-icons
+          path: .
 
       - name: Install Wails Linux dependencies
         run: |
@@ -96,10 +130,18 @@ jobs:
   macos-desktop:
     name: macOS desktop build
     runs-on: macos-14
-    needs: test
+    needs:
+      - test
+      - icons
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Download generated icons
+        uses: actions/download-artifact@v7
+        with:
+          name: bashes-generated-icons
+          path: .
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -206,10 +248,18 @@ jobs:
   windows-desktop:
     name: Windows desktop build
     runs-on: windows-2022
-    needs: test
+    needs:
+      - test
+      - icons
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Download generated icons
+        uses: actions/download-artifact@v7
+        with:
+          name: bashes-generated-icons
+          path: .
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -281,10 +331,18 @@ jobs:
   linux-arm64-desktop:
     name: Linux ARM64 desktop build
     runs-on: ubuntu-24.04-arm
-    needs: test
+    needs:
+      - test
+      - icons
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Download generated icons
+        uses: actions/download-artifact@v7
+        with:
+          name: bashes-generated-icons
+          path: .
 
       - name: Install Wails Linux dependencies
         run: |
@@ -336,10 +394,18 @@ jobs:
   windows-arm64-desktop:
     name: Windows ARM64 desktop build
     runs-on: windows-2022
-    needs: test
+    needs:
+      - test
+      - icons
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Download generated icons
+        uses: actions/download-artifact@v7
+        with:
+          name: bashes-generated-icons
+          path: .
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -438,9 +504,8 @@ jobs:
           {
             printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
             printf '## RELEASE NOTES\n\n'
-            printf -- '- Added inline help for custom SSH private key paths on connect and tunnel panels.\n'
-            printf -- '- Improved SSH key format errors when a public key or unsupported private key is selected.\n'
-            printf -- '- Improved home-directory expansion for Windows-style ~\\ paths.\n\n'
+            printf -- '- Custom SSH key path help now opens only when clicking the ? button.\n'
+            printf -- '- App icons are now regenerated from icons/bashes.png for frontend, Linux and Windows builds.\n\n'
             printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
 

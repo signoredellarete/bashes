@@ -273,6 +273,14 @@ Build the frontend:
 npm run build --prefix frontend
 ```
 
+Regenerate app icons after replacing `icons/bashes.png`:
+
+```bash
+scripts/generate-icons.sh
+```
+
+`icons/bashes.png` is the source image for the in-app logo, Wails app icon, Linux hicolor icons and Windows `.ico` file.
+
 Build the desktop app:
 
 ```bash
