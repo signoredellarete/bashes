@@ -47,6 +47,10 @@ const state = {
   activeFileTransferResourceId: null,
 };
 
+let appModalActions = {};
+let searchRenderFrame = 0;
+let terminalFitFrame = 0;
+
 const FILE_TRANSFER_ENABLED = true;
 const LOCAL_RESOURCE_ID = '__bashes_localhost__';
 const customKeyPathHelp = [
@@ -902,8 +906,6 @@ function resolveConfirmModal(confirmed) {
   if (resolve) resolve(confirmed);
 }
 
-let appModalActions = {};
-
 function showAppModal(options) {
   const modal = document.querySelector('#app-modal');
   document.querySelector('#app-modal-kicker').textContent = options.kicker ?? 'Bashes';
@@ -1034,8 +1036,6 @@ function endpointInput(form, type) {
     ...(type ? { type } : {}),
   };
 }
-
-let searchRenderFrame = 0;
 
 function scheduleHostRender() {
   if (searchRenderFrame) cancelAnimationFrame(searchRenderFrame);
@@ -2665,8 +2665,6 @@ function fitActiveTerminal() {
   if (!session?.fitAddon || !session.terminal) return;
   session.fitAddon.fit();
 }
-
-let terminalFitFrame = 0;
 
 function scheduleTerminalFit() {
   if (terminalFitFrame) cancelAnimationFrame(terminalFitFrame);

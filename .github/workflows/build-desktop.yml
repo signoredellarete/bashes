@@ -505,11 +505,8 @@ jobs:
           {
             printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
             printf '## RELEASE NOTES\n\n'
-            printf -- '- Improves sidebar, modal and tab close icons.\n'
-            printf -- '- Fixes SSH key installation command error handling.\n'
-            printf -- '- Adds toast notifications and a message log for important errors.\n'
-            printf -- '- Improves terminal fitting by removing manual row and column adjustments.\n'
-            printf -- '- Opens the credentials panel only for authentication failures.\n\n'
+            printf -- '- Fixes a startup warning shown when the local shell opens automatically.\n'
+            printf -- '- Ensures frontend frame state is initialized before automatic session startup.\n\n'
             printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
 
