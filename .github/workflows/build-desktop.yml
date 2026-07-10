@@ -505,10 +505,8 @@ jobs:
           {
             printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
             printf '## RELEASE NOTES\n\n'
-            printf -- '- Adds explicit authentication method selection for SSH sessions and tunnels.\n'
-            printf -- '- Adds terminal settings for font, copy-on-select, and 100000-line default scrollback.\n'
-            printf -- '- Shows toast popups only for errors while keeping informational messages in the log.\n'
-            printf -- '- Logs explicit session disconnects and refines close/collapse icon alignment.\n\n'
+            printf -- '- Removes duplicate success entries from the Bashes message log when SSH or local shell sessions start.\n'
+            printf -- '- Keeps connection progress messages in the frontend and successful session state messages from backend events.\n\n'
             printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
 

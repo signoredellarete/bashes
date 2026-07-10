@@ -1460,7 +1460,6 @@ function createSession(sessionID, resource, kind = 'ssh') {
   });
   flushPendingSSHOutput(sessionID);
   setActiveSession(sessionID);
-  writeNotice(isLocalResource(resource) ? 'Local shell started.' : `Connected to ${resource.user}@${resource.ip || resource.hostname}:${resource.port}`);
   renderTabs();
   renderSelection();
   scheduleTerminalFit();
