@@ -191,6 +191,8 @@ jobs:
             plutil -insert CFBundleName -string "Bashes" "$app_path/Contents/Info.plist"
           plutil -replace CFBundleDisplayName -string "Bashes" "$app_path/Contents/Info.plist" || \
             plutil -insert CFBundleDisplayName -string "Bashes" "$app_path/Contents/Info.plist"
+          codesign --force --deep --sign - "$app_path"
+          codesign --verify --deep --strict "$app_path"
           echo "path=$app_path" >> "$GITHUB_OUTPUT"
 
       - name: Sign macOS app
@@ -518,8 +520,8 @@ jobs:
           {
             printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
             printf '## RELEASE NOTES\n\n'
-            printf -- '- Fixes terminal viewport sizing so the last row stays above the footer/status bar.\n'
-            printf -- '- Moves terminal padding to the outer stack so xterm-fit measures the usable terminal area correctly.\n\n'
+            printf -- '- Re-signs the macOS app bundle after release metadata changes to avoid invalid bundle signatures.\n'
+            printf -- '- Keeps unsigned macOS test builds ad-hoc signed while preserving optional Developer ID signing when configured.\n\n'
             printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
 
