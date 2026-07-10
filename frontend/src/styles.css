@@ -91,7 +91,7 @@ textarea {
   background: #fff;
   color: #2f3945;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   line-height: 1;
   padding: 0;
@@ -639,7 +639,8 @@ textarea {
   border-left: 0;
   border-radius: 0 6px 0 0;
   padding: 0;
-  font-size: 12px;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .terminal-stack {

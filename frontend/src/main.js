@@ -53,6 +53,9 @@ const customKeyPathHelp = [
   'Linux/macOS: ~/.ssh/id_ed25519',
   'Windows: C:\\Users\\YourUser\\.ssh\\id_ed25519',
 ].join('\n\n');
+const ICON_COLLAPSE = '❮';
+const ICON_EXPAND = '❯';
+const ICON_CLOSE = '✕';
 
 function localResource() {
   return {
@@ -78,7 +81,7 @@ app.innerHTML = `
         <span>Remote sessions</span>
       </div>
       <button id="toggle-sidebar" class="sidebar-toggle" type="button" title="Compact sidebar" aria-label="Compact sidebar">
-        &lt;
+        ${ICON_COLLAPSE}
       </button>
     </header>
 
@@ -137,7 +140,7 @@ app.innerHTML = `
           <p class="eyebrow" id="resource-panel-kicker">Host</p>
           <h3 id="resource-panel-title">Add Host</h3>
         </div>
-        <button class="close-panel" type="button" data-close-panel title="Close">X</button>
+        <button class="close-panel" type="button" data-close-panel title="Close">${ICON_CLOSE}</button>
       </header>
 
       <p id="parent-host-summary" class="parent-summary" hidden></p>
@@ -185,7 +188,7 @@ app.innerHTML = `
           <p class="eyebrow">SSH</p>
           <h3>Connect</h3>
         </div>
-        <button class="close-panel" type="button" data-close-connect title="Close">X</button>
+        <button class="close-panel" type="button" data-close-connect title="Close">${ICON_CLOSE}</button>
       </header>
 
       <p id="connect-summary" class="parent-summary"></p>
@@ -231,7 +234,7 @@ app.innerHTML = `
           <p class="eyebrow">SSH Tunnel</p>
           <h3 id="tunnel-title">SOCKS Proxy</h3>
         </div>
-        <button class="close-panel" type="button" data-close-tunnel title="Close">X</button>
+        <button class="close-panel" type="button" data-close-tunnel title="Close">${ICON_CLOSE}</button>
       </header>
 
       <p id="tunnel-summary" class="parent-summary"></p>
@@ -308,7 +311,7 @@ app.innerHTML = `
         </div>
         <div class="file-transfer-header-actions">
           <button id="file-transfer-background" class="secondary" type="button" title="Send transfer window to background">Background</button>
-          <button class="close-panel" type="button" data-close-file-transfer title="Close">X</button>
+          <button class="close-panel" type="button" data-close-file-transfer title="Close">${ICON_CLOSE}</button>
         </div>
       </header>
       <div id="file-transfer-root" class="file-transfer-root"></div>
@@ -324,7 +327,7 @@ app.innerHTML = `
           <p class="eyebrow">SSH Keys</p>
           <h3>Manage Keys</h3>
         </div>
-        <button class="close-panel" type="button" data-close-keys title="Close">X</button>
+        <button class="close-panel" type="button" data-close-keys title="Close">${ICON_CLOSE}</button>
       </header>
 
       <form id="key-generate-form" class="compact-form">
@@ -392,7 +395,7 @@ app.innerHTML = `
           <p class="eyebrow" id="app-modal-kicker">Bashes</p>
           <h3 id="app-modal-title">Bashes</h3>
         </div>
-        <button class="close-panel" type="button" data-close-app-modal title="Close">X</button>
+        <button class="close-panel" type="button" data-close-app-modal title="Close">${ICON_CLOSE}</button>
       </header>
       <p id="app-modal-message"></p>
       <dl id="app-modal-details"></dl>
@@ -1231,7 +1234,7 @@ function toggleSidebar() {
 function applySidebarState() {
   app.classList.toggle('sidebar-collapsed', state.sidebarCollapsed);
   const toggle = document.querySelector('#toggle-sidebar');
-  toggle.textContent = state.sidebarCollapsed ? '>' : '<';
+  toggle.textContent = state.sidebarCollapsed ? ICON_EXPAND : ICON_COLLAPSE;
   toggle.title = state.sidebarCollapsed ? 'Expand sidebar' : 'Compact sidebar';
   toggle.setAttribute('aria-label', toggle.title);
   toggle.setAttribute('aria-expanded', String(!state.sidebarCollapsed));
@@ -1477,7 +1480,7 @@ function renderTabs() {
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'tab-close';
-    close.textContent = 'X';
+    close.textContent = ICON_CLOSE;
     close.title = `Close ${session.title}`;
     close.addEventListener('click', (event) => {
       event.stopPropagation();
