@@ -90,6 +90,16 @@ func TestResolveSessionKeyPathUsesAppDataDirectory(t *testing.T) {
 	}
 }
 
+func TestAuthMethodsRejectsUnresolvedKeyName(t *testing.T) {
+	_, _, err := authMethods(SSHSessionInput{KeyName: "bashes-main"})
+	if err == nil {
+		t.Fatal("authMethods() error = nil, want unresolved key error")
+	}
+	if got := err.Error(); got != `ssh key "bashes-main" was not resolved to a private key path` {
+		t.Fatalf("authMethods() error = %q", got)
+	}
+}
+
 func TestGenerateSSHKeyUsesNextDefaultName(t *testing.T) {
 	app := NewApp(filepath.Join(t.TempDir(), "data", "hosts.json"))
 

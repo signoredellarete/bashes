@@ -1838,7 +1838,7 @@ func authMethods(input SSHSessionInput) ([]ssh.AuthMethod, net.Conn, error) {
 
 	keyPath := strings.TrimSpace(input.PrivateKeyPath)
 	if keyPath == "" && strings.TrimSpace(input.KeyName) != "" {
-		keyPath = filepath.Join("data", "keys", sanitizeKeyName(input.KeyName))
+		return nil, nil, fmt.Errorf("ssh key %q was not resolved to a private key path", sanitizeKeyName(input.KeyName))
 	}
 
 	if keyPath != "" {
