@@ -9,24 +9,24 @@ Il documento è organizzato per priorità. Ogni voce indica: dove sta il problem
 
 ## 1. Riepilogo delle priorità
 
-| # | Problema | Tipo | Priorità |
-|---|----------|------|----------|
-| 2.1 | La verifica della chiave host del server è di fatto disattivata | Sicurezza | Alta |
-| 2.2 | Copia di una cartella dentro sé stessa causa un ciclo infinito | Bug | Alta |
-| 2.3 | Caratteri accentati/Unicode possono arrivare corrotti nel terminale | Bug | Alta |
-| 2.4 | Scritture concorrenti su hosts.json possono perdere dati | Bug | Alta |
-| 2.5 | Percorso chiavi errato (`data/keys`) in un ramo di fallback | Bug | Media |
-| 2.6 | Upload di file grandi passa interamente in memoria come base64 | Bug/Design | Media |
-| 2.7 | Trasferimenti file bloccanti, senza progresso né annullamento | Design | Media |
-| 2.8 | Nessun keepalive SSH: sessioni e tunnel cadono in silenzio | Design | Media |
-| 2.9 | Comando remoto di installazione chiave con concatenazione fragile | Bug minore | Bassa |
-| 3.1 | Chiusura sessione: l'output finale del terminale viene perso | UX/Bug | Alta |
-| 3.2 | Blocco globale di tutti i controlli durante ogni operazione | UX/Bug | Media |
-| 3.3 | La copia negli appunti può non funzionare su Linux | Bug | Media |
-| 3.4 | Errori mostrati solo in una riga di stato facilissima da perdere | UX | Alta |
-| 3.5 | Trucco manuale per riservare colonne al terminale | Bug minore | Bassa |
-| 3.6 | Messaggio fuorviante quando la connessione rapida fallisce | UX | Bassa |
-| 4.x | Migliorie UI/UX (scorciatoie, pannello connessione, tunnel, empty state, ecc.) | UX | Varie |
+| # | Problema | Tipo | Priorità | Fix |
+|---|----------|------|----------|-----|
+| 2.1 | La verifica della chiave host del server è di fatto disattivata | Sicurezza | Alta | Da fare |
+| 2.2 | Copia di una cartella dentro sé stessa causa un ciclo infinito | Bug | Alta | Da fare |
+| 2.3 | Caratteri accentati/Unicode possono arrivare corrotti nel terminale | Bug | Alta | Da fare |
+| 2.4 | Scritture concorrenti su hosts.json possono perdere dati | Bug | Alta | Da fare |
+| 2.5 | Percorso chiavi errato (`data/keys`) in un ramo di fallback | Bug | Media | Fatto |
+| 2.6 | Upload di file grandi passa interamente in memoria come base64 | Bug/Design | Media | Fatto |
+| 2.7 | Trasferimenti file bloccanti, senza progresso né annullamento | Design | Media | Fatto |
+| 2.8 | Nessun keepalive SSH: sessioni e tunnel cadono in silenzio | Design | Media | Fatto |
+| 2.9 | Comando remoto di installazione chiave con concatenazione fragile | Bug minore | Bassa | Da fare |
+| 3.1 | Chiusura sessione: l'output finale del terminale viene perso | UX/Bug | Alta | Da fare |
+| 3.2 | Blocco globale di tutti i controlli durante ogni operazione | UX/Bug | Media | Da fare |
+| 3.3 | La copia negli appunti può non funzionare su Linux | Bug | Media | Fatto |
+| 3.4 | Errori mostrati solo in una riga di stato facilissima da perdere | UX | Alta | Da fare |
+| 3.5 | Trucco manuale per riservare colonne al terminale | Bug minore | Bassa | Da fare |
+| 3.6 | Messaggio fuorviante quando la connessione rapida fallisce | UX | Bassa | Da fare |
+| 4.x | Migliorie UI/UX (scorciatoie, pannello connessione, tunnel, empty state, ecc.) | UX | Varie | Parziale |
 
 ---
 
