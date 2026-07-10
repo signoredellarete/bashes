@@ -297,7 +297,7 @@ func (a *App) ExportDatabase(path string) error {
 		return errors.New("export path is required")
 	}
 
-	data, err := store.NewRepository(a.dataPath).Load()
+	data, err := a.service.StoreSnapshot()
 	if err != nil {
 		return err
 	}
@@ -327,20 +327,27 @@ func (a *App) PreviewImportFromHostsFile() (HostsFileImportResult, error) {
 }
 
 func (a *App) importFromHostsFile(path string, user string, sshConfigPath string) (HostsFileImportResult, error) {
-	result, data, err := a.prepareHostsFileImport(path, user, sshConfigPath)
-	if err != nil {
-		return result, err
-	}
-	if result.Imported == 0 {
-		return result, nil
-	}
-	if err := store.NewRepository(a.dataPath).Save(data); err != nil {
-		return result, err
-	}
-	return result, nil
+	var result HostsFileImportResult
+	err := a.service.UpdateStore(func(data domain.Store) (domain.Store, bool, error) {
+		nextResult, nextData, err := a.prepareHostsFileImportWithStore(path, user, sshConfigPath, data)
+		result = nextResult
+		if err != nil {
+			return data, false, err
+		}
+		return nextData, result.Imported > 0, nil
+	})
+	return result, err
 }
 
 func (a *App) prepareHostsFileImport(path string, user string, sshConfigPath string) (HostsFileImportResult, domain.Store, error) {
+	data, err := a.service.StoreSnapshot()
+	if err != nil {
+		return HostsFileImportResult{Path: path, User: user}, domain.Store{}, err
+	}
+	return a.prepareHostsFileImportWithStore(path, user, sshConfigPath, data)
+}
+
+func (a *App) prepareHostsFileImportWithStore(path string, user string, sshConfigPath string, data domain.Store) (HostsFileImportResult, domain.Store, error) {
 	result := HostsFileImportResult{
 		Path: path,
 		User: user,
@@ -358,11 +365,6 @@ func (a *App) prepareHostsFileImport(path string, user string, sshConfigPath str
 	}
 	entries := parseHostsFile(raw)
 	sshConfig := loadSimpleSSHConfig(sshConfigPath)
-
-	data, err := store.NewRepository(a.dataPath).Load()
-	if err != nil {
-		return result, domain.Store{}, err
-	}
 
 	seenHosts, seenIPs := existingHostKeys(data.Hosts)
 	for _, entry := range entries {
@@ -583,7 +585,7 @@ func (a *App) ImportDatabase(path string) error {
 	if err != nil {
 		return err
 	}
-	if err := store.NewRepository(a.dataPath).Save(data); err != nil {
+	if err := a.service.ReplaceStore(data); err != nil {
 		return err
 	}
 	a.stopAllRuntimeConnections()

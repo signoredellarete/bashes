@@ -2,6 +2,7 @@ package application
 
 import (
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/signoredellarete/bashes/internal/domain"
@@ -99,6 +100,56 @@ func TestServiceAddsNestedSubsystem(t *testing.T) {
 	}
 	if hosts[0].Subsystems[0].Subsystems[0].ID != lxc.ID {
 		t.Fatalf("Nested subsystem ID = %q, want %q", hosts[0].Subsystems[0].Subsystems[0].ID, lxc.ID)
+	}
+}
+
+func TestServiceSerializesConcurrentHostAdds(t *testing.T) {
+	store := newMemoryStore()
+	service := NewService(store)
+	const count = 50
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	errs := make(chan error, count)
+
+	for i := 0; i < count; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := service.AddHost(EndpointInput{
+				Hostname: "host",
+				IP:       "10.0.0.1",
+				Port:     2200 + i,
+				User:     "root",
+			})
+			errs <- err
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("AddHost() concurrent error = %v", err)
+		}
+	}
+	hosts, err := service.ListHosts()
+	if err != nil {
+		t.Fatalf("ListHosts() error = %v", err)
+	}
+	if len(hosts) != count {
+		t.Fatalf("Hosts length = %d, want %d", len(hosts), count)
+	}
+	seen := make(map[string]struct{}, count)
+	for _, host := range hosts {
+		if _, exists := seen[host.ID]; exists {
+			t.Fatalf("duplicate host ID %q", host.ID)
+		}
+		seen[host.ID] = struct{}{}
 	}
 }
 

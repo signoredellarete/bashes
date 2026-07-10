@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/signoredellarete/bashes/internal/domain"
 )
@@ -15,6 +16,7 @@ type Store interface {
 
 type Service struct {
 	store Store
+	mu    sync.RWMutex
 }
 
 type EndpointInput struct {
@@ -30,6 +32,9 @@ func NewService(store Store) *Service {
 }
 
 func (s *Service) ListHosts() ([]domain.Host, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	data, err := s.store.Load()
 	if err != nil {
 		return nil, err
@@ -37,7 +42,42 @@ func (s *Service) ListHosts() ([]domain.Host, error) {
 	return data.Hosts, nil
 }
 
+func (s *Service) StoreSnapshot() (domain.Store, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.store.Load()
+}
+
+func (s *Service) ReplaceStore(data domain.Store) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.store.Save(data)
+}
+
+func (s *Service) UpdateStore(update func(domain.Store) (domain.Store, bool, error)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	data, err := s.store.Load()
+	if err != nil {
+		return err
+	}
+	data, changed, err := update(data)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return nil
+	}
+	return s.store.Save(data)
+}
+
 func (s *Service) AddHost(input EndpointInput) (domain.Host, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	data, err := s.store.Load()
 	if err != nil {
 		return domain.Host{}, err
@@ -61,6 +101,9 @@ func (s *Service) AddHost(input EndpointInput) (domain.Host, error) {
 }
 
 func (s *Service) AddSubsystem(hostID string, input EndpointInput) (domain.Endpoint, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	data, err := s.store.Load()
 	if err != nil {
 		return domain.Endpoint{}, err
@@ -109,6 +152,9 @@ func (s *Service) UpdateResource(id string, input EndpointInput) error {
 		return errors.New("resource id is required")
 	}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	data, err := s.store.Load()
 	if err != nil {
 		return err
@@ -145,6 +191,9 @@ func (s *Service) DeleteResource(id string) error {
 		return errors.New("resource id is required")
 	}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	data, err := s.store.Load()
 	if err != nil {
 		return err
@@ -167,6 +216,9 @@ func (s *Service) DeleteResource(id string) error {
 }
 
 func (s *Service) ReorderHosts(order []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	data, err := s.store.Load()
 	if err != nil {
 		return err
@@ -210,6 +262,9 @@ func (s *Service) SetResourceAuth(id string, auth domain.Auth) error {
 		return err
 	}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	data, err := s.store.Load()
 	if err != nil {
 		return err
@@ -242,6 +297,9 @@ func (s *Service) SetResourceHostKeyFingerprint(id string, fingerprint string) e
 	if hasControl(fingerprint) {
 		return errors.New("host key fingerprint contains control characters")
 	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	data, err := s.store.Load()
 	if err != nil {

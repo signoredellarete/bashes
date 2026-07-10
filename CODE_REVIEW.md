@@ -14,7 +14,7 @@ Il documento è organizzato per priorità. Ogni voce indica: dove sta il problem
 | 2.1 | La verifica della chiave host del server è di fatto disattivata | Sicurezza | Alta | Fatto |
 | 2.2 | Copia di una cartella dentro sé stessa causa un ciclo infinito | Bug | Alta | Fatto |
 | 2.3 | Caratteri accentati/Unicode possono arrivare corrotti nel terminale | Bug | Alta | Fatto |
-| 2.4 | Scritture concorrenti su hosts.json possono perdere dati | Bug | Alta | Da fare |
+| 2.4 | Scritture concorrenti su hosts.json possono perdere dati | Bug | Alta | Fatto |
 | 2.5 | Percorso chiavi errato (`data/keys`) in un ramo di fallback | Bug | Media | Fatto |
 | 2.6 | Upload di file grandi passa interamente in memoria come base64 | Bug/Design | Media | Fatto |
 | 2.7 | Trasferimenti file bloccanti, senza progresso né annullamento | Design | Media | Fatto |
@@ -71,7 +71,9 @@ Il documento è organizzato per priorità. Ogni voce indica: dove sta il problem
 
 **Dove:** `internal/application/service.go` (tutte le operazioni) e `internal/store/repository.go`.
 
-**Problema:** ogni operazione fa "leggi hosts.json → modifica in memoria → riscrivi tutto". Wails esegue le chiamate dal frontend su goroutine separate, e il backend stesso chiama `SetResourceAuth` durante l'avvio di sessioni/tunnel. Due operazioni sovrapposte (es. l'utente rinomina un host mentre una connessione appena avviata salva la preferenza di autenticazione) possono leggere lo stesso stato e l'ultima scrittura cancella la modifica dell'altra. Il file resta valido, ma si perdono dati in modo silenzioso.
+**Stato fix:** risolto nel layer application. `Service` ora serializza con un mutex le operazioni `Load -> modifica -> Save`, protegge `ListHosts` con lock di lettura e offre snapshot/replace/update atomici usati anche da import/export del database e import da hosts file. È stato aggiunto un test con aggiunte host concorrenti per verificare che non si perdano record e non si generino ID duplicati.
+
+**Problema originale:** ogni operazione faceva "leggi hosts.json → modifica in memoria → riscrivi tutto". Wails esegue le chiamate dal frontend su goroutine separate, e il backend stesso chiama `SetResourceAuth` durante l'avvio di sessioni/tunnel. Due operazioni sovrapposte (es. l'utente rinomina un host mentre una connessione appena avviata salva la preferenza di autenticazione) potevano leggere lo stesso stato e l'ultima scrittura cancellava la modifica dell'altra. Il file restava valido, ma si perdevano dati in modo silenzioso.
 
 **Come correggere:** aggiungere un `sync.Mutex` al tipo `Service` e prenderlo all'inizio di ogni metodo che fa load+save (`AddHost`, `AddSubsystem`, `UpdateResource`, `DeleteResource`, `ReorderHosts`, `SetResourceAuth`). È una modifica piccola e sufficiente, dato che il datastore è unico e le operazioni sono rapide.
 
