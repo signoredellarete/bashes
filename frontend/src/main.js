@@ -137,7 +137,6 @@ app.innerHTML = `
     <footer class="workspace-footer">
       <p id="app-status" class="app-status" aria-live="polite"></p>
       <button id="message-log-button" class="status-log-button" type="button" title="Show message log">Log</button>
-      <button id="open-settings-panel" class="status-log-button" type="button" title="Settings">Settings</button>
       <div class="terminal-font-controls" aria-label="Terminal font size">
         <button id="decrease-terminal-font" type="button" title="Decrease terminal font size">-</button>
         <span aria-hidden="true">A</span>
@@ -519,7 +518,6 @@ document.querySelector('#connect').addEventListener('click', () => openConnectPa
 document.querySelector('#disconnect').addEventListener('click', () => disconnectActiveSession());
 document.querySelector('#delete-resource').addEventListener('click', () => deleteSelectedResource());
 document.querySelector('#message-log-button').addEventListener('click', () => showMessageLog());
-document.querySelector('#open-settings-panel').addEventListener('click', () => openSettingsPanel());
 document.querySelector('#decrease-terminal-font').addEventListener('click', () => adjustTerminalFontSize(-1));
 document.querySelector('#increase-terminal-font').addEventListener('click', () => adjustTerminalFontSize(1));
 document.querySelector('#resource-form').addEventListener('submit', (event) => submitResource(event));
@@ -3115,6 +3113,9 @@ function registerAppEvents() {
   });
   eventsOn('database:hosts-file-preview', (event) => {
     showHostsFileImportPreview(event);
+  });
+  eventsOn('app:settings', () => {
+    openSettingsPanel();
   });
   eventsOn('app:about', (info) => showAboutModal(info));
   eventsOn('app:update-check', (event) => {

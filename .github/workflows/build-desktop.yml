@@ -178,6 +178,16 @@ jobs:
             find build -maxdepth 5 -print
             exit 1
           fi
+          app_dir="$(dirname "$app_path")"
+          if [ "$(basename "$app_path")" != "Bashes.app" ]; then
+            rm -rf "$app_dir/Bashes.app"
+            mv "$app_path" "$app_dir/Bashes.app"
+            app_path="$app_dir/Bashes.app"
+          fi
+          plutil -replace CFBundleName -string "Bashes" "$app_path/Contents/Info.plist" || \
+            plutil -insert CFBundleName -string "Bashes" "$app_path/Contents/Info.plist"
+          plutil -replace CFBundleDisplayName -string "Bashes" "$app_path/Contents/Info.plist" || \
+            plutil -insert CFBundleDisplayName -string "Bashes" "$app_path/Contents/Info.plist"
           echo "path=$app_path" >> "$GITHUB_OUTPUT"
 
       - name: Sign macOS app
@@ -505,8 +515,9 @@ jobs:
           {
             printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
             printf '## RELEASE NOTES\n\n'
-            printf -- '- Removes duplicate success entries from the Bashes message log when SSH or local shell sessions start.\n'
-            printf -- '- Keeps connection progress messages in the frontend and successful session state messages from backend events.\n\n'
+            printf -- '- Moves Settings into a primary native application menu.\n'
+            printf -- '- Removes the Settings button from the workspace footer.\n'
+            printf -- '- Packages the macOS app bundle as Bashes.app so the Dock uses the capitalized app name.\n\n'
             printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
 

@@ -1656,6 +1656,10 @@ func (a *App) importHostsFileFromMenu() {
 	a.emitData("database:hosts-file-preview", result)
 }
 
+func (a *App) openSettingsFromMenu() {
+	a.emitData("app:settings", map[string]bool{"open": true})
+}
+
 func (a *App) showAboutFromMenu() {
 	a.emitData("app:about", a.GetAppInfo())
 }

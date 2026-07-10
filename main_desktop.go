@@ -67,6 +67,11 @@ func applicationMenu(app *App) *menu.Menu {
 		app.checkForUpdatesFromMenu()
 	})
 
+	settings := appMenu.AddSubmenu("Settings")
+	settings.AddText("Settings...", nil, func(_ *menu.CallbackData) {
+		app.openSettingsFromMenu()
+	})
+
 	if goruntime.GOOS == "darwin" {
 		appMenu.Append(menu.WindowMenu())
 	}
