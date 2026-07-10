@@ -125,7 +125,7 @@ func (a *App) StartFileTransfer(input SSHSessionInput) (FileTransferSessionInfo,
 
 	input = applyAuthPreference(resource, input)
 	dialInput := a.resolveSessionKeyPath(input)
-	client, err := dialResource(resource, dialInput, remotessh.DefaultTimeout)
+	client, err := a.dialResource(resource, dialInput, remotessh.DefaultTimeout)
 	if err != nil {
 		return FileTransferSessionInfo{}, err
 	}

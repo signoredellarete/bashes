@@ -28,24 +28,26 @@ type Store struct {
 }
 
 type Host struct {
-	ID         string     `json:"id"`
-	Hostname   string     `json:"hostname"`
-	IP         string     `json:"ip"`
-	Port       int        `json:"port"`
-	User       string     `json:"user"`
-	Auth       *Auth      `json:"auth,omitempty"`
-	Subsystems []Endpoint `json:"subsystems"`
+	ID                 string     `json:"id"`
+	Hostname           string     `json:"hostname"`
+	IP                 string     `json:"ip"`
+	Port               int        `json:"port"`
+	User               string     `json:"user"`
+	HostKeyFingerprint string     `json:"hostKeyFingerprint,omitempty"`
+	Auth               *Auth      `json:"auth,omitempty"`
+	Subsystems         []Endpoint `json:"subsystems"`
 }
 
 type Endpoint struct {
-	ID         string       `json:"id"`
-	Type       ResourceType `json:"type"`
-	Hostname   string       `json:"hostname"`
-	IP         string       `json:"ip"`
-	Port       int          `json:"port"`
-	User       string       `json:"user"`
-	Auth       *Auth        `json:"auth,omitempty"`
-	Subsystems []Endpoint   `json:"subsystems,omitempty"`
+	ID                 string       `json:"id"`
+	Type               ResourceType `json:"type"`
+	Hostname           string       `json:"hostname"`
+	IP                 string       `json:"ip"`
+	Port               int          `json:"port"`
+	User               string       `json:"user"`
+	HostKeyFingerprint string       `json:"hostKeyFingerprint,omitempty"`
+	Auth               *Auth        `json:"auth,omitempty"`
+	Subsystems         []Endpoint   `json:"subsystems,omitempty"`
 }
 
 type AuthMethod string
@@ -78,6 +80,9 @@ func (s Store) Validate() error {
 		if err := validateEndpointFields("host", host.ID, host.Hostname, host.IP, host.Port, host.User); err != nil {
 			return fmt.Errorf("hosts[%d]: %w", i, err)
 		}
+		if hasControl(host.HostKeyFingerprint) {
+			return fmt.Errorf("hosts[%d]: host key fingerprint contains control characters", i)
+		}
 		if err := validateAuth(host.Auth); err != nil {
 			return fmt.Errorf("hosts[%d].auth: %w", i, err)
 		}
@@ -102,6 +107,9 @@ func validateSubsystem(sub Endpoint, path string, seen map[string]struct{}) erro
 	}
 	if err := validateEndpointFields(string(sub.Type), sub.ID, sub.Hostname, sub.IP, sub.Port, sub.User); err != nil {
 		return fmt.Errorf("%s: %w", path, err)
+	}
+	if hasControl(sub.HostKeyFingerprint) {
+		return fmt.Errorf("%s: host key fingerprint contains control characters", path)
 	}
 	if err := validateAuth(sub.Auth); err != nil {
 		return fmt.Errorf("%s.auth: %w", path, err)

@@ -32,7 +32,7 @@
   let busy = false;
   let needsPassword = false;
   let password = '';
-  let trustHostKey = true;
+  let trustHostKey = trustHostKeyFromResource();
   let passwordInput = null;
   let dragging = false;
   let dragDepth = 0;
@@ -65,7 +65,7 @@
     try {
       session = await startFileTransfer({
         resourceId: resource.id,
-        trustHostKey: true,
+        trustHostKey: trustHostKeyFromResource(),
         ...authInput,
       });
       needsPassword = false;
@@ -77,6 +77,12 @@
       const message = String(err?.message ?? err);
       if (isAuthError(message)) {
         showPasswordPrompt(authInput.password ? 'Authentication failed. Check the password and try again.' : 'Enter the SSH password to open file transfer.');
+      } else if (isUnknownHostKeyError(message)) {
+        error = 'SSH host key is not trusted yet. Open a terminal or tunnel for this node first, verify the fingerprint, and trust the host key.';
+        status = 'Host key not trusted';
+      } else if (isHostKeyMismatchError(message)) {
+        error = 'SSH host key changed for this node. Check the server before connecting.';
+        status = 'Host key mismatch';
       } else {
         error = message;
         status = 'Connection failed';
@@ -129,6 +135,10 @@
     status = 'Password required';
     error = message;
     requestAnimationFrame(() => passwordInput?.focus());
+  }
+
+  function trustHostKeyFromResource() {
+    return Boolean(resource?.auth?.trustHostKey);
   }
 
   async function loadInitial() {
@@ -418,6 +428,14 @@
       normalized.includes('authentication') ||
       normalized.includes('no supported methods') ||
       normalized.includes('permission denied');
+  }
+
+  function isUnknownHostKeyError(message) {
+    return String(message ?? '').includes('BASHES_HOST_KEY_UNKNOWN');
+  }
+
+  function isHostKeyMismatchError(message) {
+    return String(message ?? '').includes('BASHES_HOST_KEY_MISMATCH');
   }
 
   function localIcon(file, size) {
@@ -781,7 +799,7 @@
       </label>
       <label class="transfer-auth-check">
         <input bind:checked={trustHostKey} type="checkbox" disabled={busy} />
-        <span>Trust host key for this transfer</span>
+        <span>Skip host key verification for this transfer (insecure)</span>
       </label>
       <button type="submit" disabled={busy}>{busy ? 'Connecting...' : 'Connect'}</button>
     </form>

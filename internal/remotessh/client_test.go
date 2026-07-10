@@ -2,9 +2,14 @@ package remotessh
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 func TestNewClientConfigAcceptsPasswordWithExplicitInsecurePolicy(t *testing.T) {
@@ -54,16 +59,16 @@ func TestNewClientConfigRejectsMissingAuth(t *testing.T) {
 	}
 }
 
-func TestNewClientConfigRejectsMissingHostKeyPolicy(t *testing.T) {
-	_, err := NewClientConfig(ClientOptions{
+func TestNewClientConfigAcceptsTOFUHostKeyPolicy(t *testing.T) {
+	config, err := NewClientConfig(ClientOptions{
 		Target:      Target{Host: "example.test", Port: 22, User: "admin"},
 		Credentials: Credentials{Password: "secret"},
 	})
-	if err == nil {
-		t.Fatal("NewClientConfig() error = nil, want error")
+	if err != nil {
+		t.Fatalf("NewClientConfig() error = %v", err)
 	}
-	if !strings.Contains(err.Error(), "host key policy") {
-		t.Fatalf("NewClientConfig() error = %v, want host key policy error", err)
+	if config.HostKeyCallback == nil {
+		t.Fatal("HostKeyCallback is nil")
 	}
 }
 
@@ -99,11 +104,67 @@ func TestHostKeyCallbackRejectsMissingKnownHosts(t *testing.T) {
 	}
 }
 
+func TestHostKeyCallbackReturnsUnknownHostKeyFingerprint(t *testing.T) {
+	key := testPublicKey(t)
+	callback, err := HostKeyCallback(HostKeyPolicy{})
+	if err != nil {
+		t.Fatalf("HostKeyCallback() error = %v", err)
+	}
+
+	err = callback("example.test:22", nil, key)
+	var unknown UnknownHostKeyError
+	if !errors.As(err, &unknown) {
+		t.Fatalf("HostKeyCallback() error = %T %[1]v, want UnknownHostKeyError", err)
+	}
+	if unknown.Fingerprint != ssh.FingerprintSHA256(key) {
+		t.Fatalf("Fingerprint = %q, want %q", unknown.Fingerprint, ssh.FingerprintSHA256(key))
+	}
+}
+
+func TestHostKeyCallbackAcceptsExpectedFingerprint(t *testing.T) {
+	key := testPublicKey(t)
+	callback, err := HostKeyCallback(HostKeyPolicy{ExpectedFingerprint: ssh.FingerprintSHA256(key)})
+	if err != nil {
+		t.Fatalf("HostKeyCallback() error = %v", err)
+	}
+	if err := callback("example.test:22", nil, key); err != nil {
+		t.Fatalf("HostKeyCallback() verify error = %v", err)
+	}
+}
+
+func TestHostKeyCallbackCapturesAcceptedFingerprint(t *testing.T) {
+	key := testPublicKey(t)
+	var accepted string
+	callback, err := HostKeyCallback(HostKeyPolicy{AcceptNewHostKey: true, AcceptedFingerprint: &accepted})
+	if err != nil {
+		t.Fatalf("HostKeyCallback() error = %v", err)
+	}
+	if err := callback("example.test:22", nil, key); err != nil {
+		t.Fatalf("HostKeyCallback() verify error = %v", err)
+	}
+	if accepted != ssh.FingerprintSHA256(key) {
+		t.Fatalf("accepted fingerprint = %q, want %q", accepted, ssh.FingerprintSHA256(key))
+	}
+}
+
 func TestAddressUsesHostPortFormatting(t *testing.T) {
 	got := Address(Target{Host: "2001:db8::1", Port: 2222})
 	if got != "[2001:db8::1]:2222" {
 		t.Fatalf("Address() = %q, want bracketed IPv6 hostport", got)
 	}
+}
+
+func testPublicKey(t *testing.T) ssh.PublicKey {
+	t.Helper()
+	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey() error = %v", err)
+	}
+	key, err := ssh.NewPublicKey(publicKey)
+	if err != nil {
+		t.Fatalf("NewPublicKey() error = %v", err)
+	}
+	return key
 }
 
 func TestDialHonorsCanceledContext(t *testing.T) {

@@ -100,6 +100,31 @@ func TestAuthMethodsRejectsUnresolvedKeyName(t *testing.T) {
 	}
 }
 
+func TestHostKeyPolicyUsesSavedFingerprint(t *testing.T) {
+	var accepted string
+	policy := hostKeyPolicy(domain.Endpoint{HostKeyFingerprint: "SHA256:known"}, SSHSessionInput{}, &accepted)
+	if policy.InsecureIgnoreHostKey {
+		t.Fatal("InsecureIgnoreHostKey = true, want fingerprint verification")
+	}
+	if policy.ExpectedFingerprint != "SHA256:known" {
+		t.Fatalf("ExpectedFingerprint = %q, want saved fingerprint", policy.ExpectedFingerprint)
+	}
+	if policy.AcceptNewHostKey {
+		t.Fatal("AcceptNewHostKey = true, want false")
+	}
+}
+
+func TestHostKeyPolicyAcceptsNewKeyWhenRequested(t *testing.T) {
+	var accepted string
+	policy := hostKeyPolicy(domain.Endpoint{}, SSHSessionInput{AcceptHostKey: true}, &accepted)
+	if !policy.AcceptNewHostKey {
+		t.Fatal("AcceptNewHostKey = false, want true")
+	}
+	if policy.AcceptedFingerprint == nil {
+		t.Fatal("AcceptedFingerprint = nil")
+	}
+}
+
 func TestGenerateSSHKeyUsesNextDefaultName(t *testing.T) {
 	app := NewApp(filepath.Join(t.TempDir(), "data", "hosts.json"))
 

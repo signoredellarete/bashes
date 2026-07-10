@@ -213,7 +213,7 @@ app.innerHTML = `
       </label>
       <label class="checkbox-row">
         <input name="trustHostKey" type="checkbox" />
-        <span>Trust host key for this session</span>
+        <span>Skip host key verification for this session (insecure)</span>
       </label>
 
       <footer class="panel-actions">
@@ -287,7 +287,7 @@ app.innerHTML = `
       </label>
       <label class="checkbox-row">
         <input name="trustHostKey" type="checkbox" />
-        <span>Trust host key for this tunnel</span>
+        <span>Skip host key verification for this tunnel (insecure)</span>
       </label>
 
       <footer class="panel-actions">
@@ -362,7 +362,7 @@ app.innerHTML = `
         </label>
         <label class="checkbox-row">
           <input name="trustHostKey" type="checkbox" />
-          <span>Trust host key for this install</span>
+          <span>Skip host key verification for this install (insecure)</span>
         </label>
         <button type="submit">Install On Selected</button>
       </form>
@@ -626,14 +626,14 @@ async function submitConnect(event) {
     setConnectStatus('', '');
     writeNotice(`Connecting to ${target} ...`);
     try {
-      const sessionID = await apiStartSSHSession({
+      const sessionID = await startSSHSessionWithHostKeyPrompt({
         resourceId: selected.id,
         ...auth,
         password: form.elements.password.value,
         trustHostKey: form.elements.trustHostKey.checked,
         cols: 120,
         rows: 32,
-      });
+      }, selected, 'Trust and connect');
       createSession(sessionID, selected);
       closeConnectPanel();
       await refreshHosts();
@@ -663,21 +663,26 @@ async function submitTunnel(event) {
   const form = event.currentTarget;
   await withBusy(async () => {
     const auth = authInputFromForm(form);
-    const tunnel = await apiStartSSHTunnel({
-      resourceId: selected.id,
-      type: form.elements.type.value,
-      localHost: form.elements.localHost.value.trim(),
-      localPort: Number.parseInt(form.elements.localPort.value, 10),
-      remoteHost: form.elements.remoteHost.value.trim(),
-      remotePort: Number.parseInt(form.elements.remotePort.value, 10),
-      ...auth,
-      password: form.elements.password.value,
-      trustHostKey: form.elements.trustHostKey.checked,
-    });
-    state.tunnels.set(tunnel.tunnelId, tunnel);
-    renderHosts(searchInput.value);
-    renderTunnelStatus();
-    writeNotice(`${tunnelLabel(tunnel.type)} active on ${tunnel.localAddress}.`);
+    try {
+      const tunnel = await startSSHTunnelWithHostKeyPrompt({
+        resourceId: selected.id,
+        type: form.elements.type.value,
+        localHost: form.elements.localHost.value.trim(),
+        localPort: Number.parseInt(form.elements.localPort.value, 10),
+        remoteHost: form.elements.remoteHost.value.trim(),
+        remotePort: Number.parseInt(form.elements.remotePort.value, 10),
+        ...auth,
+        password: form.elements.password.value,
+        trustHostKey: form.elements.trustHostKey.checked,
+      }, selected);
+      state.tunnels.set(tunnel.tunnelId, tunnel);
+      await refreshHosts();
+      renderHosts(searchInput.value);
+      renderTunnelStatus();
+      writeNotice(`${tunnelLabel(tunnel.type)} active on ${tunnel.localAddress}.`);
+    } catch (error) {
+      writeNotice(connectErrorMessage(error, selected));
+    }
   });
 }
 
@@ -696,13 +701,13 @@ async function quickConnect(resource) {
       }
 
       writeNotice(`Connecting to ${resource.user}@${resource.ip || resource.hostname}:${resource.port} ...`);
-      const sessionID = await apiStartSSHSession({
+      const sessionID = await startSSHSessionWithHostKeyPrompt({
         resourceId: resource.id,
         ...authInputFromPreference(resource),
         trustHostKey: trustHostKeyFromPreference(resource),
         cols: 120,
         rows: 32,
-      });
+      }, resource, 'Trust and connect');
       createSession(sessionID, resource);
       await refreshHosts();
       resizeActiveSession();
@@ -780,12 +785,12 @@ async function submitInstallKey(event) {
   setKeyInstallStatus(`Installing key ${keyLabel} on ${selected.hostname} ...`, 'pending');
   await withBusy(async () => {
     try {
-      await apiInstallSSHKey({
+      await installSSHKeyWithHostKeyPrompt({
         resourceId: selected.id,
         ...installInputFromKeyChoice(keyChoice),
         password: form.elements.password.value,
         trustHostKey: form.elements.trustHostKey.checked,
-      });
+      }, selected);
       form.reset();
       form.elements.trustHostKey.checked = trustHostKeyFromPreference(selected);
       await refreshHosts();
@@ -2254,17 +2259,74 @@ function setConnectStatus(message, kind) {
   status.dataset.kind = kind;
 }
 
+async function startSSHSessionWithHostKeyPrompt(input, resource, confirmLabel = 'Trust and continue') {
+  try {
+    return await apiStartSSHSession(input);
+  } catch (error) {
+    if (input.acceptHostKey) throw error;
+    if (!(await confirmUnknownHostKey(error, resource, confirmLabel))) throw error;
+    return await apiStartSSHSession({ ...input, acceptHostKey: true });
+  }
+}
+
+async function startSSHTunnelWithHostKeyPrompt(input, resource) {
+  try {
+    return await apiStartSSHTunnel(input);
+  } catch (error) {
+    if (input.acceptHostKey) throw error;
+    if (!(await confirmUnknownHostKey(error, resource, 'Trust and start tunnel'))) throw error;
+    return await apiStartSSHTunnel({ ...input, acceptHostKey: true });
+  }
+}
+
+async function installSSHKeyWithHostKeyPrompt(input, resource) {
+  try {
+    return await apiInstallSSHKey(input);
+  } catch (error) {
+    if (input.acceptHostKey) throw error;
+    if (!(await confirmUnknownHostKey(error, resource, 'Trust and install key'))) throw error;
+    return await apiInstallSSHKey({ ...input, acceptHostKey: true });
+  }
+}
+
+async function confirmUnknownHostKey(error, resource, confirmLabel) {
+  const hostKey = parseUnknownHostKeyError(error);
+  if (!hostKey) return false;
+  const target = `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`;
+  return await openConfirmModal({
+    kicker: 'SSH Host Key',
+    title: `Trust ${resource.hostname}?`,
+    message: `Bashes has not seen this SSH server key before.\n\nTarget: ${target}\nServer: ${hostKey.host}\nFingerprint: ${hostKey.fingerprint}\n\nContinue only if this fingerprint matches the expected server.`,
+    confirmLabel,
+  });
+}
+
+function parseUnknownHostKeyError(error) {
+  const detail = String(error?.message ?? error ?? '');
+  const match = detail.match(/BASHES_HOST_KEY_UNKNOWN\s+resource=\S+\s+host=(\S+)\s+fingerprint=(SHA256:\S+)/);
+  if (!match) return null;
+  return { host: match[1], fingerprint: match[2] };
+}
+
 function connectErrorMessage(error, resource) {
   const detail = String(error?.message ?? error ?? '').trim();
   if (isLocalResource(resource)) {
     return `Could not start local shell: ${detail || 'unknown error'}`;
   }
   const target = `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`;
+  const unknownHostKey = parseUnknownHostKeyError(error);
+  if (unknownHostKey) {
+    return `Could not verify ${target}: SSH host key was not trusted.`;
+  }
+  const mismatch = parseHostKeyMismatchError(error);
+  if (mismatch) {
+    return `Could not verify ${target}: SSH host key changed. Expected ${mismatch.expected}, got ${mismatch.actual}.`;
+  }
   if (isAuthError(error)) {
     return `Could not authenticate to ${target}. Enter the remote password or configure a valid SSH key.`;
   }
   if (/host key|knownhosts|known host/i.test(detail)) {
-    return `Could not verify ${target}. Enable "Trust host key for this session" if this is the expected server.`;
+    return `Could not verify ${target}. Use "Skip host key verification" only if you accept the security risk.`;
   }
   if (/timeout|deadline|i\/o timeout|operation timed out|context canceled|context deadline exceeded/i.test(detail)) {
     return `Could not connect to ${target}: connection timed out.`;
@@ -2278,6 +2340,13 @@ function connectErrorMessage(error, resource) {
   return `Could not connect to ${target}: ${detail || 'unknown error'}`;
 }
 
+function parseHostKeyMismatchError(error) {
+  const detail = String(error?.message ?? error ?? '');
+  const match = detail.match(/BASHES_HOST_KEY_MISMATCH\s+resource=\S+\s+host=\S+\s+expected=(SHA256:\S+)\s+actual=(SHA256:\S+)/);
+  if (!match) return null;
+  return { expected: match[1], actual: match[2] };
+}
+
 function isAuthError(error) {
   const detail = String(error?.message ?? error ?? '');
   return /unable to authenticate|no supported methods|no SSH authentication method|handshake failed|permission denied/i.test(detail);
@@ -2286,11 +2355,19 @@ function isAuthError(error) {
 function keyInstallErrorMessage(error, resource) {
   const detail = String(error?.message ?? error ?? '').trim();
   const target = `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`;
+  const unknownHostKey = parseUnknownHostKeyError(error);
+  if (unknownHostKey) {
+    return `Could not verify ${target}: SSH host key was not trusted.`;
+  }
+  const mismatch = parseHostKeyMismatchError(error);
+  if (mismatch) {
+    return `Could not verify ${target}: SSH host key changed. Expected ${mismatch.expected}, got ${mismatch.actual}.`;
+  }
   if (isAuthError(error)) {
     return `Could not connect to ${target} to install the SSH key. Enter the remote password or configure a valid existing key.`;
   }
   if (/host key|knownhosts|known host/i.test(detail)) {
-    return `Could not verify ${target}. Enable "Trust host key for this install" if this is the expected server.`;
+    return `Could not verify ${target}. Use "Skip host key verification" only if you accept the security risk.`;
   }
   if (/timeout|deadline|i\/o timeout/i.test(detail)) {
     return `Could not reach ${target} to install the SSH key: connection timed out.`;

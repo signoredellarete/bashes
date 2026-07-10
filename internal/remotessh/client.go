@@ -31,6 +31,9 @@ type Credentials struct {
 type HostKeyPolicy struct {
 	KnownHostsPath        string
 	InsecureIgnoreHostKey bool
+	ExpectedFingerprint   string
+	AcceptNewHostKey      bool
+	AcceptedFingerprint   *string
 }
 
 type TerminalSize struct {
@@ -138,19 +141,79 @@ func AuthMethods(credentials Credentials) ([]ssh.AuthMethod, error) {
 }
 
 func HostKeyCallback(policy HostKeyPolicy) (ssh.HostKeyCallback, error) {
+	if policy.InsecureIgnoreHostKey {
+		return ssh.InsecureIgnoreHostKey(), nil
+	}
+
+	var knownHostsCallback ssh.HostKeyCallback
 	if policy.KnownHostsPath != "" {
 		callback, err := knownhosts.New(policy.KnownHostsPath)
 		if err != nil {
 			return nil, fmt.Errorf("load known_hosts: %w", err)
 		}
-		return callback, nil
+		knownHostsCallback = callback
 	}
 
-	if policy.InsecureIgnoreHostKey {
-		return ssh.InsecureIgnoreHostKey(), nil
-	}
+	expectedFingerprint := strings.TrimSpace(policy.ExpectedFingerprint)
+	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		fingerprint := ssh.FingerprintSHA256(key)
+		if expectedFingerprint != "" {
+			if fingerprint == expectedFingerprint {
+				return nil
+			}
+			return HostKeyMismatchError{
+				Host:                hostname,
+				ExpectedFingerprint: expectedFingerprint,
+				ActualFingerprint:   fingerprint,
+			}
+		}
 
-	return nil, errors.New("ssh host key policy is required")
+		if knownHostsCallback != nil {
+			err := knownHostsCallback(hostname, remote, key)
+			if err == nil {
+				return nil
+			}
+			if !isUnknownHostKey(err) {
+				return err
+			}
+		}
+
+		if policy.AcceptNewHostKey {
+			if policy.AcceptedFingerprint != nil {
+				*policy.AcceptedFingerprint = fingerprint
+			}
+			return nil
+		}
+
+		return UnknownHostKeyError{Host: hostname, Fingerprint: fingerprint}
+	}, nil
+}
+
+type UnknownHostKeyError struct {
+	Host        string
+	Fingerprint string
+}
+
+func (e UnknownHostKeyError) Error() string {
+	return fmt.Sprintf("unknown host key for %s: %s", e.Host, e.Fingerprint)
+}
+
+type HostKeyMismatchError struct {
+	Host                string
+	ExpectedFingerprint string
+	ActualFingerprint   string
+}
+
+func (e HostKeyMismatchError) Error() string {
+	return fmt.Sprintf("host key mismatch for %s: expected %s, got %s", e.Host, e.ExpectedFingerprint, e.ActualFingerprint)
+}
+
+func isUnknownHostKey(err error) bool {
+	var keyErr *knownhosts.KeyError
+	if errors.As(err, &keyErr) {
+		return len(keyErr.Want) == 0
+	}
+	return false
 }
 
 func Address(target Target) string {

@@ -230,6 +230,39 @@ func (s *Service) SetResourceAuth(id string, auth domain.Auth) error {
 	return fmt.Errorf("resource %q not found", id)
 }
 
+func (s *Service) SetResourceHostKeyFingerprint(id string, fingerprint string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("resource id is required")
+	}
+	fingerprint = strings.TrimSpace(fingerprint)
+	if fingerprint == "" {
+		return errors.New("host key fingerprint is required")
+	}
+	if hasControl(fingerprint) {
+		return errors.New("host key fingerprint contains control characters")
+	}
+
+	data, err := s.store.Load()
+	if err != nil {
+		return err
+	}
+
+	for i := range data.Hosts {
+		if data.Hosts[i].ID == id {
+			data.Hosts[i].HostKeyFingerprint = fingerprint
+			return s.store.Save(data)
+		}
+	}
+
+	if subsystem := findSubsystemByID(data.Hosts, id); subsystem != nil {
+		subsystem.HostKeyFingerprint = fingerprint
+		return s.store.Save(data)
+	}
+
+	return fmt.Errorf("resource %q not found", id)
+}
+
 func findSubsystemParent(hosts []domain.Host, parentID string) (*[]domain.Endpoint, []int) {
 	for i := range hosts {
 		if hosts[i].ID == parentID {
@@ -312,4 +345,10 @@ func normalizeAuth(auth domain.Auth) (domain.Auth, error) {
 		auth.PrivateKeyPath = ""
 	}
 	return auth, nil
+}
+
+func hasControl(value string) bool {
+	return strings.ContainsFunc(value, func(r rune) bool {
+		return r < 0x20 || r == 0x7f
+	})
 }

@@ -392,6 +392,12 @@ func TestServiceSetsResourceAuth(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetResourceAuth(subsystem) error = %v", err)
 	}
+	if err := service.SetResourceHostKeyFingerprint(host.ID, " SHA256:hostfingerprint "); err != nil {
+		t.Fatalf("SetResourceHostKeyFingerprint(host) error = %v", err)
+	}
+	if err := service.SetResourceHostKeyFingerprint(subsystem.ID, "SHA256:subfingerprint"); err != nil {
+		t.Fatalf("SetResourceHostKeyFingerprint(subsystem) error = %v", err)
+	}
 
 	hosts, err := service.ListHosts()
 	if err != nil {
@@ -400,8 +406,14 @@ func TestServiceSetsResourceAuth(t *testing.T) {
 	if hosts[0].Auth == nil || hosts[0].Auth.Method != domain.AuthMethodKey || hosts[0].Auth.KeyName != "bashes-main" {
 		t.Fatalf("Host auth was not saved: %+v", hosts[0].Auth)
 	}
+	if hosts[0].HostKeyFingerprint != "SHA256:hostfingerprint" {
+		t.Fatalf("HostKeyFingerprint = %q", hosts[0].HostKeyFingerprint)
+	}
 	if hosts[0].Subsystems[0].Auth == nil || hosts[0].Subsystems[0].Auth.Method != domain.AuthMethodPath || hosts[0].Subsystems[0].Auth.PrivateKeyPath != "~/.ssh/custom" {
 		t.Fatalf("Subsystem auth was not saved: %+v", hosts[0].Subsystems[0].Auth)
+	}
+	if hosts[0].Subsystems[0].HostKeyFingerprint != "SHA256:subfingerprint" {
+		t.Fatalf("Subsystem HostKeyFingerprint = %q", hosts[0].Subsystems[0].HostKeyFingerprint)
 	}
 }
 

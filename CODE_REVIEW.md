@@ -11,7 +11,7 @@ Il documento è organizzato per priorità. Ogni voce indica: dove sta il problem
 
 | # | Problema | Tipo | Priorità | Fix |
 |---|----------|------|----------|-----|
-| 2.1 | La verifica della chiave host del server è di fatto disattivata | Sicurezza | Alta | Parziale |
+| 2.1 | La verifica della chiave host del server è di fatto disattivata | Sicurezza | Alta | Fatto |
 | 2.2 | Copia di una cartella dentro sé stessa causa un ciclo infinito | Bug | Alta | Da fare |
 | 2.3 | Caratteri accentati/Unicode possono arrivare corrotti nel terminale | Bug | Alta | Da fare |
 | 2.4 | Scritture concorrenti su hosts.json possono perdere dati | Bug | Alta | Da fare |
@@ -36,7 +36,9 @@ Il documento è organizzato per priorità. Ogni voce indica: dove sta il problem
 
 **Dove:** `frontend/src/main.js` (funzione `quickConnect`, riga ~545, e i form Connect/Tunnel/Keys con la checkbox `trustHostKey` spuntata di default), `app.go` funzione `hostKeyPolicy` (riga ~950), `internal/remotessh/client.go` funzione `HostKeyCallback`.
 
-**Problema:** il doppio click su un host chiama `quickConnect` che passa sempre `trustHostKey: true`, e in tutti i form la checkbox "Trust host key" è spuntata di default. `trustHostKey: true` si traduce in `ssh.InsecureIgnoreHostKey()`: il client accetta qualunque server senza verificarne l'identità. In pratica l'app non protegge mai dall'attacco "man in the middle", che è esattamente ciò che la verifica della chiave host previene. Inoltre, se l'utente toglie la spunta, il comportamento è pessimo: se l'host non è nel file `known_hosts` la connessione fallisce con un errore tecnico incomprensibile, e se `known_hosts` non esiste l'errore è "ssh host key policy is required".
+**Stato fix:** risolto. Il quick connect non forza più `trustHostKey`, le checkbox non sono più attive di default e sono etichettate come bypass insicuro. Il backend usa TOFU: alla prima chiave host sconosciuta restituisce la fingerprint SHA256, il frontend chiede conferma, e solo dopo conferma ripete l'operazione con `acceptHostKey` e salva `hostKeyFingerprint` nel JSON del nodo. Alle connessioni successive la fingerprint salvata viene verificata e un cambio chiave produce errore esplicito.
+
+**Problema originale:** il doppio click su un host chiamava `quickConnect` passando sempre `trustHostKey: true`, e in tutti i form la checkbox "Trust host key" era spuntata di default. `trustHostKey: true` si traduce in `ssh.InsecureIgnoreHostKey()`: il client accetta qualunque server senza verificarne l'identità. In pratica l'app non proteggeva mai dall'attacco "man in the middle", che è esattamente ciò che la verifica della chiave host previene. Inoltre, se l'utente toglieva la spunta, il comportamento era pessimo: se l'host non era nel file `known_hosts` la connessione falliva con un errore tecnico incomprensibile, e se `known_hosts` non esisteva l'errore era "ssh host key policy is required".
 
 **Come correggere (istruzioni per l'agente):**
 1. Aggiungere al modello dati (`internal/domain/model.go`) un campo per memorizzare l'impronta della chiave host, ad esempio `HostKeyFingerprint string` dentro `Auth` o direttamente su `Host`/`Endpoint`.

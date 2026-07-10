@@ -200,6 +200,7 @@ type InstallSSHKeyInput struct {
 	PrivateKeyPath       string `json:"privateKeyPath,omitempty"`
 	PrivateKeyPassphrase string `json:"privateKeyPassphrase,omitempty"`
 	TrustHostKey         bool   `json:"trustHostKey"`
+	AcceptHostKey        bool   `json:"acceptHostKey,omitempty"`
 }
 
 type AppInfo struct {
@@ -885,11 +886,12 @@ func (a *App) InstallSSHKey(input InstallSSHKeyInput) error {
 		return err
 	}
 
-	client, err := dialResource(resource, SSHSessionInput{
+	client, err := a.dialResource(resource, SSHSessionInput{
 		Password:             input.Password,
 		PrivateKeyPath:       input.PrivateKeyPath,
 		PrivateKeyPassphrase: input.PrivateKeyPassphrase,
 		TrustHostKey:         input.TrustHostKey,
+		AcceptHostKey:        input.AcceptHostKey,
 	}, remotessh.DefaultTimeout)
 	if err != nil {
 		return err
@@ -946,6 +948,7 @@ type SSHSessionInput struct {
 	KeyName              string `json:"keyName,omitempty"`
 	PrivateKeyPassphrase string `json:"privateKeyPassphrase,omitempty"`
 	TrustHostKey         bool   `json:"trustHostKey"`
+	AcceptHostKey        bool   `json:"acceptHostKey,omitempty"`
 	Cols                 int    `json:"cols"`
 	Rows                 int    `json:"rows"`
 }
@@ -962,6 +965,7 @@ type SSHTunnelInput struct {
 	KeyName              string `json:"keyName,omitempty"`
 	PrivateKeyPassphrase string `json:"privateKeyPassphrase,omitempty"`
 	TrustHostKey         bool   `json:"trustHostKey"`
+	AcceptHostKey        bool   `json:"acceptHostKey,omitempty"`
 }
 
 type SSHTunnelInfo struct {
@@ -1018,7 +1022,7 @@ func (a *App) StartSSHSession(input SSHSessionInput) (string, error) {
 	input = applyAuthPreference(resource, input)
 	dialInput := a.resolveSessionKeyPath(input)
 
-	client, err := dialResource(resource, dialInput, remotessh.DefaultTimeout)
+	client, err := a.dialResource(resource, dialInput, remotessh.DefaultTimeout)
 	if err != nil {
 		return "", err
 	}
@@ -1131,11 +1135,12 @@ func (a *App) StartSSHTunnel(input SSHTunnelInput) (SSHTunnelInfo, error) {
 		KeyName:              input.KeyName,
 		PrivateKeyPassphrase: input.PrivateKeyPassphrase,
 		TrustHostKey:         input.TrustHostKey,
+		AcceptHostKey:        input.AcceptHostKey,
 	}
 	sessionInput = applyAuthPreference(resource, sessionInput)
 	dialInput := a.resolveSessionKeyPath(sessionInput)
 
-	client, err := dialResource(resource, dialInput, remotessh.DefaultTimeout)
+	client, err := a.dialResource(resource, dialInput, remotessh.DefaultTimeout)
 	if err != nil {
 		return SSHTunnelInfo{}, err
 	}
@@ -1522,13 +1527,14 @@ func (a *App) resourceByID(id string) (domain.Endpoint, error) {
 	for _, host := range hosts {
 		if host.ID == id {
 			return domain.Endpoint{
-				ID:       host.ID,
-				Type:     domain.ResourceHost,
-				Hostname: host.Hostname,
-				IP:       host.IP,
-				Port:     host.Port,
-				User:     host.User,
-				Auth:     host.Auth,
+				ID:                 host.ID,
+				Type:               domain.ResourceHost,
+				Hostname:           host.Hostname,
+				IP:                 host.IP,
+				Port:               host.Port,
+				User:               host.User,
+				HostKeyFingerprint: host.HostKeyFingerprint,
+				Auth:               host.Auth,
 			}, nil
 		}
 		if subsystem, ok := nestedResourceByID(host.Subsystems, id); ok {
@@ -1799,7 +1805,7 @@ func tunnelForwardTarget(input SSHTunnelInput, forwardAddress string) string {
 	}
 }
 
-func dialResource(resource domain.Endpoint, input SSHSessionInput, timeout time.Duration) (*ssh.Client, error) {
+func (a *App) dialResource(resource domain.Endpoint, input SSHSessionInput, timeout time.Duration) (*ssh.Client, error) {
 	authMethods, agentConn, err := authMethods(input)
 	if err != nil {
 		return nil, err
@@ -1811,7 +1817,8 @@ func dialResource(resource domain.Endpoint, input SSHSessionInput, timeout time.
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	return remotessh.Dial(ctx, remotessh.ClientOptions{
+	var acceptedFingerprint string
+	client, err := remotessh.Dial(ctx, remotessh.ClientOptions{
 		Target: remotessh.Target{
 			Host: sshHost(resource),
 			Port: resource.Port,
@@ -1821,8 +1828,18 @@ func dialResource(resource domain.Endpoint, input SSHSessionInput, timeout time.
 			Password:    input.Password,
 			AuthMethods: authMethods,
 		},
-		HostKeyPolicy: hostKeyPolicy(input.TrustHostKey),
+		HostKeyPolicy: hostKeyPolicy(resource, input, &acceptedFingerprint),
 	})
+	if err != nil {
+		return nil, hostKeyError(err, resource)
+	}
+	if acceptedFingerprint != "" {
+		if err := a.service.SetResourceHostKeyFingerprint(resource.ID, acceptedFingerprint); err != nil {
+			client.Close()
+			return nil, fmt.Errorf("save host key fingerprint: %w", err)
+		}
+	}
+	return client, nil
 }
 
 func sshHost(resource domain.Endpoint) string {
@@ -1970,17 +1987,38 @@ func sshAgentAuthMethod() (ssh.AuthMethod, net.Conn) {
 	return ssh.PublicKeysCallback(agent.NewClient(conn).Signers), conn
 }
 
-func hostKeyPolicy(trustHostKey bool) remotessh.HostKeyPolicy {
-	if trustHostKey {
+func hostKeyPolicy(resource domain.Endpoint, input SSHSessionInput, acceptedFingerprint *string) remotessh.HostKeyPolicy {
+	if input.TrustHostKey {
 		return remotessh.HostKeyPolicy{InsecureIgnoreHostKey: true}
 	}
 
+	policy := remotessh.HostKeyPolicy{
+		ExpectedFingerprint: strings.TrimSpace(resource.HostKeyFingerprint),
+		AcceptNewHostKey:    input.AcceptHostKey,
+		AcceptedFingerprint: acceptedFingerprint,
+	}
 	knownHosts := filepath.Join(userHomeDir(), ".ssh", "known_hosts")
 	if _, err := os.Stat(knownHosts); err == nil {
-		return remotessh.HostKeyPolicy{KnownHostsPath: knownHosts}
+		policy.KnownHostsPath = knownHosts
+	}
+	return policy
+}
+
+func hostKeyError(err error, resource domain.Endpoint) error {
+	var unknown remotessh.UnknownHostKeyError
+	if errors.As(err, &unknown) {
+		host := unknown.Host
+		if strings.TrimSpace(host) == "" {
+			host = net.JoinHostPort(sshHost(resource), strconv.Itoa(resource.Port))
+		}
+		return fmt.Errorf("BASHES_HOST_KEY_UNKNOWN resource=%s host=%s fingerprint=%s", resource.ID, host, unknown.Fingerprint)
 	}
 
-	return remotessh.HostKeyPolicy{}
+	var mismatch remotessh.HostKeyMismatchError
+	if errors.As(err, &mismatch) {
+		return fmt.Errorf("BASHES_HOST_KEY_MISMATCH resource=%s host=%s expected=%s actual=%s", resource.ID, mismatch.Host, mismatch.ExpectedFingerprint, mismatch.ActualFingerprint)
+	}
+	return err
 }
 
 func appVersion() string {
