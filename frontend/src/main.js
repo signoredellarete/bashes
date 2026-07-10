@@ -212,7 +212,7 @@ app.innerHTML = `
         <input name="privateKeyPassphrase" type="password" autocomplete="off" />
       </label>
       <label class="checkbox-row">
-        <input name="trustHostKey" type="checkbox" checked />
+        <input name="trustHostKey" type="checkbox" />
         <span>Trust host key for this session</span>
       </label>
 
@@ -286,7 +286,7 @@ app.innerHTML = `
         <input name="privateKeyPassphrase" type="password" autocomplete="off" />
       </label>
       <label class="checkbox-row">
-        <input name="trustHostKey" type="checkbox" checked />
+        <input name="trustHostKey" type="checkbox" />
         <span>Trust host key for this tunnel</span>
       </label>
 
@@ -361,7 +361,7 @@ app.innerHTML = `
           <input name="password" type="password" autocomplete="current-password" />
         </label>
         <label class="checkbox-row">
-          <input name="trustHostKey" type="checkbox" checked />
+          <input name="trustHostKey" type="checkbox" />
           <span>Trust host key for this install</span>
         </label>
         <button type="submit">Install On Selected</button>
@@ -699,7 +699,7 @@ async function quickConnect(resource) {
       const sessionID = await apiStartSSHSession({
         resourceId: resource.id,
         ...authInputFromPreference(resource),
-        trustHostKey: true,
+        trustHostKey: trustHostKeyFromPreference(resource),
         cols: 120,
         rows: 32,
       });
@@ -787,7 +787,7 @@ async function submitInstallKey(event) {
         trustHostKey: form.elements.trustHostKey.checked,
       });
       form.reset();
-      form.elements.trustHostKey.checked = true;
+      form.elements.trustHostKey.checked = trustHostKeyFromPreference(selected);
       await refreshHosts();
       setKeyInstallStatus(`Installed key ${keyLabel} on ${selected.hostname}.`, 'success');
       writeNotice(`Installed key ${keyLabel} on ${selected.hostname}.`);
@@ -1622,7 +1622,7 @@ async function openConnectPanel(statusMessage = '', statusKind = '') {
   const panel = document.querySelector('#connect-panel');
   const form = document.querySelector('#connect-form');
   form.reset();
-  form.elements.trustHostKey.checked = true;
+  form.elements.trustHostKey.checked = trustHostKeyFromPreference(selected);
   renderKeyOptions(form.elements.keyName, true);
   applyConnectDefaults(form, selected);
   const realSessionCount = realSessionsForResource(selected.id).length;
@@ -1667,7 +1667,7 @@ async function openTunnelPanel() {
   form.elements.localPort.value = '1080';
   form.elements.remoteHost.value = '127.0.0.1';
   form.elements.remotePort.value = '80';
-  form.elements.trustHostKey.checked = true;
+  form.elements.trustHostKey.checked = trustHostKeyFromPreference(selected);
   renderKeyOptions(form.elements.keyName, true);
   applyConnectDefaults(form, selected);
   updateTunnelMode();
@@ -1755,6 +1755,7 @@ async function openKeysPanel() {
   setKeyDirectoryStatus('', '');
   setKeyInstallStatus('', '');
   renderKeyInstallSummary();
+  document.querySelector('#key-install-form').elements.trustHostKey.checked = trustHostKeyFromPreference(selected);
   const panel = document.querySelector('#keys-panel');
   panel.hidden = false;
   requestAnimationFrame(() => panel.classList.add('open'));
@@ -2183,6 +2184,10 @@ function authInputFromPreference(resource) {
     return { privateKeyPath: auth.privateKeyPath };
   }
   return {};
+}
+
+function trustHostKeyFromPreference(resource) {
+  return Boolean(resource?.auth?.trustHostKey);
 }
 
 async function renderSelectedPublicKey() {
