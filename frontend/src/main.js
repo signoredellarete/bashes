@@ -40,6 +40,7 @@ const state = {
   draggedSessionId: null,
   lastSessionByResource: new Map(),
   sessionFocusHistory: [],
+  messageLog: [],
   sessions: new Map(),
   pendingSSHOutput: new Map(),
   fileTransferWorkspaces: new Map(),
@@ -124,6 +125,7 @@ app.innerHTML = `
 
     <footer class="workspace-footer">
       <p id="app-status" class="app-status" aria-live="polite"></p>
+      <button id="message-log-button" class="status-log-button" type="button" title="Show message log">Log</button>
       <div class="terminal-font-controls" aria-label="Terminal font size">
         <button id="decrease-terminal-font" type="button" title="Decrease terminal font size">-</button>
         <span aria-hidden="true">A</span>
@@ -131,6 +133,8 @@ app.innerHTML = `
       </div>
     </footer>
   </main>
+
+  <div id="toast-stack" class="toast-stack" aria-live="polite" aria-relevant="additions"></div>
 
   <section id="resource-panel" class="slide-panel" hidden>
     <div class="panel-scrim" data-close-panel></div>
@@ -447,6 +451,7 @@ document.querySelector('#header-add-subsystem').addEventListener('click', () => 
 document.querySelector('#connect').addEventListener('click', () => openConnectPanel());
 document.querySelector('#disconnect').addEventListener('click', () => disconnectActiveSession());
 document.querySelector('#delete-resource').addEventListener('click', () => deleteSelectedResource());
+document.querySelector('#message-log-button').addEventListener('click', () => showMessageLog());
 document.querySelector('#decrease-terminal-font').addEventListener('click', () => adjustTerminalFontSize(-1));
 document.querySelector('#increase-terminal-font').addEventListener('click', () => adjustTerminalFontSize(1));
 document.querySelector('#resource-form').addEventListener('submit', (event) => submitResource(event));
@@ -722,7 +727,12 @@ async function quickConnect(resource) {
         if (pending) removeSessionFromUI(pending.id);
         return;
       }
-      await openConnectPanel(message, 'error');
+      if (isAuthError(error)) {
+        await openConnectPanel(message, 'error');
+      } else {
+        const pending = pendingSessionForResource(resource.id);
+        if (pending) removeSessionFromUI(pending.id);
+      }
     }
   });
 }
@@ -2575,17 +2585,19 @@ function lastFocusedSessionID() {
 }
 
 async function withBusy(task) {
-  if (state.busy) return;
+  if (state.busy) {
+    writeNotice('Operation in progress, please wait.', 'warning');
+    return;
+  }
 
   state.busy = true;
-  setDisabledState(true);
+  renderSelection();
   try {
     await task();
   } catch (error) {
-    writeNotice(`Error: ${error?.message ?? error}`);
+    writeNotice(`Error: ${error?.message ?? error}`, 'error');
   } finally {
     state.busy = false;
-    setDisabledState(false);
     renderSelection();
   }
 }
@@ -2614,12 +2626,6 @@ async function runAutomaticUpdateCheck() {
   } catch {
     // Keep update failures silent and retry at the next scheduled check.
   }
-}
-
-function setDisabledState(disabled) {
-  document.querySelectorAll('button, input, select, textarea').forEach((element) => {
-    element.disabled = disabled;
-  });
 }
 
 function adjustTerminalFontSize(delta) {
@@ -2658,12 +2664,6 @@ function fitActiveTerminal() {
   const session = state.sessions.get(state.activeSessionId);
   if (!session?.fitAddon || !session.terminal) return;
   session.fitAddon.fit();
-  const reserveCols = terminalScrollbarReserveColumns(session);
-  const cols = session.terminal.cols > reserveCols + 2 ? session.terminal.cols - reserveCols : session.terminal.cols;
-  const rows = session.terminal.rows > 2 ? session.terminal.rows - 1 : session.terminal.rows;
-  if (cols !== session.terminal.cols || rows !== session.terminal.rows) {
-    session.terminal.resize(cols, rows);
-  }
 }
 
 let terminalFitFrame = 0;
@@ -2675,15 +2675,6 @@ function scheduleTerminalFit() {
     fitActiveTerminal();
     resizeActiveSession();
   });
-}
-
-function terminalScrollbarReserveColumns(session) {
-  const viewport = session.element?.querySelector('.xterm-viewport');
-  const screen = session.element?.querySelector('.xterm-screen');
-  const scrollbarWidth = viewport ? viewport.offsetWidth - viewport.clientWidth : 0;
-  const screenWidth = screen?.getBoundingClientRect().width ?? 0;
-  const cellWidth = screenWidth > 0 && session.terminal.cols > 0 ? screenWidth / session.terminal.cols : 8;
-  return Math.max(3, Math.ceil((scrollbarWidth + 12) / cellWidth));
 }
 
 function resizeActiveSession() {
@@ -2779,11 +2770,67 @@ function replaceEditableSelection(target, text) {
   target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: text ? 'insertText' : 'deleteByCut', data: text }));
 }
 
-function writeNotice(message) {
+function writeNotice(message, level = '') {
   const status = document.querySelector('#app-status');
   if (!status) return;
   status.textContent = message;
   status.title = message;
+  const resolvedLevel = level || noticeLevel(message);
+  recordNotice(message, resolvedLevel);
+  notify(message, resolvedLevel);
+}
+
+function noticeLevel(message) {
+  const text = String(message ?? '');
+  if (/error|could not|failed|unable|invalid|mismatch|required|denied|refused|timeout|unreachable/i.test(text)) {
+    return 'error';
+  }
+  if (/updated|added|imported|installed|generated|connected|started|stopped|active|saved/i.test(text)) {
+    return 'success';
+  }
+  return 'info';
+}
+
+function recordNotice(message, level) {
+  state.messageLog.unshift({
+    time: new Date().toLocaleTimeString(),
+    level,
+    message: String(message ?? ''),
+  });
+  state.messageLog = state.messageLog.slice(0, 50);
+}
+
+function notify(message, level = 'info') {
+  const stack = document.querySelector('#toast-stack');
+  if (!stack) return;
+  const toast = document.createElement('article');
+  toast.className = `toast toast-${level}`;
+  const text = document.createElement('p');
+  text.textContent = message;
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.textContent = ICON_CLOSE;
+  close.title = 'Dismiss';
+  close.addEventListener('click', () => toast.remove());
+  toast.append(text, close);
+  stack.prepend(toast);
+  const timeout = level === 'error' ? 10000 : 4000;
+  window.setTimeout(() => toast.remove(), timeout);
+}
+
+function showMessageLog() {
+  const entries = state.messageLog.length > 0
+    ? state.messageLog.map((entry) => [
+      `${entry.time} ${entry.level.toUpperCase()}`,
+      entry.message,
+    ])
+    : [['Log', 'No messages yet.']];
+  showAppModal({
+    kicker: 'Tools',
+    title: 'Message Log',
+    message: 'Latest Bashes messages.',
+    details: entries,
+  });
 }
 
 async function writeClipboard(text) {

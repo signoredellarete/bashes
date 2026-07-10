@@ -661,7 +661,7 @@ textarea {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  padding: 10px 0 0 10px;
+  padding: 10px 14px 10px 10px;
 }
 
 .terminal-pane.closed-pane {
@@ -1706,6 +1706,7 @@ textarea {
 }
 
 .app-status {
+  flex: 1 1 auto;
   min-width: 0;
   margin: 0;
   overflow: hidden;
@@ -1714,6 +1715,24 @@ textarea {
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.status-log-button {
+  flex: 0 0 auto;
+  min-height: 22px;
+  border: 1px solid #c7cfd8;
+  border-radius: 4px;
+  background: #fff;
+  color: #53606f;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 7px;
+}
+
+.status-log-button:hover {
+  border-color: #2f6f73;
+  color: #2f6f73;
 }
 
 .terminal-font-controls {
@@ -1752,6 +1771,73 @@ textarea {
   font-size: 12px;
   font-weight: 700;
   text-align: center;
+}
+
+.toast-stack {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 70;
+  display: grid;
+  width: min(360px, calc(100vw - 28px));
+  gap: 8px;
+  pointer-events: none;
+}
+
+.toast {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px;
+  align-items: start;
+  gap: 10px;
+  border: 1px solid #c7cfd8;
+  border-left-width: 4px;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 12px 30px rgba(31, 41, 51, 0.18);
+  color: #2f3945;
+  font-size: 12px;
+  line-height: 1.35;
+  padding: 9px 8px 9px 10px;
+  pointer-events: auto;
+}
+
+.toast p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.toast button {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: #66717f;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+}
+
+.toast button:hover {
+  color: #1f2933;
+}
+
+.toast-info {
+  border-left-color: #64748b;
+}
+
+.toast-success {
+  border-left-color: #2f8f63;
+}
+
+.toast-warning {
+  border-left-color: #b7791f;
+}
+
+.toast-error {
+  border-left-color: #b04134;
 }
 
 .checkbox-row {

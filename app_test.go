@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/signoredellarete/bashes/internal/application"
@@ -28,6 +29,24 @@ func TestSSHOutputEventEncodesRawBytes(t *testing.T) {
 	}
 	if !bytes.Equal(decoded, raw) {
 		t.Fatalf("decoded bytes = %v, want %v", decoded, raw)
+	}
+}
+
+func TestInstallSSHKeyCommandGroupsConditionalAppend(t *testing.T) {
+	key := "ssh-rsa AAAA'test"
+	command := installSSHKeyCommand(key)
+
+	if strings.Contains(command, "&& grep -qxF") {
+		t.Fatalf("install command has ungrouped append branch: %s", command)
+	}
+	if !strings.Contains(command, "&& { grep -qxF ") || !strings.HasSuffix(command, "; }") {
+		t.Fatalf("install command does not group grep/append branch: %s", command)
+	}
+	if strings.Count(command, shellQuote(key)) != 2 {
+		t.Fatalf("install command should quote key exactly twice: %s", command)
+	}
+	if !strings.Contains(command, "touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && {") {
+		t.Fatalf("install command does not set authorized_keys permissions before append: %s", command)
 	}
 }
 

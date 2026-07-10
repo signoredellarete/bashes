@@ -908,11 +908,7 @@ func (a *App) InstallSSHKey(input InstallSSHKeyInput) error {
 	defer session.Close()
 
 	authorizedKey := strings.TrimSpace(publicKey)
-	command := fmt.Sprintf(
-		"mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && grep -qxF %s ~/.ssh/authorized_keys || printf '%%s\\n' %s >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys",
-		shellQuote(authorizedKey),
-		shellQuote(authorizedKey),
-	)
+	command := installSSHKeyCommand(authorizedKey)
 	output, err := session.CombinedOutput(command)
 	if err != nil {
 		return fmt.Errorf("install ssh key: %w: %s", err, strings.TrimSpace(string(output)))
@@ -929,6 +925,15 @@ func (a *App) InstallSSHKey(input InstallSSHKeyInput) error {
 		KeyName:      sanitizeKeyName(input.KeyName),
 		TrustHostKey: input.TrustHostKey,
 	})
+}
+
+func installSSHKeyCommand(authorizedKey string) string {
+	quotedKey := shellQuote(authorizedKey)
+	return fmt.Sprintf(
+		"mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && { grep -qxF %s ~/.ssh/authorized_keys || printf '%%s\\n' %s >> ~/.ssh/authorized_keys; }",
+		quotedKey,
+		quotedKey,
+	)
 }
 
 func (a *App) installablePublicKey(input InstallSSHKeyInput) (string, error) {

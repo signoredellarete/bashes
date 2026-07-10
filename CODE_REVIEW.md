@@ -19,13 +19,13 @@ Il documento è organizzato per priorità. Ogni voce indica: dove sta il problem
 | 2.6 | Upload di file grandi passa interamente in memoria come base64 | Bug/Design | Media | Fatto |
 | 2.7 | Trasferimenti file bloccanti, senza progresso né annullamento | Design | Media | Fatto |
 | 2.8 | Nessun keepalive SSH: sessioni e tunnel cadono in silenzio | Design | Media | Fatto |
-| 2.9 | Comando remoto di installazione chiave con concatenazione fragile | Bug minore | Bassa | Da fare |
+| 2.9 | Comando remoto di installazione chiave con concatenazione fragile | Bug minore | Bassa | Fatto |
 | 3.1 | Chiusura sessione: l'output finale del terminale viene perso | UX/Bug | Alta | Fatto |
-| 3.2 | Blocco globale di tutti i controlli durante ogni operazione | UX/Bug | Media | Da fare |
+| 3.2 | Blocco globale di tutti i controlli durante ogni operazione | UX/Bug | Media | Fatto |
 | 3.3 | La copia negli appunti può non funzionare su Linux | Bug | Media | Fatto |
-| 3.4 | Errori mostrati solo in una riga di stato facilissima da perdere | UX | Alta | Da fare |
-| 3.5 | Trucco manuale per riservare colonne al terminale | Bug minore | Bassa | Da fare |
-| 3.6 | Messaggio fuorviante quando la connessione rapida fallisce | UX | Bassa | Da fare |
+| 3.4 | Errori mostrati solo in una riga di stato facilissima da perdere | UX | Alta | Fatto |
+| 3.5 | Trucco manuale per riservare colonne al terminale | Bug minore | Bassa | Fatto |
+| 3.6 | Messaggio fuorviante quando la connessione rapida fallisce | UX | Bassa | Fatto |
 | 4.x | Migliorie UI/UX (scorciatoie, pannello connessione, tunnel, empty state, ecc.) | UX | Varie | Parziale |
 
 ---
@@ -116,7 +116,9 @@ Il documento è organizzato per priorità. Ogni voce indica: dove sta il problem
 
 **Dove:** `app.go`, `InstallSSHKey` (riga ~253).
 
-**Problema:** il comando remoto è `mkdir ... && chmod ... && touch ... && grep -qxF ... || printf ... >> ... && chmod ...`. In shell `&&` e `||` hanno la stessa precedenza e si valutano da sinistra: se uno qualunque dei comandi iniziali fallisce (es. `mkdir` per permessi), il `printf` viene eseguito comunque, scrivendo su un file in una situazione anomala; inoltre l'esito complessivo può risultare "successo" mascherando l'errore vero.
+**Stato fix:** risolto. Il comando remoto viene generato da una funzione testabile e raggruppa esplicitamente il ramo `{ grep ... || printf ...; }`; `chmod 600` viene applicato prima del ramo condizionale dopo il `touch`.
+
+**Problema originale:** il comando remoto era `mkdir ... && chmod ... && touch ... && grep -qxF ... || printf ... >> ... && chmod ...`. In shell `&&` e `||` hanno la stessa precedenza e si valutano da sinistra: se uno qualunque dei comandi iniziali falliva (es. `mkdir` per permessi), il `printf` veniva eseguito comunque, scrivendo su un file in una situazione anomala; inoltre l'esito complessivo poteva risultare "successo" mascherando l'errore vero.
 
 **Come correggere:** raggruppare esplicitamente la parte condizionale: `mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && { grep -qxF <chiave> ~/.ssh/authorized_keys || printf '%s\n' <chiave> >> ~/.ssh/authorized_keys; }`. Così il `||` si applica solo al `grep`.
 
@@ -146,7 +148,9 @@ Il documento è organizzato per priorità. Ogni voce indica: dove sta il problem
 
 **Dove:** `frontend/src/main.js`, `withBusy` e `setDisabledState` (riga ~1678).
 
-**Problema:** ogni operazione disabilita **tutti** i bottoni, input, select e textarea della pagina e poi li riabilita tutti. Effetti collaterali: (1) durante una connessione lenta l'intera interfaccia sembra rotta; (2) alla fine, `disabled = false` riabilita anche controlli che dovrebbero restare disabilitati finché `renderSelection()` non li ricalcola, con possibili lampeggi o stati incoerenti nei pannelli; (3) `if (state.busy) return` scarta in silenzio i click dell'utente, che non capisce perché il pulsante "non funziona".
+**Stato fix:** risolto. Il blocco globale è stato rimosso: `withBusy` non disabilita più tutti i controlli, aggiorna solo lo stato globale usato da `renderSelection()` e mostra un messaggio esplicito se un'azione viene richiesta mentre un'altra è in corso.
+
+**Problema originale:** ogni operazione disabilitava **tutti** i bottoni, input, select e textarea della pagina e poi li riabilitava tutti. Effetti collaterali: (1) durante una connessione lenta l'intera interfaccia sembrava rotta; (2) alla fine, `disabled = false` riabilitava anche controlli che dovrebbero restare disabilitati finché `renderSelection()` non li ricalcola, con possibili lampeggi o stati incoerenti nei pannelli; (3) `if (state.busy) return` scartava in silenzio i click dell'utente, che non capiva perché il pulsante "non funziona".
 
 **Come correggere:** sostituire il blocco globale con: (a) un flag `busy` che disabilita solo il pulsante che ha avviato l'operazione, mostrandoci sopra uno spinner o testo "Connecting…"; (b) per le operazioni con pannello aperto, disabilitare solo i controlli di quel pannello; (c) quando un'azione viene rifiutata perché un'altra è in corso, mostrare un avviso ("Operazione in corso, attendi"). Eliminare `setDisabledState` e affidare lo stato dei pulsanti dell'header al solo `renderSelection()`.
 
@@ -162,7 +166,9 @@ Il documento è organizzato per priorità. Ogni voce indica: dove sta il problem
 
 **Dove:** `frontend/src/main.js`, `writeNotice`; markup `#app-status` nel footer.
 
-**Problema:** ogni messaggio — dal banale "Host order updated" al critico "Error: ssh: unable to authenticate" — finisce nella stessa riga piccola in basso a sinistra, dove il messaggio successivo sovrascrive il precedente. Un errore di connessione può sparire in un attimo, e l'utente non ha modo di rileggerlo.
+**Stato fix:** risolto. `writeNotice` mantiene ancora la riga di stato, ma ora registra gli ultimi messaggi in un log consultabile dal footer e mostra toast a comparsa con severità `info`/`success`/`warning`/`error`; gli errori restano visibili più a lungo e sono chiudibili.
+
+**Problema originale:** ogni messaggio — dal banale "Host order updated" al critico "Error: ssh: unable to authenticate" — finiva nella stessa riga piccola in basso a sinistra, dove il messaggio successivo sovrascriveva il precedente. Un errore di connessione poteva sparire in un attimo, e l'utente non aveva modo di rileggerlo.
 
 **Come correggere:** introdurre un piccolo sistema di notifiche a comparsa (toast) senza librerie esterne: un contenitore fisso in alto a destra; `notify(message, level)` crea un elemento con stile diverso per `info`/`success`/`error`; gli errori restano visibili finché non vengono chiusi (o almeno 10 secondi), le info spariscono dopo 3–4 secondi. Mantenere la riga di stato per i messaggi passivi (es. stato tunnel), ma instradare tutti gli errori sui toast. In più, tenere un log degli ultimi N messaggi consultabile da un'icona nel footer.
 
@@ -170,7 +176,9 @@ Il documento è organizzato per priorità. Ogni voce indica: dove sta il problem
 
 **Dove:** `frontend/src/main.js`, `fitActiveTerminal` e `terminalScrollbarReserveColumns` (riga ~1717); CSS `.terminal-pane { padding: 10px 0 0 10px; }`.
 
-**Problema:** dopo il calcolo di `fitAddon.fit()`, il codice toglie a mano 3+ colonne per "riservare" spazio alla scrollbar e una riga in basso. È un cerotto su un problema di layout: il pannello non ha padding a destra/in basso, quindi il testo toccherebbe la scrollbar. Il risultato è un terminale sempre più stretto del necessario e un valore di colonne che non corrisponde alla larghezza reale, con possibili impaginazioni strane in applicazioni a tutto schermo (vim, htop).
+**Stato fix:** risolto. Il terminale usa padding destro/inferiore nel layout CSS e `fitActiveTerminal` lascia a `fitAddon.fit()` il calcolo di righe e colonne, senza sottrazioni manuali.
+
+**Problema originale:** dopo il calcolo di `fitAddon.fit()`, il codice toglieva a mano 3+ colonne per "riservare" spazio alla scrollbar e una riga in basso. Era un cerotto su un problema di layout: il pannello non aveva padding a destra/in basso, quindi il testo toccava la scrollbar. Il risultato era un terminale sempre più stretto del necessario e un valore di colonne che non corrispondeva alla larghezza reale, con possibili impaginazioni strane in applicazioni a tutto schermo (vim, htop).
 
 **Come correggere:** dare al pannello un padding simmetrico (es. `padding: 10px 14px 10px 10px`) e lasciare che `fitAddon.fit()` calcoli da solo colonne e righe, eliminando `terminalScrollbarReserveColumns` e le sottrazioni manuali in `fitActiveTerminal`. Verificare con `htop` e `vim` che l'ultima colonna e l'ultima riga siano visibili.
 
@@ -178,7 +186,9 @@ Il documento è organizzato per priorità. Ogni voce indica: dove sta il problem
 
 **Dove:** `frontend/src/main.js`, `quickConnect` (riga ~552).
 
-**Problema:** qualsiasi errore (host irraggiungibile, DNS errato, timeout, chiave host) produce "Connection needs credentials: …" e apre il pannello credenziali, suggerendo all'utente che il problema sia la password anche quando non lo è.
+**Stato fix:** risolto. Il quick connect apre il pannello credenziali solo per errori di autenticazione; timeout, rete irraggiungibile, connection refused e problemi di host key restano come messaggi/toast espliciti senza aprire il form password.
+
+**Problema originale:** qualsiasi errore (host irraggiungibile, DNS errato, timeout, chiave host) produceva "Connection needs credentials: …" e apriva il pannello credenziali, suggerendo all'utente che il problema fosse la password anche quando non lo era.
 
 **Come correggere:** replicare la distinzione già usata nel file transfer (`isAuthError` in `FileTransferApp.svelte`): se il messaggio contiene "authenticate"/"permission denied"/"no supported methods" aprire il pannello credenziali; altrimenti mostrare l'errore com'è ("Connessione fallita: …") senza aprire il pannello. Estrarre `isAuthError` in un modulo condiviso.
 
