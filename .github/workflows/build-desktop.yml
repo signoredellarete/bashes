@@ -180,11 +180,12 @@ jobs:
           fi
           app_dir="$(dirname "$app_path")"
           if [ "$(basename "$app_path")" != "Bashes.app" ]; then
-            tmp_app="$app_dir/Bashes-renaming.app"
-            rm -rf "$tmp_app" "$app_dir/Bashes.app"
+            tmp_parent="$(mktemp -d "$RUNNER_TEMP/bashes-app-XXXXXX")"
+            tmp_app="$tmp_parent/Bashes.app"
             mv "$app_path" "$tmp_app"
-            mv "$tmp_app" "$app_dir/Bashes.app"
             app_path="$app_dir/Bashes.app"
+            mv "$tmp_app" "$app_path"
+            rmdir "$tmp_parent"
           fi
           plutil -replace CFBundleName -string "Bashes" "$app_path/Contents/Info.plist" || \
             plutil -insert CFBundleName -string "Bashes" "$app_path/Contents/Info.plist"
@@ -517,7 +518,7 @@ jobs:
           {
             printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
             printf '## RELEASE NOTES\n\n'
-            printf -- '- Fixes macOS release packaging when renaming the app bundle to Bashes.app on case-insensitive filesystems.\n'
+            printf -- '- Fixes macOS release packaging when capitalizing the app bundle name on case-insensitive filesystems.\n'
             printf -- '- Keeps the macOS Dock label capitalized as Bashes.\n\n'
             printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
