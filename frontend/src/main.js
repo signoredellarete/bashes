@@ -195,7 +195,16 @@ app.innerHTML = `
         <input name="password" type="password" autocomplete="current-password" />
       </label>
       <label>
-        <span>Custom Key Path</span>
+        <span class="field-label-with-help">
+          Custom Key Path
+          <button class="field-help-trigger" type="button" aria-label="Custom key path help">?</button>
+          <span class="field-help-popover">
+            Select the private key file, not the .pub file.
+            Linux/macOS: ~/.ssh/id_ed25519
+            Windows: C:\\Users\\YourUser\\.ssh\\id_ed25519
+            MobaXterm: C:\\Users\\YourUser\\Documents\\MobaXterm\\home\\.ssh\\id_rsa
+          </span>
+        </span>
         <input name="privateKeyPath" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="optional private key path" />
       </label>
       <label>
@@ -265,7 +274,16 @@ app.innerHTML = `
         <input name="password" type="password" autocomplete="current-password" />
       </label>
       <label>
-        <span>Custom Key Path</span>
+        <span class="field-label-with-help">
+          Custom Key Path
+          <button class="field-help-trigger" type="button" aria-label="Custom key path help">?</button>
+          <span class="field-help-popover">
+            Select the private key file, not the .pub file.
+            Linux/macOS: ~/.ssh/id_ed25519
+            Windows: C:\\Users\\YourUser\\.ssh\\id_ed25519
+            MobaXterm: C:\\Users\\YourUser\\Documents\\MobaXterm\\home\\.ssh\\id_rsa
+          </span>
+        </span>
         <input name="privateKeyPath" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="optional private key path" />
       </label>
       <label>

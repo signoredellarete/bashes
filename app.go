@@ -1902,18 +1902,21 @@ func parsePrivateKey(key []byte, passphrase string) (ssh.Signer, error) {
 	if isPuttyPrivateKey(key) {
 		return parsePuttyPrivateKey(key, passphrase)
 	}
+	if isSSHPublicKey(key) {
+		return nil, errors.New("parse private key: the selected file is an SSH public key; choose the matching private key file without the .pub extension")
+	}
 
 	if strings.TrimSpace(passphrase) != "" {
 		signer, err := ssh.ParsePrivateKeyWithPassphrase(key, []byte(passphrase))
 		if err != nil {
-			return nil, fmt.Errorf("parse encrypted private key: %w", err)
+			return nil, fmt.Errorf("parse encrypted private key: %w. Choose an OpenSSH/PEM private key or PuTTY PPK private key, not the .pub file", err)
 		}
 		return signer, nil
 	}
 
 	signer, err := ssh.ParsePrivateKey(key)
 	if err != nil {
-		return nil, fmt.Errorf("parse private key: %w. Supported formats are OpenSSH/PEM private keys and PuTTY PPK keys", err)
+		return nil, fmt.Errorf("parse private key: %w. Choose an OpenSSH/PEM private key or PuTTY PPK private key, not the .pub file", err)
 	}
 	return signer, nil
 }
@@ -1921,6 +1924,15 @@ func parsePrivateKey(key []byte, passphrase string) (ssh.Signer, error) {
 func isPuttyPrivateKey(key []byte) bool {
 	normalized := bytes.TrimSpace(bytes.TrimPrefix(key, []byte{0xef, 0xbb, 0xbf}))
 	return bytes.HasPrefix(normalized, []byte("PuTTY-User-Key-File-"))
+}
+
+func isSSHPublicKey(key []byte) bool {
+	normalized := strings.TrimSpace(string(bytes.TrimPrefix(key, []byte{0xef, 0xbb, 0xbf})))
+	return strings.HasPrefix(normalized, "ssh-rsa ") ||
+		strings.HasPrefix(normalized, "ssh-ed25519 ") ||
+		strings.HasPrefix(normalized, "ecdsa-sha2-") ||
+		strings.HasPrefix(normalized, "sk-ssh-ed25519@openssh.com ") ||
+		strings.HasPrefix(normalized, "sk-ecdsa-sha2-nistp256@openssh.com ")
 }
 
 func parsePuttyPrivateKey(key []byte, passphrase string) (ssh.Signer, error) {
@@ -2099,6 +2111,9 @@ func expandHome(path string) string {
 	}
 	if strings.HasPrefix(path, "~/") {
 		return filepath.Join(userHomeDir(), strings.TrimPrefix(path, "~/"))
+	}
+	if strings.HasPrefix(path, `~\`) {
+		return filepath.Join(userHomeDir(), strings.TrimPrefix(path, `~\`))
 	}
 	return path
 }

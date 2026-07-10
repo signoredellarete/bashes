@@ -715,6 +715,55 @@ textarea {
   font-weight: 600;
 }
 
+.field-label-with-help {
+  position: relative;
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 6px;
+}
+
+.field-help-trigger {
+  display: inline-grid;
+  width: 17px;
+  height: 17px;
+  min-height: 17px !important;
+  place-items: center;
+  border: 1px solid #aab7c4 !important;
+  border-radius: 999px !important;
+  background: #f8fafb !important;
+  color: #53606f !important;
+  cursor: help;
+  font-size: 11px !important;
+  font-weight: 800;
+  line-height: 1;
+  padding: 0 !important;
+}
+
+.field-help-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 5;
+  display: none;
+  width: min(320px, calc(100vw - 42px));
+  white-space: pre-line;
+  border: 1px solid #c7cfd8;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 10px 26px rgba(31, 41, 51, 0.18);
+  color: #2f3945 !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  line-height: 1.45;
+  padding: 9px 10px;
+}
+
+.field-help-trigger:hover + .field-help-popover,
+.field-help-trigger:focus + .field-help-popover {
+  display: block;
+}
+
 .resource-form input,
 .resource-form select,
 .panel-card input,
