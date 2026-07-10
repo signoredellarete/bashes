@@ -20,7 +20,7 @@ Il documento è organizzato per priorità. Ogni voce indica: dove sta il problem
 | 2.7 | Trasferimenti file bloccanti, senza progresso né annullamento | Design | Media | Fatto |
 | 2.8 | Nessun keepalive SSH: sessioni e tunnel cadono in silenzio | Design | Media | Fatto |
 | 2.9 | Comando remoto di installazione chiave con concatenazione fragile | Bug minore | Bassa | Da fare |
-| 3.1 | Chiusura sessione: l'output finale del terminale viene perso | UX/Bug | Alta | Da fare |
+| 3.1 | Chiusura sessione: l'output finale del terminale viene perso | UX/Bug | Alta | Fatto |
 | 3.2 | Blocco globale di tutti i controlli durante ogni operazione | UX/Bug | Media | Da fare |
 | 3.3 | La copia negli appunti può non funzionare su Linux | Bug | Media | Fatto |
 | 3.4 | Errori mostrati solo in una riga di stato facilissima da perdere | UX | Alta | Da fare |
@@ -136,7 +136,9 @@ Il documento è organizzato per priorità. Ogni voce indica: dove sta il problem
 
 **Dove:** `frontend/src/main.js`, gestore `ssh:closed` in `registerSSHEvents` (riga ~1786) che chiama `removeSessionFromUI`.
 
-**Problema:** quando la sessione termina (anche per un errore: rete caduta, `exit` del server, autenticazione scaduta), la scheda e il terminale vengono rimossi immediatamente. L'utente perde le ultime righe di output, che spesso contengono proprio la spiegazione della disconnessione. Esiste già uno stato `closed` con relativo stile CSS (`.session-tab.closed`), ma non viene mai usato: il codice rimuove tutto e basta.
+**Stato fix:** risolto. L'evento `ssh:closed` ora marca la sessione come chiusa, preserva il terminale e disabilita l'input invece di rimuovere subito la scheda. La X e il comando Disconnect continuano a rimuovere la sessione quando l'utente lo richiede esplicitamente. Il doppio click su una scheda chiusa avvia una nuova sessione sullo stesso nodo.
+
+**Problema originale:** quando la sessione terminava (anche per un errore: rete caduta, `exit` del server, autenticazione scaduta), la scheda e il terminale venivano rimossi immediatamente. L'utente perdeva le ultime righe di output, che spesso contengono proprio la spiegazione della disconnessione. Esisteva già uno stato `closed` con relativo stile CSS (`.session-tab.closed`), ma non veniva mai usato: il codice rimuoveva tutto e basta.
 
 **Come correggere:** nel gestore `ssh:closed`, invece di chiamare `removeSessionFromUI`, marcare la sessione come chiusa (`session.closed = true`), scrivere nel terminale una riga finale ben visibile (es. `\r\n[Sessione chiusa: <motivo>]`), disabilitare l'input (`terminal.options.disableStdin = true`) e rieseguire `renderTabs()`. La scheda resta consultabile con l'etichetta "closed" e si chiude solo con la X (che già chiama `stopSession` → `removeSessionFromUI`). Aggiungere sulla scheda chiusa un pulsante o doppio click "Riconnetti" che riusa `quickConnect` sulla stessa risorsa.
 

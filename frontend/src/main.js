@@ -964,9 +964,33 @@ async function disconnectActiveSession() {
 async function stopSession(sessionID) {
   const session = state.sessions.get(sessionID);
   removeSessionFromUI(sessionID);
-  if (session && !session.pending) {
+  if (session && !session.pending && !session.closed) {
     await apiStopSSHSession(sessionID);
   }
+}
+
+function markSessionClosed(sessionID, message = '') {
+  const session = state.sessions.get(sessionID);
+  if (!session) {
+    state.pendingSSHOutput.delete(sessionID);
+    return;
+  }
+
+  flushPendingSSHOutput(sessionID);
+  session.closed = true;
+  session.pending = false;
+  if (session.terminal) {
+    session.terminal.options.disableStdin = true;
+    const reason = String(message || `${terminalKindLabel(session.kind)} session closed`).trim();
+    session.terminal.write(`\r\n[Session closed: ${reason}]\r\n`);
+  }
+  if (session.element) session.element.classList.add('closed-pane');
+  if (state.lastSessionByResource.get(session.resourceId) === sessionID) {
+    state.lastSessionByResource.delete(session.resourceId);
+  }
+  renderTabs();
+  renderSelection();
+  scheduleTerminalFit();
 }
 
 function removeSessionFromUI(sessionID) {
@@ -1316,6 +1340,7 @@ function createSession(sessionID, resource, kind = 'ssh') {
   terminal.open(pane);
   installTerminalKeyRepeatFallback(terminal, sessionID);
   terminal.onData((data) => {
+    if (state.sessions.get(sessionID)?.closed) return;
     apiWriteSSHSession(sessionID, data).catch((error) => {
       writeNotice(`${terminalKindLabel(kind)} input error: ${error?.message ?? error}`);
     });
@@ -1330,7 +1355,9 @@ function createSession(sessionID, resource, kind = 'ssh') {
     event.stopPropagation();
     readClipboard()
       .then((text) => {
+        if (state.sessions.get(sessionID)?.closed) return undefined;
         if (text) return apiWriteSSHSession(sessionID, text);
+        return undefined;
       })
       .catch(() => {});
   });
@@ -1364,6 +1391,10 @@ function installTerminalKeyRepeatFallback(terminal, sessionID) {
 
     const data = repeatedKeyData(event, terminal);
     if (!data) return true;
+    if (state.sessions.get(sessionID)?.closed) {
+      event.preventDefault();
+      return false;
+    }
 
     event.preventDefault();
     apiWriteSSHSession(sessionID, data).catch((error) => {
@@ -1428,6 +1459,7 @@ function renderTabs() {
     tab.innerHTML = '<span></span><strong></strong>';
     tab.querySelector('span').textContent = session.closed ? 'closed' : session.pending ? 'new' : terminalKindLabel(session.kind);
     tab.querySelector('strong').textContent = session.title;
+    tab.title = session.closed ? 'Double-click to reconnect' : session.target;
     tab.addEventListener('click', () => {
       if (!session.pending) clearPendingTabs(session.resourceId);
       setActiveSession(session.id);
@@ -1435,6 +1467,9 @@ function renderTabs() {
       renderSelection();
       scheduleTerminalFit();
       focusActiveTerminal();
+    });
+    tab.addEventListener('dblclick', () => {
+      if (session.closed) reconnectClosedSession(session.id);
     });
     tab.addEventListener('dragstart', (event) => startSessionTabDrag(event, session.id));
     tab.addEventListener('dragend', () => endSessionTabDrag());
@@ -2005,7 +2040,7 @@ function renderSelection() {
   tunnel.disabled = state.busy || !selected || localSelected;
   connect.textContent = realSessionsForResource(selected.resource.id).length > 0 ? 'New Session' : 'Connect';
   connect.disabled = state.busy || !selected;
-  disconnect.disabled = state.busy || !activeSession;
+  disconnect.disabled = state.busy || !activeSession || activeSession.closed;
   remove.disabled = state.busy || !selected || localSelected;
   renderKeyInstallSummary();
   renderTunnelStatus();
@@ -2493,6 +2528,19 @@ function focusSession(sessionID) {
   focusActiveTerminal();
 }
 
+function reconnectClosedSession(sessionID) {
+  const session = state.sessions.get(sessionID);
+  if (!session?.closed) return;
+  const resource = isLocalResource(session.resourceId)
+    ? localResource()
+    : findResource(session.resourceId)?.resource;
+  if (!resource) {
+    writeNotice(`Cannot reconnect ${session.title}: resource no longer exists.`);
+    return;
+  }
+  quickConnect(resource);
+}
+
 function setActiveSession(sessionID) {
   const session = sessionID ? state.sessions.get(sessionID) : null;
   state.activeSessionId = session?.id ?? null;
@@ -2637,7 +2685,7 @@ function terminalScrollbarReserveColumns(session) {
 
 function resizeActiveSession() {
   const session = state.sessions.get(state.activeSessionId);
-  if (!session?.terminal || session.pending) return;
+  if (!session?.terminal || session.pending || session.closed) return;
   apiResizeSSHSession(session.id, session.terminal.cols, session.terminal.rows).catch(() => {});
 }
 
@@ -2771,7 +2819,7 @@ function registerSSHEvents() {
       state.pendingSSHOutput.delete(event.sessionId);
       return;
     }
-    removeSessionFromUI(event.sessionId);
+    markSessionClosed(event.sessionId, event?.message);
     if (event?.message) writeNotice(event.message);
   });
   eventsOn('ssh:tunnel-closed', (event) => {

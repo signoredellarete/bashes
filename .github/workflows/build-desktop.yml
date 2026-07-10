@@ -505,8 +505,10 @@ jobs:
           {
             printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
             printf '## RELEASE NOTES\n\n'
-            printf -- '- Fixed unresolved Bashes SSH key names so they no longer fall back to a relative data/keys path.\n'
-            printf -- '- Added backend coverage for SSH key path resolution errors.\n\n'
+            printf -- '- Preserves terminal output when SSH or local shell sessions close unexpectedly.\n'
+            printf -- '- Adds double-click reconnect for closed terminal tabs.\n'
+            printf -- '- Hardens JSON datastore writes against concurrent updates.\n'
+            printf -- '- Preserves raw terminal output bytes across split UTF-8 sequences.\n\n'
             printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
 

@@ -625,7 +625,9 @@ textarea {
 }
 
 .session-tab.closed {
+  border-color: #4b5563;
   color: #91a3b5;
+  background: #171d24;
 }
 
 .session-tab.pending {
@@ -659,6 +661,10 @@ textarea {
   min-height: 0;
   overflow: hidden;
   padding: 10px 0 0 10px;
+}
+
+.terminal-pane.closed-pane {
+  opacity: 0.92;
 }
 
 .empty-terminal {
