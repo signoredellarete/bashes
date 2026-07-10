@@ -505,8 +505,8 @@ jobs:
           {
             printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
             printf '## RELEASE NOTES\n\n'
-            printf -- '- Fixed custom SSH key path help so it opens only from the ? control.\n'
-            printf -- '- Improved custom SSH key path help formatting.\n\n'
+            printf -- '- Updated the Bashes application icon across release builds.\n'
+            printf -- '- Regenerated derived icon assets from icons/bashes.png.\n\n'
             printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
 
