@@ -48,6 +48,11 @@ const state = {
 
 const FILE_TRANSFER_ENABLED = true;
 const LOCAL_RESOURCE_ID = '__bashes_localhost__';
+const customKeyPathHelp = [
+  'Select the private key file, not the .pub file.',
+  'Linux/macOS: ~/.ssh/id_ed25519',
+  'Windows: C:\\Users\\YourUser\\.ssh\\id_ed25519',
+].join('\n\n');
 
 function localResource() {
   return {
@@ -197,13 +202,8 @@ app.innerHTML = `
       <label>
         <span class="field-label-with-help">
           Custom Key Path
-          <button class="field-help-trigger" type="button" aria-label="Custom key path help" aria-expanded="false">?</button>
-          <span class="field-help-popover">
-            Select the private key file, not the .pub file.
-            Linux/macOS: ~/.ssh/id_ed25519
-            Windows: C:\\Users\\YourUser\\.ssh\\id_ed25519
-            MobaXterm: C:\\Users\\YourUser\\Documents\\MobaXterm\\home\\.ssh\\id_rsa
-          </span>
+          <span class="field-help-trigger" role="button" tabindex="0" aria-label="Custom key path help" aria-expanded="false">?</span>
+          <span class="field-help-popover">${customKeyPathHelp}</span>
         </span>
         <input name="privateKeyPath" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="optional private key path" />
       </label>
@@ -276,13 +276,8 @@ app.innerHTML = `
       <label>
         <span class="field-label-with-help">
           Custom Key Path
-          <button class="field-help-trigger" type="button" aria-label="Custom key path help" aria-expanded="false">?</button>
-          <span class="field-help-popover">
-            Select the private key file, not the .pub file.
-            Linux/macOS: ~/.ssh/id_ed25519
-            Windows: C:\\Users\\YourUser\\.ssh\\id_ed25519
-            MobaXterm: C:\\Users\\YourUser\\Documents\\MobaXterm\\home\\.ssh\\id_rsa
-          </span>
+          <span class="field-help-trigger" role="button" tabindex="0" aria-label="Custom key path help" aria-expanded="false">?</span>
+          <span class="field-help-popover">${customKeyPathHelp}</span>
         </span>
         <input name="privateKeyPath" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="optional private key path" />
       </label>
@@ -490,6 +485,11 @@ document.querySelectorAll('[data-close-app-modal]').forEach((element) => {
 });
 document.querySelectorAll('.field-help-trigger').forEach((button) => {
   button.addEventListener('click', (event) => toggleFieldHelp(event));
+  button.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      toggleFieldHelp(event);
+    }
+  });
 });
 document.querySelector('#app-modal-primary').addEventListener('click', () => runAppModalAction('primary'));
 document.querySelector('#app-modal-secondary').addEventListener('click', () => runAppModalAction('secondary'));

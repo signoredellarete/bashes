@@ -733,11 +733,12 @@ textarea {
   border-radius: 999px !important;
   background: #f8fafb !important;
   color: #53606f !important;
-  cursor: help;
+  cursor: pointer;
   font-size: 11px !important;
   font-weight: 800;
   line-height: 1;
   padding: 0 !important;
+  user-select: none;
 }
 
 .field-help-popover {
@@ -753,10 +754,10 @@ textarea {
   background: #fff;
   box-shadow: 0 10px 26px rgba(31, 41, 51, 0.18);
   color: #2f3945 !important;
-  font-size: 11px !important;
+  font-size: 12px !important;
   font-weight: 500 !important;
-  line-height: 1.45;
-  padding: 9px 10px;
+  line-height: 1.5;
+  padding: 10px 11px;
 }
 
 .field-help-trigger[aria-expanded='true'] + .field-help-popover {
