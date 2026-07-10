@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -988,6 +989,7 @@ type LocalSessionInput struct {
 type SSHEvent struct {
 	SessionID string `json:"sessionId"`
 	Data      string `json:"data,omitempty"`
+	Bytes     string `json:"bytes,omitempty"`
 	Message   string `json:"message,omitempty"`
 }
 
@@ -1706,8 +1708,17 @@ type eventWriter struct {
 }
 
 func (w eventWriter) Write(data []byte) (int, error) {
-	w.app.emit("ssh:output", SSHEvent{SessionID: w.sessionID, Data: string(data)})
+	if len(data) > 0 {
+		w.app.emit("ssh:output", sshOutputEvent(w.sessionID, data))
+	}
 	return len(data), nil
+}
+
+func sshOutputEvent(sessionID string, data []byte) SSHEvent {
+	return SSHEvent{
+		SessionID: sessionID,
+		Bytes:     base64.StdEncoding.EncodeToString(data),
+	}
 }
 
 func applyAuthPreference(resource domain.Endpoint, input SSHSessionInput) SSHSessionInput {

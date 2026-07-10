@@ -13,7 +13,7 @@ Il documento è organizzato per priorità. Ogni voce indica: dove sta il problem
 |---|----------|------|----------|-----|
 | 2.1 | La verifica della chiave host del server è di fatto disattivata | Sicurezza | Alta | Fatto |
 | 2.2 | Copia di una cartella dentro sé stessa causa un ciclo infinito | Bug | Alta | Fatto |
-| 2.3 | Caratteri accentati/Unicode possono arrivare corrotti nel terminale | Bug | Alta | Da fare |
+| 2.3 | Caratteri accentati/Unicode possono arrivare corrotti nel terminale | Bug | Alta | Fatto |
 | 2.4 | Scritture concorrenti su hosts.json possono perdere dati | Bug | Alta | Da fare |
 | 2.5 | Percorso chiavi errato (`data/keys`) in un ramo di fallback | Bug | Media | Fatto |
 | 2.6 | Upload di file grandi passa interamente in memoria come base64 | Bug/Design | Media | Fatto |
@@ -61,7 +61,9 @@ Il documento è organizzato per priorità. Ogni voce indica: dove sta il problem
 
 **Dove:** `app.go`, tipo `eventWriter` (riga ~716).
 
-**Problema:** l'output SSH arriva a blocchi di byte arbitrari. `eventWriter.Write` converte ogni blocco in stringa e lo emette come evento. Un carattere UTF-8 multibyte (lettere accentate, caratteri di disegno riquadri usati da `htop`, `mc`, `top` con locale UTF-8) può essere spezzato tra due blocchi: la conversione produce caratteri di sostituzione (�) e il terminale mostra testo corrotto. Il problema è intermittente e dipende dal punto in cui il flusso viene spezzato, quindi difficilissimo da diagnosticare per un utente.
+**Stato fix:** risolto. L'output del terminale viene emesso come base64 nel campo `bytes` di `SSHEvent` e il frontend lo decodifica in `Uint8Array` prima di passarlo a xterm.js. Il vecchio campo `data` resta come fallback per compatibilità.
+
+**Problema originale:** l'output SSH arriva a blocchi di byte arbitrari. `eventWriter.Write` convertiva ogni blocco in stringa e lo emetteva come evento. Un carattere UTF-8 multibyte (lettere accentate, caratteri di disegno riquadri usati da `htop`, `mc`, `top` con locale UTF-8) poteva essere spezzato tra due blocchi: la conversione produceva caratteri di sostituzione (�) e il terminale mostrava testo corrotto. Il problema era intermittente e dipendeva dal punto in cui il flusso veniva spezzato, quindi difficilissimo da diagnosticare per un utente.
 
 **Come correggere:** rendere `eventWriter` un tipo con stato (puntatore) che mantiene un piccolo buffer dei byte finali incompleti: a ogni `Write`, accodare i byte al buffer, individuare il prefisso valido UTF-8 più lungo (con `utf8.DecodeLastRune`/`utf8.Valid` sugli ultimi 1–3 byte), emettere solo quello e conservare il resto per la chiamata successiva. In alternativa (più semplice e robusta): trasmettere i dati come base64 nell'evento e decodificarli nel frontend passando i byte grezzi a xterm.js (`terminal.write(Uint8Array)`), che gestisce da solo l'UTF-8 spezzato. La seconda strada è preferibile perché elimina il problema alla radice.
 

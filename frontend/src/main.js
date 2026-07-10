@@ -2760,7 +2760,7 @@ function registerSSHEvents() {
   if (!eventsOn) return;
 
   eventsOn('ssh:output', (event) => {
-    writeSSHOutput(event.sessionId, event.data ?? '');
+    writeSSHOutput(event.sessionId, decodeSSHOutput(event));
   });
   eventsOn('ssh:status', (event) => {
     if (event?.message) writeNotice(event.message);
@@ -2924,16 +2924,17 @@ function openExternalURL(url) {
 }
 
 function writeSSHOutput(sessionID, data) {
-  if (!sessionID || !data) return;
+  if (!sessionID || !data || data.length === 0) return;
   const session = state.sessions.get(sessionID);
   if (session?.terminal) {
     session.terminal.write(data);
     return;
   }
 
-  const current = state.pendingSSHOutput.get(sessionID) ?? '';
-  const next = current + data;
-  state.pendingSSHOutput.set(sessionID, next.length > 262144 ? next.slice(-262144) : next);
+  const current = state.pendingSSHOutput.get(sessionID);
+  const chunks = Array.isArray(current) ? current : current ? [current] : [];
+  chunks.push(data);
+  state.pendingSSHOutput.set(sessionID, trimPendingSSHOutput(chunks));
 }
 
 function flushPendingSSHOutput(sessionID) {
@@ -2941,7 +2942,39 @@ function flushPendingSSHOutput(sessionID) {
   if (!pending) return;
   state.pendingSSHOutput.delete(sessionID);
   const session = state.sessions.get(sessionID);
-  if (session?.terminal) session.terminal.write(pending);
+  if (!session?.terminal) return;
+
+  const chunks = Array.isArray(pending) ? pending : [pending];
+  chunks.forEach((chunk) => session.terminal.write(chunk));
+}
+
+function decodeSSHOutput(event) {
+  if (event?.bytes) return base64ToBytes(event.bytes);
+  return event?.data ?? '';
+}
+
+function base64ToBytes(value) {
+  const binary = atob(String(value));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function trimPendingSSHOutput(chunks) {
+  const limit = 262144;
+  let total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  while (chunks.length > 1 && total > limit) {
+    const removed = chunks.shift();
+    total -= removed.length;
+  }
+  if (total <= limit) return chunks;
+
+  const first = chunks[0];
+  const start = first.length - limit;
+  chunks[0] = typeof first === 'string' ? first.slice(start) : first.slice(start);
+  return chunks;
 }
 
 function wailsAPI() {

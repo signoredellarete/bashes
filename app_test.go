@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"testing"
@@ -8,6 +10,26 @@ import (
 	"github.com/signoredellarete/bashes/internal/application"
 	"github.com/signoredellarete/bashes/internal/domain"
 )
+
+func TestSSHOutputEventEncodesRawBytes(t *testing.T) {
+	raw := []byte{0xe2, 0x82}
+
+	event := sshOutputEvent("session-1", raw)
+	if event.SessionID != "session-1" {
+		t.Fatalf("SessionID = %q, want session-1", event.SessionID)
+	}
+	if event.Data != "" {
+		t.Fatalf("Data = %q, want empty legacy string field", event.Data)
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(event.Bytes)
+	if err != nil {
+		t.Fatalf("DecodeString() error = %v", err)
+	}
+	if !bytes.Equal(decoded, raw) {
+		t.Fatalf("decoded bytes = %v, want %v", decoded, raw)
+	}
+}
 
 func TestApplyAuthPreferenceUsesStoredKey(t *testing.T) {
 	resource := domain.Endpoint{
