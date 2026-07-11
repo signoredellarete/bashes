@@ -7,22 +7,22 @@ Revisione statica dello stato corrente. Il report precedente e' archiviato in `C
 
 ## Riepilogo
 
-| # | Problema | Area | Priorita' |
-|---|---|---|---|
-| 1 | Il bypass della verifica host key viene salvato e riutilizzato | Sicurezza SSH | Alta |
-| 2 | Copie e upload sovrascrivono direttamente la destinazione e lasciano file parziali | File transfer | Alta |
-| 3 | Un errore UI dopo l'avvio della shell viene riportato come errore di connessione e puo' lasciare una sessione orfana | Frontend/sessioni | Alta |
-| 4 | I job di trasferimento non vengono rimossi e l'avvio concorrente non e' atomico | Backend/runtime | Media |
-| 5 | I confini del file manager sono aggirabili con symlink; il move di path assoluti e' troppo permissivo | Sicurezza file | Media |
-| 6 | Modificare endpoint SSH conserva la fingerprint del vecchio server | Sicurezza/UX | Media |
-| 7 | La consistenza tra nodi salvati e risorse runtime dipende dal frontend | Design backend | Media |
-| 8 | Un tunnel SOCKS puo' essere esposto senza autenticazione e senza timeout sulle connessioni inattive | Sicurezza tunnel | Media |
-| 9 | `main.js` e `app.go` concentrano troppe responsabilita'; il fallback demo nasconde errori di binding | Manutenibilita' | Media |
-| 10 | Non esistono test frontend ne' test dei cicli di vita runtime | Qualita' | Media |
-| 11 | Autenticazione, errori ed eventi sono duplicati o codificati come stringhe | Design/API | Media |
-| 12 | Il workflow CI assegna permessi di scrittura globali e le release non pubblicano checksum | Supply chain | Media |
-| 13 | Scrittura settings e generazione chiavi non sono transazioni atomiche complete | Persistenza | Bassa |
-| 14 | Workflow e versioni sono duplicati in molti punti | Manutenibilita' CI | Bassa |
+| # | Problema | Area | Priorita' | Stato fix |
+|---|---|---|---|---|
+| 1 | Il bypass della verifica host key viene salvato e riutilizzato | Sicurezza SSH | Alta | Fatto |
+| 2 | Copie e upload sovrascrivono direttamente la destinazione e lasciano file parziali | File transfer | Alta | Fatto |
+| 3 | Un errore UI dopo l'avvio della shell viene riportato come errore di connessione e puo' lasciare una sessione orfana | Frontend/sessioni | Alta | Fatto |
+| 4 | I job di trasferimento non vengono rimossi e l'avvio concorrente non e' atomico | Backend/runtime | Media | Fatto |
+| 5 | I confini del file manager sono aggirabili con symlink; il move di path assoluti e' troppo permissivo | Sicurezza file | Media | Fatto |
+| 6 | Modificare endpoint SSH conserva la fingerprint del vecchio server | Sicurezza/UX | Media | Fatto |
+| 7 | La consistenza tra nodi salvati e risorse runtime dipende dal frontend | Design backend | Media | Fatto |
+| 8 | Un tunnel SOCKS puo' essere esposto senza autenticazione e senza timeout sulle connessioni inattive | Sicurezza tunnel | Media | Fatto |
+| 9 | `main.js` e `app.go` concentrano troppe responsabilita'; il fallback demo nasconde errori di binding | Manutenibilita' | Media | Fatto |
+| 10 | Non esistono test frontend ne' test dei cicli di vita runtime | Qualita' | Media | Fatto |
+| 11 | Autenticazione, errori ed eventi sono duplicati o codificati come stringhe | Design/API | Media | Fatto |
+| 12 | Il workflow CI assegna permessi di scrittura globali e le release non pubblicano checksum | Supply chain | Media | Fatto |
+| 13 | Scrittura settings e generazione chiavi non sono transazioni atomiche complete | Persistenza | Bassa | Fatto |
+| 14 | Workflow e versioni sono duplicati in molti punti | Manutenibilita' CI | Bassa | Fatto |
 
 ## Problemi e correzioni
 
@@ -126,6 +126,13 @@ Il workflow ripete setup e packaging per cinque target e la versione e' replicat
 - Output terminale trasportato come byte/base64 e resize PTY.
 - File transfer a blocchi nel backend con progresso, cancellazione e UI Svelte isolata.
 
-## Limiti della verifica
+## Verifiche eseguite dopo i fix
 
-La review e' statica. In questo ambiente non sono disponibili Go, Node/npm e gofmt, quindi non sono stati eseguiti test, race detector, build o analisi del bundle minificato. La CI attuale esegue `go test ./...` e la build Vite, ma non test frontend ne' `go test -race`.
+- `go test ./...`
+- `go test -race ./...`
+- `go vet ./...`
+- `npm test --prefix frontend`
+- `npm run build --prefix frontend`
+- build Wails `linux/amd64` con tag `desktop,webkit2_41`
+- validazione YAML del workflow e sintassi degli script shell
+- verifica della coerenza versione con `node scripts/version.mjs check`

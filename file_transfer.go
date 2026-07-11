@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -371,14 +372,6 @@ func (a *App) CancelFileTransferJob(input FileTransferCancelJobInput) error {
 		return nil
 	}
 	job.cancel()
-	job.update(func(info *FileTransferJobInfo) {
-		if info.Status == "completed" || info.Status == "failed" {
-			return
-		}
-		info.Status = "canceled"
-		info.FinishedAt = time.Now().Format(time.RFC3339)
-	})
-	a.emitFileTransferJob(job, true)
 	return nil
 }
 
@@ -432,14 +425,6 @@ func (a *App) cancelFileTransferJobsForSession(sessionID string) []*fileTransfer
 
 	for _, job := range jobs {
 		job.cancel()
-		job.update(func(info *FileTransferJobInfo) {
-			if info.Status == "completed" || info.Status == "failed" || info.Status == "canceled" {
-				return
-			}
-			info.Status = "canceled"
-			info.FinishedAt = time.Now().Format(time.RFC3339)
-		})
-		a.emitFileTransferJob(job, true)
 	}
 	return jobs
 }
@@ -497,6 +482,32 @@ func (a *App) finishFileTransferJob(job *fileTransferJob, err error) {
 		}
 	})
 	a.emitFileTransferJob(job, true)
+	a.pruneFinishedFileTransferJobs(job.snapshot().ResourceID, 16)
+}
+
+func (a *App) pruneFinishedFileTransferJobs(resourceID string, keep int) {
+	type retainedJob struct {
+		id       string
+		finished string
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	finished := make([]retainedJob, 0)
+	for id, job := range a.transferJobs {
+		info := job.snapshot()
+		if info.ResourceID == resourceID && !isActiveFileTransferJob(info.Status) {
+			finished = append(finished, retainedJob{id: id, finished: info.FinishedAt})
+		}
+	}
+	sort.Slice(finished, func(i, j int) bool {
+		return finished[i].finished > finished[j].finished
+	})
+	if keep < 0 || len(finished) <= keep {
+		return
+	}
+	for _, item := range finished[keep:] {
+		delete(a.transferJobs, item.id)
+	}
 }
 
 func (a *App) emitFileTransferJob(job *fileTransferJob, force bool) {

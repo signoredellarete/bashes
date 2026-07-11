@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -173,5 +174,25 @@ func TestDismissFileTransferJobOnlyRemovesFinishedJobs(t *testing.T) {
 	}
 	if _, exists := app.transferJobs[job.info.JobID]; exists {
 		t.Fatal("completed job still retained after dismiss")
+	}
+}
+
+func TestPruneFinishedFileTransferJobsBoundsRetention(t *testing.T) {
+	app := NewApp(filepath.Join(t.TempDir(), "hosts.json"))
+	for index := 0; index < 5; index++ {
+		id := fmt.Sprintf("job-%d", index)
+		app.transferJobs[id] = &fileTransferJob{
+			info: FileTransferJobInfo{
+				JobID:      id,
+				ResourceID: "host-1",
+				Status:     "completed",
+				FinishedAt: time.Unix(int64(index), 0).Format(time.RFC3339),
+			},
+			done: make(chan struct{}),
+		}
+	}
+	app.pruneFinishedFileTransferJobs("host-1", 2)
+	if len(app.transferJobs) != 2 {
+		t.Fatalf("retained jobs = %d, want 2", len(app.transferJobs))
 	}
 }

@@ -44,6 +44,21 @@ download() {
   die "curl or wget is required to download Bashes"
 }
 
+download_optional() {
+  url="$1"
+  output="$2"
+
+  if have curl; then
+    curl -fsSL --retry 2 --connect-timeout 20 "$url" -o "$output"
+    return
+  fi
+  if have wget; then
+    wget -q --tries=2 --timeout=20 "$url" -O "$output"
+    return
+  fi
+  return 1
+}
+
 detect_arch() {
   case "$(uname -m)" in
     x86_64|amd64)
@@ -169,13 +184,16 @@ main() {
   trap 'rm -rf "$tmp_dir"' EXIT
 
   printf 'Installing Bashes %s for linux/%s\n' "$release_version" "$arch"
-	download "$asset_url" "$tmp_dir/$asset_name"
-	download "https://github.com/$repo/releases/download/$release_version/SHA256SUMS" "$tmp_dir/SHA256SUMS"
-	expected_checksum="$(awk -v asset="$asset_name" '$2 == asset || $2 == "release-assets/" asset { print $1; exit }' "$tmp_dir/SHA256SUMS")"
-	[ -n "$expected_checksum" ] || die "release checksum not found for $asset_name"
-	actual_checksum="$(sha256sum "$tmp_dir/$asset_name" | awk '{print $1}')"
-	[ "$actual_checksum" = "$expected_checksum" ] || die "checksum verification failed for $asset_name"
-	mkdir -p "$tmp_dir/extract"
+  download "$asset_url" "$tmp_dir/$asset_name"
+  if download_optional "https://github.com/$repo/releases/download/$release_version/SHA256SUMS" "$tmp_dir/SHA256SUMS"; then
+    expected_checksum="$(awk -v asset="$asset_name" '$2 == asset || $2 == "release-assets/" asset { print $1; exit }' "$tmp_dir/SHA256SUMS")"
+    [ -n "$expected_checksum" ] || die "release checksum not found for $asset_name"
+    actual_checksum="$(sha256sum "$tmp_dir/$asset_name" | awk '{print $1}')"
+    [ "$actual_checksum" = "$expected_checksum" ] || die "checksum verification failed for $asset_name"
+  else
+    printf 'Warning: release %s predates SHA256SUMS; checksum verification was skipped.\n' "$release_version" >&2
+  fi
+  mkdir -p "$tmp_dir/extract"
   tar -xzf "$tmp_dir/$asset_name" -C "$tmp_dir/extract"
 
   package_binary="$(find "$tmp_dir/extract" -type f -name bashes -print -quit)"

@@ -7,4 +7,5 @@ bin/
 node_modules/
 frontend/node_modules/
 frontend/wailsjs/
+frontend/package.json.md5
 screenshots/
