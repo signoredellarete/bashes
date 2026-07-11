@@ -2,10 +2,11 @@
   import { onDestroy, onMount } from 'svelte';
   import { Filemanager, WillowDark } from '@svar-ui/svelte-filemanager';
   import {
-    cancelJob,
-    closeFileTransfer,
+		cancelJob,
+		closeFileTransfer,
     createItem,
-    deleteItems,
+		deleteItems,
+		dismissJob as dismissBackendJob,
     listJobs,
     listFiles,
     renameItem,
@@ -299,8 +300,14 @@
     }
   }
 
-  function dismissJob(jobId) {
-    jobs = jobs.filter((job) => job.jobId !== jobId);
+	async function dismissJob(jobId) {
+		try {
+			await dismissBackendJob(jobId);
+		} catch (err) {
+			error = String(err?.message ?? err);
+			return;
+		}
+		jobs = jobs.filter((job) => job.jobId !== jobId);
     jobSpeedSamples.delete(jobId);
   }
 

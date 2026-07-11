@@ -59,7 +59,11 @@ export async function listJobs(sessionID) {
 }
 
 export async function cancelJob(jobId) {
-  return await appAPI('CancelFileTransferJob')({ jobId });
+	return await appAPI('CancelFileTransferJob')({ jobId });
+}
+
+export async function dismissJob(jobId) {
+	return await appAPI('DismissFileTransferJob')({ jobId });
 }
 
 export async function resolveDroppedFilePaths(files) {

@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseTransferID(t *testing.T) {
@@ -94,5 +97,81 @@ func TestFileTransferLocalPathStaysUnderRoot(t *testing.T) {
 	}
 	if got != filepath.Join(root, "etc", "passwd") {
 		t.Fatalf("localPath(cleaned escape) = %q, want path under root", got)
+	}
+}
+
+func TestFileTransferLocalPathRejectsSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "outside")); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	session := &fileTransferSession{localRoot: root}
+	if _, err := session.localPath("outside/file.txt"); err == nil || !strings.Contains(err.Error(), "escapes transfer root") {
+		t.Fatalf("localPath() error = %v, want symlink escape rejection", err)
+	}
+}
+
+func TestAtomicFileTransferRejectsConflictWithoutChangingDestination(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "source.txt"), []byte("source"), 0o600); err != nil {
+		t.Fatalf("WriteFile(source) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "target.txt"), []byte("target"), 0o600); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+
+	session := &fileTransferSession{localRoot: root}
+	err := session.copyItemAtomic(context.Background(), "local", "source.txt", "local", "target.txt")
+	if err == nil || !strings.Contains(err.Error(), "destination already exists") {
+		t.Fatalf("copyItemAtomic() error = %v, want conflict error", err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "target.txt"))
+	if err != nil {
+		t.Fatalf("ReadFile(target) error = %v", err)
+	}
+	if string(data) != "target" {
+		t.Fatalf("target content = %q, want unchanged target", data)
+	}
+}
+
+func TestReserveFileTransferJobIsAtomicPerResource(t *testing.T) {
+	app := NewApp(filepath.Join(t.TempDir(), "hosts.json"))
+	first := &fileTransferJob{
+		info: FileTransferJobInfo{JobID: "one", ResourceID: "host-1", Status: "running"},
+		done: make(chan struct{}),
+	}
+	second := &fileTransferJob{
+		info: FileTransferJobInfo{JobID: "two", ResourceID: "host-1", Status: "queued"},
+		done: make(chan struct{}),
+	}
+	if err := app.reserveFileTransferJob(first); err != nil {
+		t.Fatalf("reserve first job error = %v", err)
+	}
+	if err := app.reserveFileTransferJob(second); err == nil {
+		t.Fatal("reserve second job error = nil, want active resource conflict")
+	}
+}
+
+func TestDismissFileTransferJobOnlyRemovesFinishedJobs(t *testing.T) {
+	app := NewApp(filepath.Join(t.TempDir(), "hosts.json"))
+	job := &fileTransferJob{
+		info: FileTransferJobInfo{JobID: "job-1", ResourceID: "host-1", Status: "running"},
+		done: make(chan struct{}),
+	}
+	app.transferJobs[job.info.JobID] = job
+	if err := app.DismissFileTransferJob(FileTransferDismissJobInput{JobID: job.info.JobID}); err == nil {
+		t.Fatal("DismissFileTransferJob(active) error = nil")
+	}
+	job.update(func(info *FileTransferJobInfo) {
+		info.Status = "completed"
+		info.FinishedAt = time.Now().Format(time.RFC3339)
+	})
+	if err := app.DismissFileTransferJob(FileTransferDismissJobInput{JobID: job.info.JobID}); err != nil {
+		t.Fatalf("DismissFileTransferJob(completed) error = %v", err)
+	}
+	if _, exists := app.transferJobs[job.info.JobID]; exists {
+		t.Fatal("completed job still retained after dismiss")
 	}
 }
