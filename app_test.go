@@ -2,15 +2,19 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/signoredellarete/bashes/internal/application"
 	"github.com/signoredellarete/bashes/internal/domain"
+	"github.com/signoredellarete/bashes/internal/remotessh"
 )
 
 func TestSSHOutputEventEncodesRawBytes(t *testing.T) {
@@ -412,6 +416,58 @@ func TestResourceIDsForDeleteIncludesNestedSubsystems(t *testing.T) {
 	}
 	if len(ids) != 2 || ids[0] != vm.ID || ids[1] != lxc.ID {
 		t.Fatalf("resourceIDsForDelete(vm) = %v, want vm and lxc ids", ids)
+	}
+}
+
+func TestStopSessionsForResourceOnlyStopsMatchingSessions(t *testing.T) {
+	app := NewApp(filepath.Join(t.TempDir(), "hosts.json"))
+	matching := newTestSSHSession("matching", "host-1")
+	other := newTestSSHSession("other", "host-2")
+	app.sessions[matching.id] = matching
+	app.sessions[other.id] = other
+
+	app.stopSessionsForResource("host-1")
+	if _, exists := app.sessions[matching.id]; exists {
+		t.Fatal("matching session still registered")
+	}
+	if _, exists := app.sessions[other.id]; !exists {
+		t.Fatal("unrelated session was removed")
+	}
+	if matching.shell.(*testTerminalShell).closeCount() != 1 {
+		t.Fatalf("matching shell close count = %d, want 1", matching.shell.(*testTerminalShell).closeCount())
+	}
+	_ = app.StopSSHSession(other.id)
+}
+
+type testTerminalShell struct {
+	mu     sync.Mutex
+	closed int
+}
+
+func (s *testTerminalShell) Resize(remotessh.TerminalSize) error { return nil }
+func (s *testTerminalShell) Wait() error                         { return nil }
+func (s *testTerminalShell) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed++
+	return nil
+}
+func (s *testTerminalShell) closeCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
+}
+
+func newTestSSHSession(id, resourceID string) *sshSession {
+	reader, writer := io.Pipe()
+	_ = reader.Close()
+	_, cancel := context.WithCancel(context.Background())
+	return &sshSession{
+		id:         id,
+		resourceID: resourceID,
+		shell:      &testTerminalShell{},
+		stdin:      writer,
+		cancel:     cancel,
 	}
 }
 
