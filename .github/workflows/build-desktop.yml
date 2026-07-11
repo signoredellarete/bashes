@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test:
@@ -37,6 +37,18 @@ jobs:
 
       - name: Run Go tests
         run: go test ./...
+
+      - name: Run Go race tests
+        run: go test -race ./...
+
+      - name: Run Go vet
+        run: go vet ./...
+
+      - name: Run frontend tests
+        run: npm test --prefix frontend
+
+      - name: Verify version metadata
+        run: node scripts/version.mjs check
 
       - name: Build frontend
         run: npm run build --prefix frontend
@@ -500,7 +512,14 @@ jobs:
       - linux-arm64-desktop
       - windows-arm64-desktop
     if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
     steps:
+      - name: Checkout release history
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
       - name: Download release artifacts
         uses: actions/download-artifact@v7
         with:
@@ -511,17 +530,27 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          (
+            cd release-assets
+            find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | sort | xargs sha256sum > SHA256SUMS
+          )
           assets="$(find release-assets -maxdepth 1 -type f | sort)"
           if [ -z "$assets" ]; then
             echo "No release assets found"
             exit 1
           fi
 
+          previous_tag="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          if [ -n "$previous_tag" ]; then
+            changes="$(git log --no-merges --pretty='- %s' "$previous_tag..$GITHUB_REF_NAME")"
+          else
+            changes="$(git log --no-merges --pretty='- %s' "$GITHUB_REF_NAME")"
+          fi
+
           {
             printf '# Bashes %s\n\n' "$GITHUB_REF_NAME"
             printf '## RELEASE NOTES\n\n'
-            printf -- '- Re-signs the macOS app bundle after release metadata changes to avoid invalid bundle signatures.\n'
-            printf -- '- Keeps unsigned macOS test builds ad-hoc signed while preserving optional Developer ID signing when configured.\n\n'
+            printf '%s\n\n' "$changes"
             printf 'Download the package for your platform from the assets attached to this release.\n'
           } > release-notes.md
 
