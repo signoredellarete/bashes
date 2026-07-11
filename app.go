@@ -230,6 +230,20 @@ type UpdateInfo struct {
 	Message         string `json:"message"`
 }
 
+type appErrorPayload struct {
+	Code    string            `json:"code"`
+	Message string            `json:"message"`
+	Details map[string]string `json:"details,omitempty"`
+}
+
+func newAppError(code string, message string, details map[string]string) error {
+	payload, err := json.Marshal(appErrorPayload{Code: code, Message: message, Details: details})
+	if err != nil {
+		return errors.New(message)
+	}
+	return fmt.Errorf("BASHES_ERROR:%s", base64.RawURLEncoding.EncodeToString(payload))
+}
+
 type HostsFileImportResult struct {
 	Path      string                  `json:"path"`
 	Imported  int                     `json:"imported"`
@@ -1822,7 +1836,10 @@ func normalizeTunnelInput(input *SSHTunnelInput) error {
 		return errors.New("local bind address contains invalid characters")
 	}
 	if !input.AllowPublicBind && !isLoopbackBind(input.LocalHost) {
-		return fmt.Errorf("BASHES_PUBLIC_TUNNEL_BIND host=%s type=%s", input.LocalHost, input.Type)
+		return newAppError("public_tunnel_bind", "public tunnel bind requires confirmation", map[string]string{
+			"host": input.LocalHost,
+			"type": input.Type,
+		})
 	}
 	if input.LocalPort < 1 || input.LocalPort > 65535 {
 		return errors.New("local port must be between 1 and 65535")
@@ -2076,12 +2093,21 @@ func hostKeyError(err error, resource domain.Endpoint) error {
 		if strings.TrimSpace(host) == "" {
 			host = net.JoinHostPort(sshHost(resource), strconv.Itoa(resource.Port))
 		}
-		return fmt.Errorf("BASHES_HOST_KEY_UNKNOWN resource=%s host=%s fingerprint=%s", resource.ID, host, unknown.Fingerprint)
+		return newAppError("ssh_host_key_unknown", "SSH host key is unknown", map[string]string{
+			"resource":    resource.ID,
+			"host":        host,
+			"fingerprint": unknown.Fingerprint,
+		})
 	}
 
 	var mismatch remotessh.HostKeyMismatchError
 	if errors.As(err, &mismatch) {
-		return fmt.Errorf("BASHES_HOST_KEY_MISMATCH resource=%s host=%s expected=%s actual=%s", resource.ID, mismatch.Host, mismatch.ExpectedFingerprint, mismatch.ActualFingerprint)
+		return newAppError("ssh_host_key_mismatch", "SSH host key does not match", map[string]string{
+			"resource": resource.ID,
+			"host":     mismatch.Host,
+			"expected": mismatch.ExpectedFingerprint,
+			"actual":   mismatch.ActualFingerprint,
+		})
 	}
 	return err
 }

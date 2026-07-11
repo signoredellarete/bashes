@@ -353,7 +353,7 @@ func TestNormalizeTunnelInputRejectsUnsupportedTypeAndPort(t *testing.T) {
 
 func TestNormalizeTunnelInputRequiresConfirmationForPublicBind(t *testing.T) {
 	input := SSHTunnelInput{Type: "socks", LocalHost: "0.0.0.0", LocalPort: 1080}
-	if err := normalizeTunnelInput(&input); err == nil || !strings.Contains(err.Error(), "BASHES_PUBLIC_TUNNEL_BIND") {
+	if err := normalizeTunnelInput(&input); err == nil || !strings.Contains(err.Error(), "BASHES_ERROR:") {
 		t.Fatalf("normalizeTunnelInput(public) error = %v, want confirmation error", err)
 	}
 

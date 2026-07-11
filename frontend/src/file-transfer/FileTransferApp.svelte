@@ -1,6 +1,7 @@
 <script>
   import { onDestroy, onMount } from 'svelte';
-  import { Filemanager, WillowDark } from '@svar-ui/svelte-filemanager';
+	import { Filemanager, WillowDark } from '@svar-ui/svelte-filemanager';
+	import { isAuthError, isHostKeyMismatchError, isUnknownHostKeyError } from '../ssh-errors.js';
   import {
 		cancelJob,
 		closeFileTransfer,
@@ -427,22 +428,6 @@
 
   function unique(values) {
     return [...new Set(values)];
-  }
-
-  function isAuthError(message) {
-    const normalized = message.toLowerCase();
-    return normalized.includes('authenticate') ||
-      normalized.includes('authentication') ||
-      normalized.includes('no supported methods') ||
-      normalized.includes('permission denied');
-  }
-
-  function isUnknownHostKeyError(message) {
-    return String(message ?? '').includes('BASHES_HOST_KEY_UNKNOWN');
-  }
-
-  function isHostKeyMismatchError(message) {
-    return String(message ?? '').includes('BASHES_HOST_KEY_MISMATCH');
   }
 
   function localIcon(file, size) {

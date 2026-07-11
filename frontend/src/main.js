@@ -2,6 +2,13 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import bashesLogo from './assets/bashes.png';
+import {
+  errorDetail,
+  isAuthError,
+  parseHostKeyMismatchError,
+  parsePublicTunnelBindError,
+  parseUnknownHostKeyError,
+} from './ssh-errors.js';
 import './styles.css';
 
 const DEFAULT_TERMINAL_FONT_SIZE = 13;
@@ -59,6 +66,7 @@ let searchRenderFrame = 0;
 let terminalFitFrame = 0;
 
 const FILE_TRANSFER_ENABLED = true;
+const DEMO_MODE = import.meta.env.DEV && globalThis.__BASHES_DEMO__ === true;
 const LOCAL_RESOURCE_ID = '__bashes_localhost__';
 const customKeyPathHelp = [
   'Select the private key file, not the .pub file.',
@@ -2495,12 +2503,6 @@ async function startSSHTunnelWithHostKeyPrompt(input, resource) {
   }
 }
 
-function parsePublicTunnelBindError(error) {
-	const detail = String(error?.message ?? error ?? '');
-	const match = detail.match(/BASHES_PUBLIC_TUNNEL_BIND\s+host=(\S+)\s+type=(\S+)/);
-	return match ? { host: match[1], type: match[2] } : null;
-}
-
 async function installSSHKeyWithHostKeyPrompt(input, resource) {
   try {
     return await apiInstallSSHKey(input);
@@ -2523,15 +2525,8 @@ async function confirmUnknownHostKey(error, resource, confirmLabel) {
   });
 }
 
-function parseUnknownHostKeyError(error) {
-  const detail = String(error?.message ?? error ?? '');
-  const match = detail.match(/BASHES_HOST_KEY_UNKNOWN\s+resource=\S+\s+host=(\S+)\s+fingerprint=(SHA256:\S+)/);
-  if (!match) return null;
-  return { host: match[1], fingerprint: match[2] };
-}
-
 function connectErrorMessage(error, resource) {
-	const detail = String(error?.message ?? error ?? '').trim();
+	const detail = errorDetail(error);
 	if (error?.stage === 'terminal-ui') {
 		return `Could not open the terminal interface for ${resource.hostname}: ${detail}`;
 	}
@@ -2565,24 +2560,12 @@ function connectErrorMessage(error, resource) {
   return `Could not connect to ${target}: ${detail || 'unknown error'}`;
 }
 
-function parseHostKeyMismatchError(error) {
-  const detail = String(error?.message ?? error ?? '');
-  const match = detail.match(/BASHES_HOST_KEY_MISMATCH\s+resource=\S+\s+host=\S+\s+expected=(SHA256:\S+)\s+actual=(SHA256:\S+)/);
-  if (!match) return null;
-  return { expected: match[1], actual: match[2] };
-}
-
-function isAuthError(error) {
-  const detail = String(error?.message ?? error ?? '');
-  return /unable to authenticate|no supported methods|no SSH authentication method|handshake failed|permission denied/i.test(detail);
-}
-
 function isAuthMessage(message) {
   return /authenticate|authentication|password|SSH key|permission denied/i.test(String(message ?? ''));
 }
 
 function keyInstallErrorMessage(error, resource) {
-  const detail = String(error?.message ?? error ?? '').trim();
+	const detail = errorDetail(error);
   const target = `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`;
   const unknownHostKey = parseUnknownHostKeyError(error);
   if (unknownHostKey) {
@@ -3332,7 +3315,11 @@ function trimPendingSSHOutput(chunks) {
 }
 
 function wailsAPI() {
-  return globalThis.go?.main?.App ?? globalThis.go?.desktop?.App;
+	const api = globalThis.go?.main?.App ?? globalThis.go?.desktop?.App;
+	if (!api && !DEMO_MODE) {
+		throw new Error('Bashes desktop bindings are unavailable. Demo mode must be enabled explicitly for browser development.');
+	}
+	return api;
 }
 
 async function apiListHosts() {
