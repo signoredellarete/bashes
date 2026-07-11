@@ -431,9 +431,8 @@ func TestServiceSetsResourceAuth(t *testing.T) {
 	}
 
 	if err := service.SetResourceAuth(host.ID, domain.Auth{
-		Method:       domain.AuthMethodKey,
-		KeyName:      " bashes-main ",
-		TrustHostKey: true,
+		Method:  domain.AuthMethodKey,
+		KeyName: " bashes-main ",
 	}); err != nil {
 		t.Fatalf("SetResourceAuth(host) error = %v", err)
 	}
@@ -465,6 +464,28 @@ func TestServiceSetsResourceAuth(t *testing.T) {
 	}
 	if hosts[0].Subsystems[0].HostKeyFingerprint != "SHA256:subfingerprint" {
 		t.Fatalf("Subsystem HostKeyFingerprint = %q", hosts[0].Subsystems[0].HostKeyFingerprint)
+	}
+}
+
+func TestServiceClearsHostKeyFingerprintWhenEndpointChanges(t *testing.T) {
+	service := NewService(newMemoryStore())
+	host, err := service.AddHost(EndpointInput{Hostname: "server", IP: "10.0.0.1", Port: 22, User: "root"})
+	if err != nil {
+		t.Fatalf("AddHost() error = %v", err)
+	}
+	if err := service.SetResourceHostKeyFingerprint(host.ID, "SHA256:known"); err != nil {
+		t.Fatalf("SetResourceHostKeyFingerprint() error = %v", err)
+	}
+
+	if err := service.UpdateResource(host.ID, EndpointInput{Hostname: "server", IP: "10.0.0.2", Port: 22, User: "root"}); err != nil {
+		t.Fatalf("UpdateResource() error = %v", err)
+	}
+	hosts, err := service.ListHosts()
+	if err != nil {
+		t.Fatalf("ListHosts() error = %v", err)
+	}
+	if hosts[0].HostKeyFingerprint != "" {
+		t.Fatalf("HostKeyFingerprint = %q, want cleared fingerprint", hosts[0].HostKeyFingerprint)
 	}
 }
 

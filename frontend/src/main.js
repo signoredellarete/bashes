@@ -614,8 +614,12 @@ function closeFieldHelpPopovers(except = null) {
 await loadKeys();
 await loadTunnels();
 applySidebarState();
-await openInitialLocalSession();
 schedulePeriodicUpdateCheck();
+window.setTimeout(() => {
+  openInitialLocalSession().catch((error) => {
+    writeNotice(`Could not initialize local terminal UI: ${error?.message ?? error}`, 'error');
+  });
+}, 0);
 
 async function loadCapabilities() {
   state.localShellSupported = await apiSupportsLocalShell();
@@ -713,7 +717,7 @@ async function submitConnect(event) {
         cols: 120,
         rows: 32,
       }, selected, 'Trust and connect');
-      createSession(sessionID, selected);
+      await attachStartedSession(sessionID, selected);
       closeConnectPanel();
       await refreshHosts();
       resizeActiveSession();
@@ -773,7 +777,7 @@ async function quickConnect(resource) {
           cols: 120,
           rows: 32,
         });
-        createSession(sessionID, resource, 'local');
+        await attachStartedSession(sessionID, resource, 'local');
         resizeActiveSession();
         return;
       }
@@ -786,7 +790,7 @@ async function quickConnect(resource) {
         cols: 120,
         rows: 32,
       }, resource, 'Trust and connect');
-      createSession(sessionID, resource);
+      await attachStartedSession(sessionID, resource);
       await refreshHosts();
       resizeActiveSession();
     } catch (error) {
@@ -1390,6 +1394,17 @@ function selectResource(resource) {
   }
 }
 
+async function attachStartedSession(sessionID, resource, kind = 'ssh') {
+  try {
+    createSession(sessionID, resource, kind);
+  } catch (error) {
+    await apiStopSSHSession(sessionID).catch(() => {});
+    const attachError = new Error(`Terminal UI initialization failed: ${error?.message ?? error}`);
+    attachError.stage = 'terminal-ui';
+    throw attachError;
+  }
+}
+
 function createSession(sessionID, resource, kind = 'ssh') {
   const pending = pendingSessionForResource(resource.id);
   if (pending?.pending) {
@@ -1403,7 +1418,9 @@ function createSession(sessionID, resource, kind = 'ssh') {
   pane.dataset.sessionId = sessionID;
   stack.append(pane);
 
-  const terminal = new Terminal({
+  let terminal;
+  try {
+    terminal = new Terminal({
     cursorBlink: true,
     convertEol: true,
     fontFamily: state.terminalFontFamily,
@@ -1415,10 +1432,10 @@ function createSession(sessionID, resource, kind = 'ssh') {
       cursor: '#f5c542',
       selectionBackground: '#3d4a58',
     },
-  });
-  const fitAddon = new FitAddon();
-  terminal.loadAddon(fitAddon);
-  terminal.open(pane);
+    });
+    const fitAddon = new FitAddon();
+    terminal.loadAddon(fitAddon);
+    terminal.open(pane);
   installTerminalKeyRepeatFallback(terminal, sessionID);
   terminal.onData((data) => {
     if (state.sessions.get(sessionID)?.closed) return;
@@ -1444,7 +1461,7 @@ function createSession(sessionID, resource, kind = 'ssh') {
       .catch(() => {});
   });
 
-  state.sessions.set(sessionID, {
+    state.sessions.set(sessionID, {
     id: sessionID,
     resourceId: resource.id,
     title: sessionTitle(resource.hostname, ordinal),
@@ -1455,13 +1472,19 @@ function createSession(sessionID, resource, kind = 'ssh') {
     fitAddon,
     element: pane,
     closed: false,
-  });
-  flushPendingSSHOutput(sessionID);
-  setActiveSession(sessionID);
-  renderTabs();
-  renderSelection();
-  scheduleTerminalFit();
-  focusActiveTerminal();
+    });
+    flushPendingSSHOutput(sessionID);
+    setActiveSession(sessionID);
+    renderTabs();
+    renderSelection();
+    scheduleTerminalFit();
+    focusActiveTerminal();
+  } catch (error) {
+    state.sessions.delete(sessionID);
+    terminal?.dispose();
+    pane.remove();
+    throw error;
+  }
 }
 
 function installTerminalKeyRepeatFallback(terminal, sessionID) {
@@ -2488,7 +2511,10 @@ function parseUnknownHostKeyError(error) {
 }
 
 function connectErrorMessage(error, resource) {
-  const detail = String(error?.message ?? error ?? '').trim();
+	const detail = String(error?.message ?? error ?? '').trim();
+	if (error?.stage === 'terminal-ui') {
+		return `Could not open the terminal interface for ${resource.hostname}: ${detail}`;
+	}
   if (isLocalResource(resource)) {
     return `Could not start local shell: ${detail || 'unknown error'}`;
   }

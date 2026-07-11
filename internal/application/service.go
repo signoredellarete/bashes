@@ -162,6 +162,9 @@ func (s *Service) UpdateResource(id string, input EndpointInput) error {
 
 	for i := range data.Hosts {
 		if data.Hosts[i].ID == id {
+			if endpointChanged(data.Hosts[i].Hostname, data.Hosts[i].IP, data.Hosts[i].Port, input) {
+				data.Hosts[i].HostKeyFingerprint = ""
+			}
 			data.Hosts[i].Hostname = strings.TrimSpace(input.Hostname)
 			data.Hosts[i].IP = strings.TrimSpace(input.IP)
 			data.Hosts[i].Port = input.Port
@@ -174,6 +177,9 @@ func (s *Service) UpdateResource(id string, input EndpointInput) error {
 		if !domain.ValidResourceType(input.Type) || input.Type == domain.ResourceHost {
 			return fmt.Errorf("invalid subsystem type %q", input.Type)
 		}
+		if endpointChanged(subsystem.Hostname, subsystem.IP, subsystem.Port, input) {
+			subsystem.HostKeyFingerprint = ""
+		}
 		subsystem.Type = input.Type
 		subsystem.Hostname = strings.TrimSpace(input.Hostname)
 		subsystem.IP = strings.TrimSpace(input.IP)
@@ -183,6 +189,12 @@ func (s *Service) UpdateResource(id string, input EndpointInput) error {
 	}
 
 	return fmt.Errorf("resource %q not found", id)
+}
+
+func endpointChanged(hostname, ip string, port int, input EndpointInput) bool {
+	return strings.TrimSpace(hostname) != strings.TrimSpace(input.Hostname) ||
+		strings.TrimSpace(ip) != strings.TrimSpace(input.IP) ||
+		port != input.Port
 }
 
 func (s *Service) DeleteResource(id string) error {

@@ -140,9 +140,8 @@ func TestSaveAndLoadPreservesAuthPreference(t *testing.T) {
 				Port:     22,
 				User:     "admin",
 				Auth: &domain.Auth{
-					Method:       domain.AuthMethodKey,
-					KeyName:      "bashes-main",
-					TrustHostKey: true,
+					Method:  domain.AuthMethodKey,
+					KeyName: "bashes-main",
 				},
 				Subsystems: []domain.Endpoint{},
 			},

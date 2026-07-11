@@ -147,6 +147,10 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
+func (a *App) shutdown(context.Context) {
+	a.stopAllRuntimeConnections()
+}
+
 func (a *App) ListHosts() ([]domain.Host, error) {
 	return a.service.ListHosts()
 }
@@ -173,7 +177,9 @@ func (a *App) DeleteResource(id string) error {
 		return err
 	}
 	for _, resourceID := range resourceIDs {
+		a.stopSessionsForResource(resourceID)
 		a.stopTunnelsForResource(resourceID)
+		a.closeTransfersForResource(resourceID)
 	}
 	return a.service.DeleteResource(id)
 }
@@ -917,13 +923,11 @@ func (a *App) InstallSSHKey(input InstallSSHKeyInput) error {
 		return a.service.SetResourceAuth(input.ResourceID, domain.Auth{
 			Method:         domain.AuthMethodPath,
 			PrivateKeyPath: expandHome(input.PrivateKeyPath),
-			TrustHostKey:   input.TrustHostKey,
 		})
 	}
 	return a.service.SetResourceAuth(input.ResourceID, domain.Auth{
-		Method:       domain.AuthMethodKey,
-		KeyName:      sanitizeKeyName(input.KeyName),
-		TrustHostKey: input.TrustHostKey,
+		Method:  domain.AuthMethodKey,
+		KeyName: sanitizeKeyName(input.KeyName),
 	})
 }
 
@@ -1007,11 +1011,12 @@ type terminalShell interface {
 }
 
 type sshSession struct {
-	id     string
-	client *ssh.Client
-	shell  terminalShell
-	stdin  *io.PipeWriter
-	cancel context.CancelFunc
+	id         string
+	resourceID string
+	client     *ssh.Client
+	shell      terminalShell
+	stdin      *io.PipeWriter
+	cancel     context.CancelFunc
 }
 
 type sshTunnel struct {
@@ -1052,11 +1057,12 @@ func (a *App) StartSSHSession(input SSHSessionInput) (string, error) {
 
 	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
 	session := &sshSession{
-		id:     sessionID,
-		client: client,
-		shell:  shell,
-		stdin:  stdinWriter,
-		cancel: runtimeCancel,
+		id:         sessionID,
+		resourceID: resource.ID,
+		client:     client,
+		shell:      shell,
+		stdin:      stdinWriter,
+		cancel:     runtimeCancel,
 	}
 
 	a.mu.Lock()
@@ -1109,10 +1115,11 @@ func (a *App) StartLocalSession(input LocalSessionInput) (string, error) {
 
 	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
 	session := &sshSession{
-		id:     sessionID,
-		shell:  shell,
-		stdin:  stdinWriter,
-		cancel: runtimeCancel,
+		id:         sessionID,
+		resourceID: "__bashes_localhost__",
+		shell:      shell,
+		stdin:      stdinWriter,
+		cancel:     runtimeCancel,
 	}
 
 	a.mu.Lock()
@@ -1374,6 +1381,36 @@ func (a *App) stopTunnelsForResource(resourceID string) {
 
 	for _, id := range tunnelIDs {
 		_ = a.StopSSHTunnel(id)
+	}
+}
+
+func (a *App) stopSessionsForResource(resourceID string) {
+	var sessionIDs []string
+	a.mu.Lock()
+	for id, session := range a.sessions {
+		if session.resourceID == resourceID {
+			sessionIDs = append(sessionIDs, id)
+		}
+	}
+	a.mu.Unlock()
+
+	for _, id := range sessionIDs {
+		_ = a.StopSSHSession(id)
+	}
+}
+
+func (a *App) closeTransfersForResource(resourceID string) {
+	var transferIDs []string
+	a.mu.Lock()
+	for id, transfer := range a.transfers {
+		if transfer.resourceID == resourceID {
+			transferIDs = append(transferIDs, id)
+		}
+	}
+	a.mu.Unlock()
+
+	for _, id := range transferIDs {
+		_ = a.CloseFileTransfer(id)
 	}
 }
 
@@ -1738,9 +1775,6 @@ func applyAuthPreference(resource domain.Endpoint, input SSHSessionInput) SSHSes
 	}
 
 	auth := resource.Auth
-	if auth.TrustHostKey {
-		input.TrustHostKey = true
-	}
 	switch auth.Method {
 	case domain.AuthMethodKey:
 		input.KeyName = auth.KeyName
@@ -1758,7 +1792,7 @@ func hasExplicitAuth(input SSHSessionInput) bool {
 }
 
 func authPreferenceFromSessionInput(input SSHSessionInput) *domain.Auth {
-	auth := domain.Auth{TrustHostKey: input.TrustHostKey}
+	auth := domain.Auth{}
 	switch {
 	case strings.TrimSpace(input.PrivateKeyPath) != "":
 		auth.Method = domain.AuthMethodPath

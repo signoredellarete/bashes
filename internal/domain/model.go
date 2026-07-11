@@ -63,7 +63,6 @@ type Auth struct {
 	Method         AuthMethod `json:"method"`
 	KeyName        string     `json:"keyName,omitempty"`
 	PrivateKeyPath string     `json:"privateKeyPath,omitempty"`
-	TrustHostKey   bool       `json:"trustHostKey,omitempty"`
 }
 
 func NewStore() Store {

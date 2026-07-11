@@ -58,9 +58,8 @@ func TestApplyAuthPreferenceUsesStoredKey(t *testing.T) {
 		Port:     22,
 		User:     "root",
 		Auth: &domain.Auth{
-			Method:       domain.AuthMethodKey,
-			KeyName:      "bashes-main",
-			TrustHostKey: true,
+			Method:  domain.AuthMethodKey,
+			KeyName: "bashes-main",
 		},
 	}
 
@@ -68,8 +67,8 @@ func TestApplyAuthPreferenceUsesStoredKey(t *testing.T) {
 	if input.KeyName != "bashes-main" {
 		t.Fatalf("KeyName = %q, want stored key", input.KeyName)
 	}
-	if !input.TrustHostKey {
-		t.Fatal("TrustHostKey = false, want stored trust preference")
+	if input.TrustHostKey {
+		t.Fatal("TrustHostKey = true, insecure bypass must not come from stored auth")
 	}
 }
 
@@ -100,7 +99,7 @@ func TestAuthPreferenceFromSessionInput(t *testing.T) {
 		KeyName:      "bashes-main",
 		TrustHostKey: true,
 	})
-	if auth == nil || auth.Method != domain.AuthMethodKey || auth.KeyName != "bashes-main" || !auth.TrustHostKey {
+	if auth == nil || auth.Method != domain.AuthMethodKey || auth.KeyName != "bashes-main" {
 		t.Fatalf("Auth preference from key input = %+v", auth)
 	}
 
