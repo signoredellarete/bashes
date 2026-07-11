@@ -1,6 +1,16 @@
 :root {
-  color: #1f2933;
-  background: #eef1f4;
+  --color-accent: #2f6f73;
+  --color-accent-hover: #285e62;
+  --color-border: #c7cfd8;
+  --color-border-soft: #d3d9df;
+  --color-canvas: #eef1f4;
+  --color-panel: #f9fafb;
+  --color-text: #1f2933;
+  --color-text-strong: #2f3945;
+  --color-muted: #66717f;
+  --color-white: #fff;
+  color: var(--color-text);
+  background: var(--color-canvas);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -51,8 +61,8 @@ textarea {
   min-height: 0;
   flex-direction: column;
   gap: 12px;
-  border-right: 1px solid #d3d9df;
-  background: #f9fafb;
+  border-right: 1px solid var(--color-border-soft);
+  background: var(--color-panel);
   overflow: hidden;
   padding: 14px;
 }
@@ -76,7 +86,7 @@ textarea {
 
 .brand span,
 .eyebrow {
-  color: #66717f;
+  color: var(--color-muted);
   font-size: 12px;
 }
 
@@ -88,10 +98,10 @@ textarea {
   height: 28px;
   margin-left: auto;
   place-items: center;
-  border: 1px solid #c7cfd8;
+  border: 1px solid var(--color-border);
   border-radius: 6px;
-  background: #fff;
-  color: #2f3945;
+  background: var(--color-white);
+  color: var(--color-text-strong);
   cursor: pointer;
   font-family: "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols 2", system-ui, sans-serif;
   font-size: 15px;
@@ -102,8 +112,8 @@ textarea {
 }
 
 .sidebar-toggle:hover {
-  border-color: #2f6f73;
-  color: #2f6f73;
+  border-color: var(--color-accent);
+  color: var(--color-accent);
 }
 
 .toolbar {
@@ -115,7 +125,7 @@ textarea {
 .toolbar input {
   width: 100%;
   min-width: 0;
-  border: 1px solid #c7cfd8;
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   padding: 7px 9px;
 }
@@ -125,10 +135,10 @@ textarea {
 .resource-form button,
 .panel-card button,
 .row-action {
-  border: 1px solid #2f6f73;
+  border: 1px solid var(--color-accent);
   border-radius: 6px;
-  background: #2f6f73;
-  color: #fff;
+  background: var(--color-accent);
+  color: var(--color-white);
   padding: 7px 10px;
   cursor: pointer;
   font-size: 13px;
@@ -139,7 +149,7 @@ textarea {
 .resource-form button:hover,
 .panel-card button:hover,
 .row-action:hover {
-  background: #285e62;
+  background: var(--color-accent-hover);
 }
 
 .session-actions button:disabled,

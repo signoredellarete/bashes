@@ -9,11 +9,26 @@ import {
   parsePublicTunnelBindError,
   parseUnknownHostKeyError,
 } from './ssh-errors.js';
+import {
+  lastFocusedSessionId as lastFocusedSessionIdFromState,
+  pendingSessionForResource as pendingSessionForResourceFromState,
+  preferredSessionForResource as preferredSessionForResourceFromState,
+  realSessionsForResource as realSessionsForResourceFromState,
+  rememberFocus,
+  reorderSessions,
+  sessionsForResource as sessionsForResourceFromState,
+} from './session-state.js';
+import {
+  clampNumber,
+  DEFAULT_TERMINAL_FONT_FAMILY,
+  DEFAULT_TERMINAL_FONT_SIZE,
+  DEFAULT_TERMINAL_SCROLLBACK,
+  loadTerminalSettings,
+  persistTerminalSettings,
+} from './terminal-settings.js';
 import './styles.css';
 
-const DEFAULT_TERMINAL_FONT_SIZE = 13;
-const DEFAULT_TERMINAL_FONT_FAMILY = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
-const DEFAULT_TERMINAL_SCROLLBACK = 100000;
+const terminalSettings = loadTerminalSettings(localStorage);
 
 const demoStore = {
   hosts: [
@@ -39,10 +54,7 @@ const state = {
   localShellSupported: false,
   selectedId: null,
   activeSessionId: null,
-  terminalFontSize: readNumberSetting('bashes.terminalFontSize', DEFAULT_TERMINAL_FONT_SIZE, 10, 22),
-  terminalFontFamily: readStringSetting('bashes.terminalFontFamily', DEFAULT_TERMINAL_FONT_FAMILY),
-  terminalScrollback: readNumberSetting('bashes.terminalScrollback', DEFAULT_TERMINAL_SCROLLBACK, 1000, 500000),
-  terminalCopyOnSelect: readBooleanSetting('bashes.terminalCopyOnSelect', true),
+  ...terminalSettings,
   sidebarCollapsed: localStorage.getItem('bashes.sidebarCollapsed') === 'true',
   busy: false,
   drawerMode: null,
@@ -1656,19 +1668,7 @@ function dropAfterTab(event, wrapper) {
 }
 
 function reorderSessionTabs(draggedSessionId, targetSessionId, after) {
-  const order = [...state.sessions.keys()];
-  const from = order.indexOf(draggedSessionId);
-  if (from < 0 || !order.includes(targetSessionId)) return;
-  order.splice(from, 1);
-  let insertAt = order.indexOf(targetSessionId);
-  if (after) insertAt += 1;
-  order.splice(insertAt, 0, draggedSessionId);
-  const reordered = new Map();
-  for (const id of order) {
-    const session = state.sessions.get(id);
-    if (session) reordered.set(id, session);
-  }
-  state.sessions = reordered;
+	state.sessions = reorderSessions(state.sessions, draggedSessionId, targetSessionId, after);
 }
 
 function openResourcePanel(mode, hostID = '') {
@@ -2636,29 +2636,19 @@ function findNestedResource(subsystems, id, parent) {
 }
 
 function sessionsForResource(resourceId) {
-  return [...state.sessions.values()].filter((session) => session.resourceId === resourceId);
+	return sessionsForResourceFromState(state.sessions, resourceId);
 }
 
 function realSessionsForResource(resourceId) {
-  return sessionsForResource(resourceId).filter((session) => !session.closed && !session.pending);
+	return realSessionsForResourceFromState(state.sessions, resourceId);
 }
 
 function pendingSessionForResource(resourceId) {
-  return sessionsForResource(resourceId).find((session) => !session.closed && session.pending);
+	return pendingSessionForResourceFromState(state.sessions, resourceId);
 }
 
 function preferredSessionForResource(resourceId) {
-  const lastSessionID = state.lastSessionByResource.get(resourceId);
-  const lastSession = lastSessionID ? state.sessions.get(lastSessionID) : null;
-  if (lastSession && !lastSession.closed && !lastSession.pending) {
-    return lastSession;
-  }
-
-  const realSessions = realSessionsForResource(resourceId);
-  if (realSessions.length > 0) {
-    return realSessions[realSessions.length - 1];
-  }
-  return pendingSessionForResource(resourceId);
+	return preferredSessionForResourceFromState(state.sessions, state.lastSessionByResource, resourceId);
 }
 
 function sessionTitle(hostname, ordinal) {
@@ -2732,8 +2722,7 @@ function setActiveSession(sessionID) {
 }
 
 function rememberSessionFocus(sessionID) {
-  forgetSessionFocus(sessionID);
-  state.sessionFocusHistory.push(sessionID);
+	state.sessionFocusHistory = rememberFocus(state.sessionFocusHistory, sessionID);
 }
 
 function forgetSessionFocus(sessionID) {
@@ -2741,11 +2730,7 @@ function forgetSessionFocus(sessionID) {
 }
 
 function lastFocusedSessionID() {
-  for (let index = state.sessionFocusHistory.length - 1; index >= 0; index -= 1) {
-    const sessionID = state.sessionFocusHistory[index];
-    if (state.sessions.has(sessionID)) return sessionID;
-  }
-  return state.sessions.keys().next().value ?? null;
+	return lastFocusedSessionIdFromState(state.sessionFocusHistory, state.sessions);
 }
 
 async function withBusy(task) {
@@ -2842,32 +2827,7 @@ function applyTerminalSettings() {
 }
 
 function saveTerminalSettings() {
-  localStorage.setItem('bashes.terminalFontSize', String(state.terminalFontSize));
-  localStorage.setItem('bashes.terminalFontFamily', state.terminalFontFamily);
-  localStorage.setItem('bashes.terminalScrollback', String(state.terminalScrollback));
-  localStorage.setItem('bashes.terminalCopyOnSelect', String(state.terminalCopyOnSelect));
-}
-
-function readNumberSetting(key, fallback, min, max) {
-  return clampNumber(localStorage.getItem(key), min, max, fallback);
-}
-
-function readStringSetting(key, fallback) {
-  const value = localStorage.getItem(key);
-  return value?.trim() || fallback;
-}
-
-function readBooleanSetting(key, fallback) {
-  const value = localStorage.getItem(key);
-  if (value === 'true') return true;
-  if (value === 'false') return false;
-  return fallback;
-}
-
-function clampNumber(value, min, max, fallback) {
-  const number = Number.parseInt(value, 10);
-  if (!Number.isFinite(number)) return fallback;
-  return Math.min(Math.max(number, min), max);
+	persistTerminalSettings(localStorage, state);
 }
 
 function adjustTerminalFontSize(delta) {
