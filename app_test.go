@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -188,6 +189,30 @@ func TestGenerateSSHKeyUsesNextDefaultName(t *testing.T) {
 	}
 	if _, err := os.Stat(second.PrivateKey); err != nil {
 		t.Fatalf("second private key missing: %v", err)
+	}
+}
+
+func TestWriteSSHKeyPairAtomicDoesNotOverwriteExistingKey(t *testing.T) {
+	dir := t.TempDir()
+	privatePath := filepath.Join(dir, "existing")
+	publicPath := privatePath + ".pub"
+	if err := os.WriteFile(privatePath, []byte("original"), 0o600); err != nil {
+		t.Fatalf("WriteFile(existing) error = %v", err)
+	}
+
+	err := writeSSHKeyPairAtomic(privatePath, []byte("replacement"), publicPath, []byte("public"))
+	if err == nil {
+		t.Fatal("writeSSHKeyPairAtomic() error = nil, want existing key error")
+	}
+	data, err := os.ReadFile(privatePath)
+	if err != nil {
+		t.Fatalf("ReadFile(existing) error = %v", err)
+	}
+	if string(data) != "original" {
+		t.Fatalf("existing private key = %q, want unchanged content", data)
+	}
+	if _, err := os.Stat(publicPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("public key unexpectedly created: %v", err)
 	}
 }
 

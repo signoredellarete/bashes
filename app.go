@@ -670,12 +670,7 @@ func (a *App) SaveSSHKeySettings(input SSHKeySettings) (SSHKeySettings, error) {
 	if err != nil {
 		return SSHKeySettings{}, err
 	}
-	tempPath := a.settingsPath() + ".tmp"
-	if err := os.WriteFile(tempPath, append(data, '\n'), 0o600); err != nil {
-		return SSHKeySettings{}, err
-	}
-	if err := os.Rename(tempPath, a.settingsPath()); err != nil {
-		_ = os.Remove(tempPath)
+	if err := writeFileAtomic(a.settingsPath(), append(data, '\n'), 0o600); err != nil {
 		return SSHKeySettings{}, err
 	}
 	return settings, nil
@@ -804,7 +799,7 @@ func (a *App) GenerateSSHKey(input GenerateSSHKeyInput) (SSHKeyInfo, error) {
 
 	privatePath := filepath.Join(dir, name)
 	publicPath := privatePath + ".pub"
-	if _, err := os.Stat(privatePath); err == nil {
+	if fileExists(privatePath) || fileExists(publicPath) {
 		return SSHKeyInfo{}, fmt.Errorf("ssh key %q already exists", name)
 	}
 
@@ -817,15 +812,16 @@ func (a *App) GenerateSSHKey(input GenerateSSHKeyInput) (SSHKeyInfo, error) {
 	if err != nil {
 		return SSHKeyInfo{}, fmt.Errorf("marshal private key: %w", err)
 	}
-	if err := os.WriteFile(privatePath, pem.EncodeToMemory(block), 0o600); err != nil {
-		return SSHKeyInfo{}, err
-	}
-
 	sshPublicKey, err := ssh.NewPublicKey(publicKey)
 	if err != nil {
 		return SSHKeyInfo{}, fmt.Errorf("marshal public key: %w", err)
 	}
-	if err := os.WriteFile(publicPath, ssh.MarshalAuthorizedKey(sshPublicKey), 0o644); err != nil {
+	if err := writeSSHKeyPairAtomic(
+		privatePath,
+		pem.EncodeToMemory(block),
+		publicPath,
+		ssh.MarshalAuthorizedKey(sshPublicKey),
+	); err != nil {
 		return SSHKeyInfo{}, err
 	}
 
@@ -2184,31 +2180,72 @@ func writeFileAtomic(path string, data []byte, perm fs.FileMode) error {
 		return fmt.Errorf("stat export path: %w", err)
 	}
 
-	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
+	tmpName, err := writeTempFile(dir, filepath.Base(path), data, perm)
 	if err != nil {
-		return fmt.Errorf("create temporary export: %w", err)
+		return err
 	}
-	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
-
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return fmt.Errorf("write temporary export: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return fmt.Errorf("sync temporary export: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close temporary export: %w", err)
-	}
-	if err := os.Chmod(tmpName, perm); err != nil {
-		return fmt.Errorf("chmod temporary export: %w", err)
-	}
 	if err := os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("replace export: %w", err)
 	}
 	return nil
+}
+
+func writeSSHKeyPairAtomic(privatePath string, privateData []byte, publicPath string, publicData []byte) error {
+	dir := filepath.Dir(privatePath)
+	privateTemp, err := writeTempFile(dir, filepath.Base(privatePath), privateData, 0o600)
+	if err != nil {
+		return fmt.Errorf("prepare private key: %w", err)
+	}
+	defer os.Remove(privateTemp)
+	publicTemp, err := writeTempFile(dir, filepath.Base(publicPath), publicData, 0o644)
+	if err != nil {
+		return fmt.Errorf("prepare public key: %w", err)
+	}
+	defer os.Remove(publicTemp)
+
+	if err := os.Link(privateTemp, privatePath); err != nil {
+		return fmt.Errorf("publish private key: %w", err)
+	}
+	if err := os.Link(publicTemp, publicPath); err != nil {
+		_ = os.Remove(privatePath)
+		return fmt.Errorf("publish public key: %w", err)
+	}
+	return nil
+}
+
+func writeTempFile(dir string, base string, data []byte, perm fs.FileMode) (string, error) {
+	tmp, err := os.CreateTemp(dir, "."+base+".*.tmp")
+	if err != nil {
+		return "", fmt.Errorf("create temporary file: %w", err)
+	}
+	name := tmp.Name()
+	cleanup := func() {
+		_ = tmp.Close()
+		_ = os.Remove(name)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		cleanup()
+		return "", fmt.Errorf("write temporary file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		cleanup()
+		return "", fmt.Errorf("sync temporary file: %w", err)
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		cleanup()
+		return "", fmt.Errorf("chmod temporary file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(name)
+		return "", fmt.Errorf("close temporary file: %w", err)
+	}
+	return name, nil
+}
+
+func fileExists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
 }
 
 func expandHome(path string) string {
