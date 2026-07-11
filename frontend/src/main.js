@@ -89,6 +89,44 @@ const ICON_COLLAPSE = '❮';
 const ICON_EXPAND = '❯';
 const ICON_CLOSE = '✕';
 
+function authFieldsMarkup(context) {
+  return `
+    <label>
+      <span>Authentication</span>
+      <select name="authMethod">
+        <option value="agent">Agent / system keys</option>
+        <option value="password">Password</option>
+        <option value="key">Existing key</option>
+        <option value="path">Key file</option>
+      </select>
+    </label>
+    <label data-auth-field="key">
+      <span>Existing Key</span>
+      <select name="keyName"></select>
+    </label>
+    <label data-auth-field="password">
+      <span>Password</span>
+      <input name="password" type="password" autocomplete="current-password" />
+    </label>
+    <label data-auth-field="path">
+      <span class="field-label-with-help">
+        Custom Key Path
+        <span class="field-help-trigger" role="button" tabindex="0" aria-label="Custom key path help" aria-expanded="false">?</span>
+        <span class="field-help-popover">${customKeyPathHelp}</span>
+      </span>
+      <input name="privateKeyPath" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="optional private key path" />
+    </label>
+    <label data-auth-field="key-passphrase">
+      <span>Key Passphrase</span>
+      <input name="privateKeyPassphrase" type="password" autocomplete="off" />
+    </label>
+    <label class="checkbox-row">
+      <input name="trustHostKey" type="checkbox" />
+      <span>Skip host key verification for this ${context} (insecure)</span>
+    </label>
+  `;
+}
+
 function localResource() {
   return {
     id: LOCAL_RESOURCE_ID,
@@ -229,39 +267,7 @@ app.innerHTML = `
       <p id="connect-summary" class="parent-summary"></p>
       <p class="inline-status" id="connect-status" hidden></p>
 
-      <label>
-        <span>Authentication</span>
-        <select name="authMethod">
-          <option value="agent">Agent / system keys</option>
-          <option value="password">Password</option>
-          <option value="key">Existing key</option>
-          <option value="path">Key file</option>
-        </select>
-      </label>
-      <label data-auth-field="key">
-        <span>Existing Key</span>
-        <select name="keyName"></select>
-      </label>
-      <label data-auth-field="password">
-        <span>Password</span>
-        <input name="password" type="password" autocomplete="current-password" />
-      </label>
-      <label data-auth-field="path">
-        <span class="field-label-with-help">
-          Custom Key Path
-          <span class="field-help-trigger" role="button" tabindex="0" aria-label="Custom key path help" aria-expanded="false">?</span>
-          <span class="field-help-popover">${customKeyPathHelp}</span>
-        </span>
-        <input name="privateKeyPath" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="optional private key path" />
-      </label>
-      <label data-auth-field="key-passphrase">
-        <span>Key Passphrase</span>
-        <input name="privateKeyPassphrase" type="password" autocomplete="off" />
-      </label>
-      <label class="checkbox-row">
-        <input name="trustHostKey" type="checkbox" />
-        <span>Skip host key verification for this session (insecure)</span>
-      </label>
+      ${authFieldsMarkup('session')}
 
       <footer class="panel-actions">
         <button class="secondary" type="button" data-close-connect>Cancel</button>
@@ -312,39 +318,7 @@ app.innerHTML = `
           <input name="remotePort" type="number" min="1" max="65535" value="80" />
         </label>
       </div>
-      <label>
-        <span>Authentication</span>
-        <select name="authMethod">
-          <option value="agent">Agent / system keys</option>
-          <option value="password">Password</option>
-          <option value="key">Existing key</option>
-          <option value="path">Key file</option>
-        </select>
-      </label>
-      <label data-auth-field="key">
-        <span>Existing Key</span>
-        <select name="keyName"></select>
-      </label>
-      <label data-auth-field="password">
-        <span>Password</span>
-        <input name="password" type="password" autocomplete="current-password" />
-      </label>
-      <label data-auth-field="path">
-        <span class="field-label-with-help">
-          Custom Key Path
-          <span class="field-help-trigger" role="button" tabindex="0" aria-label="Custom key path help" aria-expanded="false">?</span>
-          <span class="field-help-popover">${customKeyPathHelp}</span>
-        </span>
-        <input name="privateKeyPath" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="optional private key path" />
-      </label>
-      <label data-auth-field="key-passphrase">
-        <span>Key Passphrase</span>
-        <input name="privateKeyPassphrase" type="password" autocomplete="off" />
-      </label>
-      <label class="checkbox-row">
-        <input name="trustHostKey" type="checkbox" />
-        <span>Skip host key verification for this tunnel (insecure)</span>
-      </label>
+      ${authFieldsMarkup('tunnel')}
 
       <footer class="panel-actions">
         <button class="secondary" type="button" data-close-tunnel>Close</button>
@@ -2324,9 +2298,6 @@ function applyConnectDefaults(form, resource) {
     return;
   }
 
-  if (auth.trustHostKey) {
-    form.elements.trustHostKey.checked = true;
-  }
   if (auth.method === 'password') {
     form.elements.authMethod.value = 'password';
   }
@@ -2402,7 +2373,7 @@ function authInputFromPreference(resource) {
 }
 
 function trustHostKeyFromPreference(resource) {
-  return Boolean(resource?.auth?.trustHostKey);
+	return false;
 }
 
 async function renderSelectedPublicKey() {
