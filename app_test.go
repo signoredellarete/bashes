@@ -326,6 +326,18 @@ func TestNormalizeTunnelInputRejectsUnsupportedTypeAndPort(t *testing.T) {
 	}
 }
 
+func TestNormalizeTunnelInputRequiresConfirmationForPublicBind(t *testing.T) {
+	input := SSHTunnelInput{Type: "socks", LocalHost: "0.0.0.0", LocalPort: 1080}
+	if err := normalizeTunnelInput(&input); err == nil || !strings.Contains(err.Error(), "BASHES_PUBLIC_TUNNEL_BIND") {
+		t.Fatalf("normalizeTunnelInput(public) error = %v, want confirmation error", err)
+	}
+
+	input.AllowPublicBind = true
+	if err := normalizeTunnelInput(&input); err != nil {
+		t.Fatalf("normalizeTunnelInput(confirmed public) error = %v", err)
+	}
+}
+
 func TestResourceIDsForDeleteIncludesHostSubsystems(t *testing.T) {
 	app := NewApp(filepath.Join(t.TempDir(), "hosts.json"))
 	host, err := app.AddHost(applicationEndpoint("host", "10.0.0.1"))

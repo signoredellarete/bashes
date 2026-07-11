@@ -2472,13 +2472,33 @@ async function startSSHSessionWithHostKeyPrompt(input, resource, confirmLabel = 
 }
 
 async function startSSHTunnelWithHostKeyPrompt(input, resource) {
-  try {
-    return await apiStartSSHTunnel(input);
-  } catch (error) {
-    if (input.acceptHostKey) throw error;
+	try {
+		return await apiStartSSHTunnel(input);
+	} catch (error) {
+		const publicBind = parsePublicTunnelBindError(error);
+		if (publicBind && !input.allowPublicBind) {
+			const warning = input.type === 'socks'
+				? `This exposes an unauthenticated SOCKS proxy on ${publicBind.host}. Anyone who can reach this address may use the tunnel.`
+				: `This exposes the tunnel listener on ${publicBind.host} instead of loopback.`;
+			const confirmed = await openConfirmModal({
+				kicker: 'Public Tunnel',
+				title: `Bind tunnel to ${publicBind.host}?`,
+				message: `${warning}\n\nContinue only if this network exposure is intentional.`,
+				confirmLabel: 'Bind Publicly',
+			});
+			if (!confirmed) throw error;
+			return await startSSHTunnelWithHostKeyPrompt({ ...input, allowPublicBind: true }, resource);
+		}
+		if (input.acceptHostKey) throw error;
     if (!(await confirmUnknownHostKey(error, resource, 'Trust and start tunnel'))) throw error;
     return await apiStartSSHTunnel({ ...input, acceptHostKey: true });
   }
+}
+
+function parsePublicTunnelBindError(error) {
+	const detail = String(error?.message ?? error ?? '');
+	const match = detail.match(/BASHES_PUBLIC_TUNNEL_BIND\s+host=(\S+)\s+type=(\S+)/);
+	return match ? { host: match[1], type: match[2] } : null;
 }
 
 async function installSSHKeyWithHostKeyPrompt(input, resource) {

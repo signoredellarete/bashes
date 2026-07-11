@@ -70,6 +70,18 @@ func TestHandleSOCKS5RejectsUnsupportedCommand(t *testing.T) {
 	}
 }
 
+func TestConnectionSetClosesTrackedConnections(t *testing.T) {
+	client, server := net.Pipe()
+	connections := newConnectionSet()
+	connections.add(client)
+	connections.closeAll()
+	defer server.Close()
+
+	if _, err := server.Write([]byte("closed")); err == nil {
+		t.Fatal("Write() error = nil, want peer closed by connection set")
+	}
+}
+
 func writeAll(t *testing.T, conn net.Conn, data []byte) {
 	t.Helper()
 	if _, err := conn.Write(data); err != nil {

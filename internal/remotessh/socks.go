@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -22,9 +23,11 @@ func ServeSOCKS5(ctx context.Context, listener net.Listener, client *ssh.Client)
 		return errors.New("ssh client is required")
 	}
 
+	connections := newConnectionSet()
 	go func() {
 		<-ctx.Done()
 		_ = listener.Close()
+		connections.closeAll()
 	}()
 
 	for {
@@ -38,7 +41,9 @@ func ServeSOCKS5(ctx context.Context, listener net.Listener, client *ssh.Client)
 			}
 		}
 
+		connections.add(conn)
 		go func() {
+			defer connections.remove(conn)
 			_ = HandleSOCKS5(conn, client.Dial)
 		}()
 	}
@@ -51,6 +56,9 @@ func HandleSOCKS5(conn net.Conn, dial DialFunc) error {
 		return errors.New("socks dialer is required")
 	}
 
+	if err := conn.SetDeadline(time.Now().Add(15 * time.Second)); err != nil {
+		return err
+	}
 	if err := readSOCKS5Greeting(conn); err != nil {
 		return err
 	}
@@ -70,6 +78,9 @@ func HandleSOCKS5(conn net.Conn, dial DialFunc) error {
 		return err
 	}
 	defer remote.Close()
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		return err
+	}
 
 	if err := writeSOCKS5Reply(conn, 0x00); err != nil {
 		return err

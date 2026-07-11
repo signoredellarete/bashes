@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"sync"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -31,9 +32,11 @@ func serveForward(ctx context.Context, listener net.Listener, dial func() (net.C
 		return errors.New("tunnel dialer is required")
 	}
 
+	connections := newConnectionSet()
 	go func() {
 		<-ctx.Done()
 		_ = listener.Close()
+		connections.closeAll()
 	}()
 
 	for {
@@ -47,11 +50,13 @@ func serveForward(ctx context.Context, listener net.Listener, dial func() (net.C
 			}
 		}
 
-		go handleForwardConn(conn, dial)
+		connections.add(conn)
+		go handleForwardConn(conn, dial, connections)
 	}
 }
 
-func handleForwardConn(conn net.Conn, dial func() (net.Conn, error)) {
+func handleForwardConn(conn net.Conn, dial func() (net.Conn, error), connections *connectionSet) {
+	defer connections.remove(conn)
 	defer conn.Close()
 
 	remote, err := dial()
@@ -64,4 +69,38 @@ func handleForwardConn(conn net.Conn, dial func() (net.Conn, error)) {
 	go proxyCopy(remote, conn, done)
 	go proxyCopy(conn, remote, done)
 	<-done
+}
+
+type connectionSet struct {
+	mu    sync.Mutex
+	items map[net.Conn]struct{}
+}
+
+func newConnectionSet() *connectionSet {
+	return &connectionSet{items: make(map[net.Conn]struct{})}
+}
+
+func (s *connectionSet) add(conn net.Conn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.items[conn] = struct{}{}
+}
+
+func (s *connectionSet) remove(conn net.Conn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.items, conn)
+}
+
+func (s *connectionSet) closeAll() {
+	s.mu.Lock()
+	connections := make([]net.Conn, 0, len(s.items))
+	for conn := range s.items {
+		connections = append(connections, conn)
+	}
+	s.items = make(map[net.Conn]struct{})
+	s.mu.Unlock()
+	for _, conn := range connections {
+		_ = conn.Close()
+	}
 }

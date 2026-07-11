@@ -978,6 +978,7 @@ type SSHTunnelInput struct {
 	PrivateKeyPassphrase string `json:"privateKeyPassphrase,omitempty"`
 	TrustHostKey         bool   `json:"trustHostKey"`
 	AcceptHostKey        bool   `json:"acceptHostKey,omitempty"`
+	AllowPublicBind      bool   `json:"allowPublicBind,omitempty"`
 }
 
 type SSHTunnelInfo struct {
@@ -1824,6 +1825,9 @@ func normalizeTunnelInput(input *SSHTunnelInput) error {
 	if invalidTunnelHost(input.LocalHost) {
 		return errors.New("local bind address contains invalid characters")
 	}
+	if !input.AllowPublicBind && !isLoopbackBind(input.LocalHost) {
+		return fmt.Errorf("BASHES_PUBLIC_TUNNEL_BIND host=%s type=%s", input.LocalHost, input.Type)
+	}
 	if input.LocalPort < 1 || input.LocalPort > 65535 {
 		return errors.New("local port must be between 1 and 65535")
 	}
@@ -1842,6 +1846,15 @@ func normalizeTunnelInput(input *SSHTunnelInput) error {
 		return errors.New("forward target port must be between 1 and 65535")
 	}
 	return nil
+}
+
+func isLoopbackBind(host string) bool {
+	host = strings.TrimSpace(strings.Trim(host, "[]"))
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func invalidTunnelHost(host string) bool {
