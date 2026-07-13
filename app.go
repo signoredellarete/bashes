@@ -206,6 +206,7 @@ type InstallSSHKeyInput struct {
 	PrivateKeyPassphrase string `json:"privateKeyPassphrase,omitempty"`
 	TrustHostKey         bool   `json:"trustHostKey"`
 	AcceptHostKey        bool   `json:"acceptHostKey,omitempty"`
+	ReplaceHostKey       bool   `json:"replaceHostKey,omitempty"`
 }
 
 type AppInfo struct {
@@ -872,6 +873,7 @@ func (a *App) InstallSSHKey(input InstallSSHKeyInput) error {
 		PrivateKeyPassphrase: input.PrivateKeyPassphrase,
 		TrustHostKey:         input.TrustHostKey,
 		AcceptHostKey:        input.AcceptHostKey,
+		ReplaceHostKey:       input.ReplaceHostKey,
 	}, remotessh.DefaultTimeout)
 	if err != nil {
 		return err
@@ -932,6 +934,7 @@ type SSHSessionInput struct {
 	PrivateKeyPassphrase string `json:"privateKeyPassphrase,omitempty"`
 	TrustHostKey         bool   `json:"trustHostKey"`
 	AcceptHostKey        bool   `json:"acceptHostKey,omitempty"`
+	ReplaceHostKey       bool   `json:"replaceHostKey,omitempty"`
 	Cols                 int    `json:"cols"`
 	Rows                 int    `json:"rows"`
 }
@@ -949,6 +952,7 @@ type SSHTunnelInput struct {
 	PrivateKeyPassphrase string `json:"privateKeyPassphrase,omitempty"`
 	TrustHostKey         bool   `json:"trustHostKey"`
 	AcceptHostKey        bool   `json:"acceptHostKey,omitempty"`
+	ReplaceHostKey       bool   `json:"replaceHostKey,omitempty"`
 	AllowPublicBind      bool   `json:"allowPublicBind,omitempty"`
 }
 
@@ -1124,6 +1128,7 @@ func (a *App) StartSSHTunnel(input SSHTunnelInput) (SSHTunnelInfo, error) {
 		PrivateKeyPassphrase: input.PrivateKeyPassphrase,
 		TrustHostKey:         input.TrustHostKey,
 		AcceptHostKey:        input.AcceptHostKey,
+		ReplaceHostKey:       input.ReplaceHostKey,
 	}
 	sessionInput = applyAuthPreference(resource, sessionInput)
 	dialInput := a.resolveSessionKeyPath(sessionInput)
@@ -2036,9 +2041,10 @@ func hostKeyPolicy(resource domain.Endpoint, input SSHSessionInput, acceptedFing
 	}
 
 	policy := remotessh.HostKeyPolicy{
-		ExpectedFingerprint: strings.TrimSpace(resource.HostKeyFingerprint),
-		AcceptNewHostKey:    input.AcceptHostKey,
-		AcceptedFingerprint: acceptedFingerprint,
+		ExpectedFingerprint:  strings.TrimSpace(resource.HostKeyFingerprint),
+		AcceptNewHostKey:     input.AcceptHostKey,
+		AcceptChangedHostKey: input.ReplaceHostKey,
+		AcceptedFingerprint:  acceptedFingerprint,
 	}
 	knownHosts := filepath.Join(userHomeDir(), ".ssh", "known_hosts")
 	if _, err := os.Stat(knownHosts); err == nil {

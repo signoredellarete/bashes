@@ -5,11 +5,15 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
+	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 func TestNewClientConfigAcceptsPasswordWithExplicitInsecurePolicy(t *testing.T) {
@@ -144,6 +148,49 @@ func TestHostKeyCallbackCapturesAcceptedFingerprint(t *testing.T) {
 	}
 	if accepted != ssh.FingerprintSHA256(key) {
 		t.Fatalf("accepted fingerprint = %q, want %q", accepted, ssh.FingerprintSHA256(key))
+	}
+}
+
+func TestHostKeyCallbackReportsAndAcceptsKnownHostsMismatch(t *testing.T) {
+	knownKey := testPublicKey(t)
+	actualKey := testPublicKey(t)
+	knownHostsPath := filepath.Join(t.TempDir(), "known_hosts")
+	line := knownhosts.Line([]string{"example.test"}, knownKey) + "\n"
+	if err := os.WriteFile(knownHostsPath, []byte(line), 0o600); err != nil {
+		t.Fatalf("WriteFile(known_hosts) error = %v", err)
+	}
+	remote := &net.TCPAddr{IP: net.ParseIP("192.0.2.10"), Port: 22}
+
+	callback, err := HostKeyCallback(HostKeyPolicy{KnownHostsPath: knownHostsPath})
+	if err != nil {
+		t.Fatalf("HostKeyCallback() error = %v", err)
+	}
+	err = callback("example.test:22", remote, actualKey)
+	var mismatch HostKeyMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("HostKeyCallback() error = %T %[1]v, want HostKeyMismatchError", err)
+	}
+	if mismatch.ExpectedFingerprint != ssh.FingerprintSHA256(knownKey) {
+		t.Fatalf("ExpectedFingerprint = %q, want %q", mismatch.ExpectedFingerprint, ssh.FingerprintSHA256(knownKey))
+	}
+	if mismatch.ActualFingerprint != ssh.FingerprintSHA256(actualKey) {
+		t.Fatalf("ActualFingerprint = %q, want %q", mismatch.ActualFingerprint, ssh.FingerprintSHA256(actualKey))
+	}
+
+	var accepted string
+	callback, err = HostKeyCallback(HostKeyPolicy{
+		KnownHostsPath:       knownHostsPath,
+		AcceptChangedHostKey: true,
+		AcceptedFingerprint:  &accepted,
+	})
+	if err != nil {
+		t.Fatalf("HostKeyCallback(replace) error = %v", err)
+	}
+	if err := callback("example.test:22", remote, actualKey); err != nil {
+		t.Fatalf("HostKeyCallback(replace) verify error = %v", err)
+	}
+	if accepted != ssh.FingerprintSHA256(actualKey) {
+		t.Fatalf("accepted fingerprint = %q, want %q", accepted, ssh.FingerprintSHA256(actualKey))
 	}
 }
 

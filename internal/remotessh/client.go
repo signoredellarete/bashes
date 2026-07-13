@@ -33,6 +33,7 @@ type HostKeyPolicy struct {
 	InsecureIgnoreHostKey bool
 	ExpectedFingerprint   string
 	AcceptNewHostKey      bool
+	AcceptChangedHostKey  bool
 	AcceptedFingerprint   *string
 }
 
@@ -161,6 +162,10 @@ func HostKeyCallback(policy HostKeyPolicy) (ssh.HostKeyCallback, error) {
 			if fingerprint == expectedFingerprint {
 				return nil
 			}
+			if policy.AcceptChangedHostKey {
+				captureAcceptedFingerprint(policy, fingerprint)
+				return nil
+			}
 			return HostKeyMismatchError{
 				Host:                hostname,
 				ExpectedFingerprint: expectedFingerprint,
@@ -173,20 +178,35 @@ func HostKeyCallback(policy HostKeyPolicy) (ssh.HostKeyCallback, error) {
 			if err == nil {
 				return nil
 			}
+			if expected, mismatch := knownHostMismatch(err); mismatch {
+				if policy.AcceptChangedHostKey {
+					captureAcceptedFingerprint(policy, fingerprint)
+					return nil
+				}
+				return HostKeyMismatchError{
+					Host:                hostname,
+					ExpectedFingerprint: expected,
+					ActualFingerprint:   fingerprint,
+				}
+			}
 			if !isUnknownHostKey(err) {
-				return err
+				return fmt.Errorf("verify known_hosts: %w", err)
 			}
 		}
 
 		if policy.AcceptNewHostKey {
-			if policy.AcceptedFingerprint != nil {
-				*policy.AcceptedFingerprint = fingerprint
-			}
+			captureAcceptedFingerprint(policy, fingerprint)
 			return nil
 		}
 
 		return UnknownHostKeyError{Host: hostname, Fingerprint: fingerprint}
 	}, nil
+}
+
+func captureAcceptedFingerprint(policy HostKeyPolicy, fingerprint string) {
+	if policy.AcceptedFingerprint != nil {
+		*policy.AcceptedFingerprint = fingerprint
+	}
 }
 
 type UnknownHostKeyError struct {
@@ -214,6 +234,24 @@ func isUnknownHostKey(err error) bool {
 		return len(keyErr.Want) == 0
 	}
 	return false
+}
+
+func knownHostMismatch(err error) (string, bool) {
+	var keyErr *knownhosts.KeyError
+	if !errors.As(err, &keyErr) || len(keyErr.Want) == 0 {
+		return "", false
+	}
+	fingerprints := make([]string, 0, len(keyErr.Want))
+	seen := make(map[string]struct{}, len(keyErr.Want))
+	for _, known := range keyErr.Want {
+		fingerprint := ssh.FingerprintSHA256(known.Key)
+		if _, exists := seen[fingerprint]; exists {
+			continue
+		}
+		seen[fingerprint] = struct{}{}
+		fingerprints = append(fingerprints, fingerprint)
+	}
+	return strings.Join(fingerprints, ", "), true
 }
 
 func Address(target Target) string {

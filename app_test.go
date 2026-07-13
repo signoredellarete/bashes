@@ -3,18 +3,26 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/signoredellarete/bashes/internal/application"
 	"github.com/signoredellarete/bashes/internal/domain"
 	"github.com/signoredellarete/bashes/internal/remotessh"
+	"golang.org/x/crypto/ssh"
 )
 
 func TestSSHOutputEventEncodesRawBytes(t *testing.T) {
@@ -145,6 +153,127 @@ func TestAuthMethodsRejectsUnresolvedKeyName(t *testing.T) {
 	}
 }
 
+func TestDialResourceAuthenticatesWithSystemAndExplicitKeys(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey() error = %v", err)
+	}
+	privateBlock, err := ssh.MarshalPrivateKey(privateKey, "bashes auth integration test")
+	if err != nil {
+		t.Fatalf("MarshalPrivateKey() error = %v", err)
+	}
+	privatePEM := pem.EncodeToMemory(privateBlock)
+	userKey, err := ssh.NewPublicKey(publicKey)
+	if err != nil {
+		t.Fatalf("NewPublicKey() error = %v", err)
+	}
+
+	home := t.TempDir()
+	sshDir := filepath.Join(home, ".ssh")
+	if err := os.MkdirAll(sshDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(.ssh) error = %v", err)
+	}
+	privatePath := filepath.Join(sshDir, "id_ed25519")
+	if err := os.WriteFile(privatePath, privatePEM, 0o600); err != nil {
+		t.Fatalf("WriteFile(private key) error = %v", err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("SSH_AUTH_SOCK", "")
+
+	app := NewApp(filepath.Join(t.TempDir(), "hosts.json"))
+	tests := []struct {
+		name  string
+		input SSHSessionInput
+	}{
+		{name: "system default", input: SSHSessionInput{TrustHostKey: true}},
+		{name: "explicit path", input: SSHSessionInput{PrivateKeyPath: privatePath, TrustHostKey: true}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			host, port, wait := startPublicKeyTestServer(t, userKey)
+			resource := domain.Endpoint{ID: "host-1", Hostname: host, IP: host, Port: port, User: "test"}
+			client, err := app.dialResource(resource, test.input, 3*time.Second)
+			if err != nil {
+				t.Fatalf("dialResource() error = %v", err)
+			}
+			_ = client.Close()
+			if err := wait(); err != nil {
+				t.Fatalf("SSH server error = %v", err)
+			}
+		})
+	}
+}
+
+func startPublicKeyTestServer(t *testing.T, acceptedKey ssh.PublicKey) (string, int, func() error) {
+	t.Helper()
+	_, hostPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey(host) error = %v", err)
+	}
+	hostSigner, err := ssh.NewSignerFromKey(hostPrivateKey)
+	if err != nil {
+		t.Fatalf("NewSignerFromKey(host) error = %v", err)
+	}
+
+	config := &ssh.ServerConfig{
+		PublicKeyCallback: func(_ ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+			if bytes.Equal(key.Marshal(), acceptedKey.Marshal()) {
+				return nil, nil
+			}
+			return nil, errors.New("unexpected public key")
+		},
+	}
+	config.AddHostKey(hostSigner)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	host, portText, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		listener.Close()
+		t.Fatalf("SplitHostPort() error = %v", err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		listener.Close()
+		t.Fatalf("Atoi(port) error = %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			done <- err
+			return
+		}
+		defer conn.Close()
+		serverConn, channels, requests, err := ssh.NewServerConn(conn, config)
+		if err != nil {
+			done <- err
+			return
+		}
+		go ssh.DiscardRequests(requests)
+		go func() {
+			for channel := range channels {
+				_ = channel.Reject(ssh.UnknownChannelType, "test server does not accept channels")
+			}
+		}()
+		_ = serverConn.Wait()
+		done <- nil
+	}()
+
+	return host, port, func() error {
+		_ = listener.Close()
+		select {
+		case err := <-done:
+			return err
+		case <-time.After(3 * time.Second):
+			return fmt.Errorf("timed out waiting for SSH test server")
+		}
+	}
+}
+
 func TestHostKeyPolicyUsesSavedFingerprint(t *testing.T) {
 	var accepted string
 	policy := hostKeyPolicy(domain.Endpoint{HostKeyFingerprint: "SHA256:known"}, SSHSessionInput{}, &accepted)
@@ -164,6 +293,24 @@ func TestHostKeyPolicyAcceptsNewKeyWhenRequested(t *testing.T) {
 	policy := hostKeyPolicy(domain.Endpoint{}, SSHSessionInput{AcceptHostKey: true}, &accepted)
 	if !policy.AcceptNewHostKey {
 		t.Fatal("AcceptNewHostKey = false, want true")
+	}
+	if policy.AcceptedFingerprint == nil {
+		t.Fatal("AcceptedFingerprint = nil")
+	}
+}
+
+func TestHostKeyPolicyAcceptsChangedKeyOnlyWhenRequested(t *testing.T) {
+	var accepted string
+	policy := hostKeyPolicy(
+		domain.Endpoint{HostKeyFingerprint: "SHA256:old"},
+		SSHSessionInput{ReplaceHostKey: true},
+		&accepted,
+	)
+	if !policy.AcceptChangedHostKey {
+		t.Fatal("AcceptChangedHostKey = false, want true")
+	}
+	if policy.AcceptNewHostKey {
+		t.Fatal("AcceptNewHostKey = true, want false")
 	}
 	if policy.AcceptedFingerprint == nil {
 		t.Fatal("AcceptedFingerprint = nil")

@@ -2444,9 +2444,10 @@ async function startSSHSessionWithHostKeyPrompt(input, resource, confirmLabel = 
   try {
     return await apiStartSSHSession(input);
   } catch (error) {
-    if (input.acceptHostKey) throw error;
-    if (!(await confirmUnknownHostKey(error, resource, confirmLabel))) throw error;
-    return await apiStartSSHSession({ ...input, acceptHostKey: true });
+    if (input.acceptHostKey || input.replaceHostKey) throw error;
+    const retryInput = await confirmHostKeyChange(error, resource, confirmLabel);
+    if (!retryInput) throw error;
+    return await apiStartSSHSession({ ...input, ...retryInput });
   }
 }
 
@@ -2468,9 +2469,10 @@ async function startSSHTunnelWithHostKeyPrompt(input, resource) {
 			if (!confirmed) throw error;
 			return await startSSHTunnelWithHostKeyPrompt({ ...input, allowPublicBind: true }, resource);
 		}
-		if (input.acceptHostKey) throw error;
-    if (!(await confirmUnknownHostKey(error, resource, 'Trust and start tunnel'))) throw error;
-    return await apiStartSSHTunnel({ ...input, acceptHostKey: true });
+		if (input.acceptHostKey || input.replaceHostKey) throw error;
+		const retryInput = await confirmHostKeyChange(error, resource, 'Trust and start tunnel');
+		if (!retryInput) throw error;
+		return await apiStartSSHTunnel({ ...input, ...retryInput });
   }
 }
 
@@ -2478,22 +2480,35 @@ async function installSSHKeyWithHostKeyPrompt(input, resource) {
   try {
     return await apiInstallSSHKey(input);
   } catch (error) {
-    if (input.acceptHostKey) throw error;
-    if (!(await confirmUnknownHostKey(error, resource, 'Trust and install key'))) throw error;
-    return await apiInstallSSHKey({ ...input, acceptHostKey: true });
+    if (input.acceptHostKey || input.replaceHostKey) throw error;
+    const retryInput = await confirmHostKeyChange(error, resource, 'Trust and install key');
+    if (!retryInput) throw error;
+    return await apiInstallSSHKey({ ...input, ...retryInput });
   }
 }
 
-async function confirmUnknownHostKey(error, resource, confirmLabel) {
+async function confirmHostKeyChange(error, resource, confirmLabel) {
   const hostKey = parseUnknownHostKeyError(error);
-  if (!hostKey) return false;
   const target = `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`;
-  return await openConfirmModal({
-    kicker: 'SSH Host Key',
-    title: `Trust ${resource.hostname}?`,
-    message: `Bashes has not seen this SSH server key before.\n\nTarget: ${target}\nServer: ${hostKey.host}\nFingerprint: ${hostKey.fingerprint}\n\nContinue only if this fingerprint matches the expected server.`,
-    confirmLabel,
+  if (hostKey) {
+    const confirmed = await openConfirmModal({
+      kicker: 'SSH Host Key',
+      title: `Trust ${resource.hostname}?`,
+      message: `Bashes has not seen this SSH server key before.\n\nTarget: ${target}\nServer: ${hostKey.host}\nFingerprint: ${hostKey.fingerprint}\n\nContinue only if this fingerprint matches the expected server.`,
+      confirmLabel,
+    });
+    return confirmed ? { acceptHostKey: true } : null;
+  }
+
+  const mismatch = parseHostKeyMismatchError(error);
+  if (!mismatch) return null;
+  const confirmed = await openConfirmModal({
+    kicker: 'SSH Host Key Changed',
+    title: `Replace the trusted key for ${resource.hostname}?`,
+    message: `The SSH server key does not match the trusted fingerprint. This can indicate a reinstalled server or a man-in-the-middle attack.\n\nTarget: ${target}\nTrusted: ${mismatch.expected}\nReceived: ${mismatch.actual}\n\nVerify the new fingerprint before replacing the trusted key.`,
+    confirmLabel: 'Replace Trusted Key',
   });
+  return confirmed ? { replaceHostKey: true } : null;
 }
 
 function connectErrorMessage(error, resource) {
