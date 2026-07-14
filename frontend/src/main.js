@@ -2494,7 +2494,7 @@ async function confirmHostKeyChange(error, resource, confirmLabel) {
     const confirmed = await openConfirmModal({
       kicker: 'SSH Host Key',
       title: `Trust ${resource.hostname}?`,
-      message: `Bashes has not seen this SSH server key before.\n\nTarget: ${target}\nServer: ${hostKey.host}\nFingerprint: ${hostKey.fingerprint}\n\nContinue only if this fingerprint matches the expected server.`,
+      message: `Verify the server fingerprint before continuing.\n\n${target}\nFingerprint: ${hostKey.fingerprint}`,
       confirmLabel,
     });
     return confirmed ? { acceptHostKey: true } : null;
@@ -2504,8 +2504,8 @@ async function confirmHostKeyChange(error, resource, confirmLabel) {
   if (!mismatch) return null;
   const confirmed = await openConfirmModal({
     kicker: 'SSH Host Key Changed',
-    title: `Replace the trusted key for ${resource.hostname}?`,
-    message: `The SSH server key does not match the trusted fingerprint. This can indicate a reinstalled server or a man-in-the-middle attack.\n\nTarget: ${target}\nTrusted: ${mismatch.expected}\nReceived: ${mismatch.actual}\n\nVerify the new fingerprint before replacing the trusted key.`,
+    title: `Replace trusted key for ${resource.hostname}?`,
+    message: `The server identity changed. Verify the new fingerprint before continuing.\n\n${target}\nTrusted: ${mismatch.expected}\nNew: ${mismatch.actual}`,
     confirmLabel: 'Replace Trusted Key',
   });
   return confirmed ? { replaceHostKey: true } : null;

@@ -911,7 +911,10 @@ textarea {
   position: relative;
   z-index: 1;
   display: grid;
+  box-sizing: border-box;
   width: min(390px, calc(100vw - 36px));
+  max-width: 100%;
+  min-width: 0;
   gap: 12px;
   border: 1px solid #c7cfd8;
   border-radius: 8px;
@@ -936,13 +939,18 @@ textarea {
 .confirm-card h3 {
   color: #1f2933;
   font-size: 16px;
+  overflow-wrap: anywhere;
 }
 
 #confirm-message {
+  min-width: 0;
+  max-width: 100%;
   color: #53606f;
   font-size: 13px;
   line-height: 1.45;
+  overflow-wrap: anywhere;
   white-space: pre-line;
+  word-break: break-word;
 }
 
 .confirm-actions {
