@@ -87,8 +87,6 @@ const customKeyPathHelp = [
   'Linux/macOS: ~/.ssh/id_ed25519',
   'Windows: C:\\Users\\YourUser\\.ssh\\id_ed25519',
 ].join('\n\n');
-const ICON_COLLAPSE = '❮';
-const ICON_EXPAND = '❯';
 const ICON_CLOSE = '✕';
 
 function authFieldsMarkup(context) {
@@ -153,7 +151,9 @@ app.innerHTML = `
         <span>Remote sessions</span>
       </div>
       <button id="toggle-sidebar" class="sidebar-toggle" type="button" title="Compact sidebar" aria-label="Compact sidebar">
-        ${ICON_COLLAPSE}
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="m15 18-6-6 6-6"></path>
+        </svg>
       </button>
     </header>
 
@@ -764,7 +764,7 @@ async function submitTunnel(event) {
   });
 }
 
-async function quickConnect(resource) {
+async function quickConnect(resource, { failureSessionID = '' } = {}) {
   return await withBusy(async () => {
     try {
       if (isLocalResource(resource)) {
@@ -802,7 +802,8 @@ async function quickConnect(resource) {
         await openConnectPanel(message, 'error');
       } else {
         const pending = pendingSessionForResource(resource.id);
-        if (pending) removeSessionFromUI(pending.id);
+        const failedSession = pending ?? state.sessions.get(failureSessionID);
+        if (failedSession) markSessionConnectionFailed(failedSession.id, resource, message);
       }
       return null;
     }
@@ -1066,8 +1067,7 @@ function markSessionClosed(sessionID, message = '') {
   if (session.terminal) {
     session.terminal.options.disableStdin = true;
     const reason = String(message || `${terminalKindLabel(session.kind)} session closed`).trim();
-    session.terminal.write(`\r\n[Session closed: ${reason}]\r\n\x1b[90m[Ctrl+D close tab | Ctrl+R reconnect]\x1b[0m\r\n`);
-    session.terminal.scrollToBottom();
+    writeClosedSessionNotice(session.terminal, `[Session closed: ${terminalSafeText(reason)}]`);
   }
   if (session.element) session.element.classList.add('closed-pane');
   if (state.lastSessionByResource.get(session.resourceId) === sessionID) {
@@ -1076,6 +1076,45 @@ function markSessionClosed(sessionID, message = '') {
   renderTabs();
   renderSelection();
   scheduleTerminalFit();
+}
+
+function markSessionConnectionFailed(sessionID, resource, message) {
+  const session = state.sessions.get(sessionID);
+  if (!session) return;
+
+  if (!session.terminal) {
+    session.element.textContent = '';
+    const terminal = new Terminal(terminalOptions(true));
+    const fitAddon = new FitAddon();
+    terminal.loadAddon(fitAddon);
+    terminal.open(session.element);
+    installTerminalKeyRepeatFallback(terminal, sessionID);
+    session.terminal = terminal;
+    session.fitAddon = fitAddon;
+  }
+
+  session.kind = 'ssh';
+  session.closed = true;
+  session.pending = false;
+  session.title = resource.hostname;
+  session.target = resourceTarget(resource);
+  session.terminal.options.disableStdin = true;
+  session.element.classList.remove('pending-pane');
+  session.element.classList.add('closed-pane');
+  writeClosedSessionNotice(session.terminal, `\x1b[31m[Connection failed]\x1b[0m ${terminalSafeText(message)}`);
+  renderTabs();
+  renderSelection();
+  scheduleTerminalFit();
+  focusActiveTerminal();
+}
+
+function writeClosedSessionNotice(terminal, message) {
+  terminal.write(`\r\n${message}\r\n\x1b[90m[Ctrl+D close tab | Ctrl+R reconnect]\x1b[0m\r\n`);
+  terminal.scrollToBottom();
+}
+
+function terminalSafeText(value) {
+  return String(value ?? '').replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '').replace(/\s+/g, ' ').trim();
 }
 
 function removeSessionFromUI(sessionID) {
@@ -1314,7 +1353,6 @@ function toggleSidebar() {
 function applySidebarState() {
   app.classList.toggle('sidebar-collapsed', state.sidebarCollapsed);
   const toggle = document.querySelector('#toggle-sidebar');
-  toggle.textContent = state.sidebarCollapsed ? ICON_EXPAND : ICON_COLLAPSE;
   toggle.title = state.sidebarCollapsed ? 'Expand sidebar' : 'Compact sidebar';
   toggle.setAttribute('aria-label', toggle.title);
   toggle.setAttribute('aria-expanded', String(!state.sidebarCollapsed));
@@ -1419,22 +1457,7 @@ function createSession(sessionID, resource, kind = 'ssh') {
 
   let terminal;
   try {
-    terminal = new Terminal({
-    cursorBlink: true,
-    convertEol: true,
-    fontFamily: state.terminalFontFamily,
-    fontSize: state.terminalFontSize,
-    scrollback: state.terminalScrollback,
-    linkHandler: {
-      activate: (event, url) => openTerminalLink(event, url),
-    },
-    theme: {
-      background: '#101418',
-      foreground: '#d7dde5',
-      cursor: '#f5c542',
-      selectionBackground: '#3d4a58',
-    },
-    });
+    terminal = new Terminal(terminalOptions());
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(pane);
@@ -1487,6 +1510,26 @@ function createSession(sessionID, resource, kind = 'ssh') {
     pane.remove();
     throw error;
   }
+}
+
+function terminalOptions(disableStdin = false) {
+  return {
+    cursorBlink: !disableStdin,
+    convertEol: true,
+    disableStdin,
+    fontFamily: state.terminalFontFamily,
+    fontSize: state.terminalFontSize,
+    scrollback: state.terminalScrollback,
+    linkHandler: {
+      activate: (event, url) => openTerminalLink(event, url),
+    },
+    theme: {
+      background: '#101418',
+      foreground: '#d7dde5',
+      cursor: '#f5c542',
+      selectionBackground: '#3d4a58',
+    },
+  };
 }
 
 function installTerminalKeyRepeatFallback(terminal, sessionID) {
@@ -2707,7 +2750,7 @@ async function reconnectClosedSession(sessionID) {
     writeNotice(`Cannot reconnect ${session.title}: resource no longer exists.`);
     return;
   }
-  const replacementSessionID = await quickConnect(resource);
+  const replacementSessionID = await quickConnect(resource, { failureSessionID: sessionID });
   if (replacementSessionID && state.sessions.has(sessionID)) {
     removeSessionFromUI(sessionID);
   }
