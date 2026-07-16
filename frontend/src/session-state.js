@@ -40,3 +40,16 @@ export function lastFocusedSessionId(history, sessions) {
   }
   return sessions.keys().next().value ?? null;
 }
+
+export function closedSessionShortcut(event) {
+  if (event?.type !== 'keydown' || event.repeat || event.isComposing) return '';
+  if (!event.ctrlKey || event.metaKey || event.altKey) return '';
+  switch (String(event.key).toLowerCase()) {
+    case 'd':
+      return 'close';
+    case 'r':
+      return 'reconnect';
+    default:
+      return '';
+  }
+}

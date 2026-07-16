@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lastFocusedSessionId, preferredSessionForResource, reorderSessions, rememberFocus } from './session-state.js';
+import { closedSessionShortcut, lastFocusedSessionId, preferredSessionForResource, reorderSessions, rememberFocus } from './session-state.js';
 
 describe('session state', () => {
   it('prefers the last live session for a resource', () => {
@@ -19,5 +19,12 @@ describe('session state', () => {
     const history = rememberFocus(['one', 'two'], 'one');
     expect(history).toEqual(['two', 'one']);
     expect(lastFocusedSessionId(history, new Map([['two', {}]]))).toBe('two');
+  });
+
+  it('maps closed-session control shortcuts without intercepting normal keys', () => {
+    expect(closedSessionShortcut({ type: 'keydown', key: 'd', ctrlKey: true })).toBe('close');
+    expect(closedSessionShortcut({ type: 'keydown', key: 'R', ctrlKey: true })).toBe('reconnect');
+    expect(closedSessionShortcut({ type: 'keydown', key: 'r', metaKey: true })).toBe('');
+    expect(closedSessionShortcut({ type: 'keydown', key: 'd', ctrlKey: true, repeat: true })).toBe('');
   });
 });

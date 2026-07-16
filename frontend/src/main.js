@@ -2,6 +2,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import bashesLogo from './assets/bashes.png';
+import { externalHttpURL } from './external-links.js';
 import {
   errorDetail,
   isAuthError,
@@ -10,6 +11,7 @@ import {
   parseUnknownHostKeyError,
 } from './ssh-errors.js';
 import {
+  closedSessionShortcut,
   lastFocusedSessionId as lastFocusedSessionIdFromState,
   pendingSessionForResource as pendingSessionForResourceFromState,
   preferredSessionForResource as preferredSessionForResourceFromState,
@@ -763,7 +765,7 @@ async function submitTunnel(event) {
 }
 
 async function quickConnect(resource) {
-  await withBusy(async () => {
+  return await withBusy(async () => {
     try {
       if (isLocalResource(resource)) {
         writeNotice('Starting local shell ...');
@@ -773,7 +775,7 @@ async function quickConnect(resource) {
         });
         await attachStartedSession(sessionID, resource, 'local');
         resizeActiveSession();
-        return;
+        return sessionID;
       }
 
       writeNotice(`Connecting to ${resource.user}@${resource.ip || resource.hostname}:${resource.port} ...`);
@@ -787,13 +789,14 @@ async function quickConnect(resource) {
       await attachStartedSession(sessionID, resource);
       await refreshHosts();
       resizeActiveSession();
+      return sessionID;
     } catch (error) {
       const message = connectErrorMessage(error, resource);
       writeNotice(message);
       if (isLocalResource(resource)) {
         const pending = pendingSessionForResource(resource.id);
         if (pending) removeSessionFromUI(pending.id);
-        return;
+        return null;
       }
       if (isAuthError(error)) {
         await openConnectPanel(message, 'error');
@@ -801,6 +804,7 @@ async function quickConnect(resource) {
         const pending = pendingSessionForResource(resource.id);
         if (pending) removeSessionFromUI(pending.id);
       }
+      return null;
     }
   });
 }
@@ -1062,7 +1066,8 @@ function markSessionClosed(sessionID, message = '') {
   if (session.terminal) {
     session.terminal.options.disableStdin = true;
     const reason = String(message || `${terminalKindLabel(session.kind)} session closed`).trim();
-    session.terminal.write(`\r\n[Session closed: ${reason}]\r\n`);
+    session.terminal.write(`\r\n[Session closed: ${reason}]\r\n\x1b[90m[Ctrl+D close tab | Ctrl+R reconnect]\x1b[0m\r\n`);
+    session.terminal.scrollToBottom();
   }
   if (session.element) session.element.classList.add('closed-pane');
   if (state.lastSessionByResource.get(session.resourceId) === sessionID) {
@@ -1420,6 +1425,9 @@ function createSession(sessionID, resource, kind = 'ssh') {
     fontFamily: state.terminalFontFamily,
     fontSize: state.terminalFontSize,
     scrollback: state.terminalScrollback,
+    linkHandler: {
+      activate: (event, url) => openTerminalLink(event, url),
+    },
     theme: {
       background: '#101418',
       foreground: '#d7dde5',
@@ -1483,16 +1491,24 @@ function createSession(sessionID, resource, kind = 'ssh') {
 
 function installTerminalKeyRepeatFallback(terminal, sessionID) {
   terminal.attachCustomKeyEventHandler((event) => {
+    const session = state.sessions.get(sessionID);
+    if (session?.closed && event.type === 'keydown') {
+      const shortcut = closedSessionShortcut(event);
+      event.preventDefault();
+      if (shortcut === 'close') {
+        window.setTimeout(() => removeSessionFromUI(sessionID), 0);
+      } else if (shortcut === 'reconnect') {
+        window.setTimeout(() => reconnectClosedSession(sessionID), 0);
+      }
+      return false;
+    }
+
     if (event.type !== 'keydown' || !event.repeat || event.isComposing) {
       return true;
     }
 
     const data = repeatedKeyData(event, terminal);
     if (!data) return true;
-    if (state.sessions.get(sessionID)?.closed) {
-      event.preventDefault();
-      return false;
-    }
 
     event.preventDefault();
     apiWriteSSHSession(sessionID, data).catch((error) => {
@@ -1583,7 +1599,7 @@ function renderTabs() {
     });
 
     const wrapper = document.createElement('div');
-    wrapper.className = 'session-tab-wrap';
+    wrapper.className = `session-tab-wrap ${session.id === state.activeSessionId ? 'active' : ''}`;
     wrapper.dataset.sessionId = session.id;
     wrapper.addEventListener('dragover', (event) => previewSessionTabDrop(event, wrapper));
     wrapper.addEventListener('dragleave', () => clearSessionTabDropPreview(wrapper));
@@ -2681,7 +2697,7 @@ function focusSession(sessionID) {
   focusActiveTerminal();
 }
 
-function reconnectClosedSession(sessionID) {
+async function reconnectClosedSession(sessionID) {
   const session = state.sessions.get(sessionID);
   if (!session?.closed) return;
   const resource = isLocalResource(session.resourceId)
@@ -2691,7 +2707,10 @@ function reconnectClosedSession(sessionID) {
     writeNotice(`Cannot reconnect ${session.title}: resource no longer exists.`);
     return;
   }
-  quickConnect(resource);
+  const replacementSessionID = await quickConnect(resource);
+  if (replacementSessionID && state.sessions.has(sessionID)) {
+    removeSessionFromUI(sessionID);
+  }
 }
 
 function setActiveSession(sessionID) {
@@ -2728,9 +2747,10 @@ async function withBusy(task) {
   state.busy = true;
   renderSelection();
   try {
-    await task();
+    return await task();
   } catch (error) {
     writeNotice(`Error: ${error?.message ?? error}`, 'error');
+    return null;
   } finally {
     state.busy = false;
     renderSelection();
@@ -3204,6 +3224,16 @@ function openExternalURL(url) {
     return;
   }
   window.open(url, '_blank', 'noopener');
+}
+
+function openTerminalLink(event, value) {
+  const url = externalHttpURL(value);
+  if (!url) {
+    writeNotice('Blocked an unsupported terminal link.', 'error');
+    return;
+  }
+  event?.preventDefault?.();
+  openExternalURL(url);
 }
 
 function writeSSHOutput(sessionID, data) {
