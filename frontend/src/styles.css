@@ -1375,13 +1375,106 @@ textarea {
   font-size: 12px;
 }
 
-.transfer-error {
+.transfer-status-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.transfer-hidden-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #53606f;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.transfer-hidden-toggle input {
+  width: 28px;
+  height: 16px;
   margin: 0;
+  appearance: none;
+  border: 1px solid #9ca8b4;
+  border-radius: 99px;
+  background: #dce2e7;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.transfer-hidden-toggle input::before {
+  display: block;
+  width: 10px;
+  height: 10px;
+  margin: 2px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(31, 41, 51, 0.24);
+  content: "";
+  transition: transform 120ms ease;
+}
+
+.transfer-hidden-toggle input:checked {
+  border-color: #2f8f63;
+  background: #2f8f63;
+}
+
+.transfer-hidden-toggle input:checked::before {
+  transform: translateX(12px);
+}
+
+.transfer-hidden-toggle input:focus-visible {
+  outline: 2px solid #d9862f;
+  outline-offset: 2px;
+}
+
+.transfer-hidden-toggle input:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.transfer-error {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
   border-bottom: 1px solid #e0a39c;
   background: #fff0ee;
   color: #8b332a;
   font-size: 12px;
   padding: 7px 10px;
+}
+
+.transfer-error span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.transfer-error button {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: #8b332a;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+}
+
+.transfer-error button:hover {
+  color: #5f211b;
+}
+
+.transfer-error button:focus-visible {
+  outline: 2px solid #8b332a;
+  outline-offset: 1px;
 }
 
 .transfer-jobs {

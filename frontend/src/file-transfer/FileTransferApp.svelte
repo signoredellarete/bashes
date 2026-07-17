@@ -2,6 +2,7 @@
   import { onDestroy, onMount } from 'svelte';
 	import { Filemanager, WillowDark } from '@svar-ui/svelte-filemanager';
 	import { isAuthError, isHostKeyMismatchError, isUnknownHostKeyError } from '../ssh-errors.js';
+	import { visibleFileEntries } from './file-visibility.js';
   import {
 		cancelJob,
 		closeFileTransfer,
@@ -49,6 +50,7 @@
   let dragGhostX = 0;
   let dragGhostY = 0;
   let activeJobState = false;
+  let showHiddenFiles = false;
 
   $: publishActiveTransferState(hasActiveJobs(jobs));
 
@@ -235,8 +237,17 @@
   async function provide(id) {
     if (!api || !session?.sessionId) return;
     const files = await listFiles(session.sessionId, id);
-    await api.exec('provide-data', { id, data: files });
+    await api.exec('provide-data', { id, data: visibleFileEntries(files, showHiddenFiles) });
     scheduleDraggableRefresh();
+  }
+
+  async function changeHiddenFileVisibility(event) {
+    showHiddenFiles = event.currentTarget.checked;
+    await runOperation(async () => {
+      const paths = unique((api?.getState()?.panels ?? []).map((panel) => panel.path).filter(Boolean));
+      for (const path of paths) await provide(path);
+      status = showHiddenFiles ? 'Hidden files shown' : 'Hidden files hidden';
+    });
   }
 
   async function runOperation(operation) {
@@ -749,10 +760,26 @@
 <div class="transfer-shell" class:busy class:dragging bind:this={transferShell}>
   <div class="transfer-status">
     <span>{status}</span>
-    {#if busy}<strong>Working...</strong>{/if}
+    <div class="transfer-status-actions">
+      {#if session}
+        <label class="transfer-hidden-toggle">
+          <input
+            type="checkbox"
+            checked={showHiddenFiles}
+            onchange={changeHiddenFileVisibility}
+            disabled={busy}
+          />
+          <span>Show hidden files</span>
+        </label>
+      {/if}
+      {#if busy}<strong>Working...</strong>{/if}
+    </div>
   </div>
   {#if error}
-    <p class="transfer-error">{error}</p>
+    <div class="transfer-error" role="alert">
+      <span>{error}</span>
+      <button type="button" onclick={() => (error = '')} title="Dismiss error" aria-label="Dismiss error">&#10005;</button>
+    </div>
   {/if}
   {#if jobs.length}
     <div class="transfer-jobs" aria-live="polite">
