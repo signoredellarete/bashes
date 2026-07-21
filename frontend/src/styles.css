@@ -1,6 +1,6 @@
 :root {
-  --color-accent: #2f6f73;
-  --color-accent-hover: #285e62;
+  --color-accent: #495479;
+  --color-accent-hover: #3e4767;
   --color-border: #c7cfd8;
   --color-border-soft: #d3d9df;
   --color-canvas: #eef1f4;
@@ -238,8 +238,8 @@ textarea {
 }
 
 .host-row.selected .host-select {
-  border-color: #2f6f73;
-  box-shadow: inset 3px 0 0 #2f6f73;
+  border-color: #495479;
+  box-shadow: inset 3px 0 0 #495479;
 }
 
 .host-row.local-row .host-select {
@@ -262,19 +262,19 @@ textarea {
 }
 
 .host-row.drop-before .host-select {
-  box-shadow: 0 -2px 0 #2f6f73;
+  box-shadow: 0 -2px 0 #495479;
 }
 
 .host-row.drop-after .host-select {
-  box-shadow: 0 2px 0 #2f6f73;
+  box-shadow: 0 2px 0 #495479;
 }
 
 .host-row.selected.drop-before .host-select {
-  box-shadow: inset 3px 0 0 #2f6f73, 0 -2px 0 #2f6f73;
+  box-shadow: inset 3px 0 0 #495479, 0 -2px 0 #495479;
 }
 
 .host-row.selected.drop-after .host-select {
-  box-shadow: inset 3px 0 0 #2f6f73, 0 2px 0 #2f6f73;
+  box-shadow: inset 3px 0 0 #495479, 0 2px 0 #495479;
 }
 
 .row-action {
@@ -295,7 +295,7 @@ textarea {
   place-items: center;
   border-radius: 5px;
   background: #e5eef0;
-  color: #2f6f73;
+  color: #495479;
   overflow: hidden;
   padding: 0 3px;
   font-size: 9px;
@@ -918,7 +918,7 @@ textarea {
 }
 
 .close-panel:hover {
-  color: #2f6f73 !important;
+  color: #495479 !important;
 }
 
 .confirm-modal[hidden] {
@@ -994,9 +994,9 @@ textarea {
 
 .confirm-actions button {
   min-height: 28px;
-  border: 1px solid #2f6f73;
+  border: 1px solid #495479;
   border-radius: 6px;
-  background: #2f6f73;
+  background: #495479;
   color: #fff;
   padding: 5px 10px;
   cursor: pointer;
@@ -1114,9 +1114,9 @@ textarea {
 
 .app-modal-actions button {
   min-height: 28px;
-  border: 1px solid #2f6f73;
+  border: 1px solid #495479;
   border-radius: 6px;
-  background: #2f6f73;
+  background: #495479;
   color: #fff;
   padding: 5px 10px;
   cursor: pointer;
@@ -1371,7 +1371,7 @@ textarea {
 }
 
 .transfer-status strong {
-  color: #2f6f73;
+  color: #495479;
   font-size: 12px;
 }
 
@@ -1660,7 +1660,7 @@ textarea {
 }
 
 .transfer-shell.dragging .transfer-manager {
-  outline: 1px dashed #2f6f73;
+  outline: 1px dashed #495479;
   outline-offset: -8px;
 }
 
@@ -1671,7 +1671,7 @@ textarea {
   z-index: 5;
   display: inline-flex;
   align-items: center;
-  border: 1px dashed #2f6f73;
+  border: 1px dashed #495479;
   border-radius: 5px;
   background: rgba(237, 248, 240, 0.9);
   color: #1f6f3d;
@@ -1890,8 +1890,8 @@ textarea {
 }
 
 .status-log-button:hover {
-  border-color: #2f6f73;
-  color: #2f6f73;
+  border-color: #495479;
+  color: #495479;
 }
 
 .terminal-font-controls {
@@ -1921,7 +1921,7 @@ textarea {
 }
 
 .terminal-font-controls button:hover {
-  border-color: #2f6f73;
+  border-color: #495479;
   color: #f5c542;
 }
 

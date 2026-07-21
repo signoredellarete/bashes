@@ -24,6 +24,7 @@ import (
 
 	"github.com/kayrus/putty"
 	"github.com/signoredellarete/bashes/internal/application"
+	"github.com/signoredellarete/bashes/internal/credentials"
 	"github.com/signoredellarete/bashes/internal/domain"
 	"github.com/signoredellarete/bashes/internal/localterm"
 	"github.com/signoredellarete/bashes/internal/remotessh"
@@ -44,6 +45,7 @@ const (
 type App struct {
 	ctx          context.Context
 	service      *application.Service
+	passwords    credentials.Store
 	dataPath     string
 	mu           sync.Mutex
 	sessions     map[string]*sshSession
@@ -53,6 +55,10 @@ type App struct {
 }
 
 func NewApp(dataPath string) *App {
+	return newAppWithPasswordStore(dataPath, credentials.NewNativeStore())
+}
+
+func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App {
 	if dataPath == "" {
 		dataPath = defaultDataPath()
 	}
@@ -60,6 +66,7 @@ func NewApp(dataPath string) *App {
 	return &App{
 		dataPath:     dataPath,
 		service:      application.NewService(store.NewRepository(dataPath)),
+		passwords:    passwords,
 		sessions:     make(map[string]*sshSession),
 		tunnels:      make(map[string]*sshTunnel),
 		transfers:    make(map[string]*fileTransferSession),
@@ -179,7 +186,13 @@ func (a *App) DeleteResource(id string) error {
 		a.stopTunnelsForResource(resourceID)
 		a.closeTransfersForResource(resourceID)
 	}
-	return a.service.DeleteResource(id)
+	if err := a.service.DeleteResource(id); err != nil {
+		return err
+	}
+	for _, resourceID := range resourceIDs {
+		_ = a.passwords.DeletePassword(resourceID)
+	}
+	return nil
 }
 
 type SSHKeyInfo struct {
@@ -932,6 +945,8 @@ type SSHSessionInput struct {
 	PrivateKeyPath       string `json:"privateKeyPath,omitempty"`
 	KeyName              string `json:"keyName,omitempty"`
 	PrivateKeyPassphrase string `json:"privateKeyPassphrase,omitempty"`
+	ManagePassword       bool   `json:"managePassword,omitempty"`
+	SavePassword         bool   `json:"savePassword,omitempty"`
 	TrustHostKey         bool   `json:"trustHostKey"`
 	AcceptHostKey        bool   `json:"acceptHostKey,omitempty"`
 	ReplaceHostKey       bool   `json:"replaceHostKey,omitempty"`
@@ -950,6 +965,8 @@ type SSHTunnelInput struct {
 	PrivateKeyPath       string `json:"privateKeyPath,omitempty"`
 	KeyName              string `json:"keyName,omitempty"`
 	PrivateKeyPassphrase string `json:"privateKeyPassphrase,omitempty"`
+	ManagePassword       bool   `json:"managePassword,omitempty"`
+	SavePassword         bool   `json:"savePassword,omitempty"`
 	TrustHostKey         bool   `json:"trustHostKey"`
 	AcceptHostKey        bool   `json:"acceptHostKey,omitempty"`
 	ReplaceHostKey       bool   `json:"replaceHostKey,omitempty"`
@@ -1009,11 +1026,18 @@ func (a *App) StartSSHSession(input SSHSessionInput) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	input = applyAuthPreference(resource, input)
+	input, err = a.prepareSessionInput(resource, input)
+	if err != nil {
+		return "", err
+	}
 	dialInput := a.resolveSessionKeyPath(input)
 
 	client, err := a.dialResource(resource, dialInput, remotessh.DefaultTimeout)
 	if err != nil {
+		return "", err
+	}
+	if err := a.persistPasswordChoice(resource.ID, input); err != nil {
+		client.Close()
 		return "", err
 	}
 
@@ -1126,15 +1150,24 @@ func (a *App) StartSSHTunnel(input SSHTunnelInput) (SSHTunnelInfo, error) {
 		PrivateKeyPath:       input.PrivateKeyPath,
 		KeyName:              input.KeyName,
 		PrivateKeyPassphrase: input.PrivateKeyPassphrase,
+		ManagePassword:       input.ManagePassword,
+		SavePassword:         input.SavePassword,
 		TrustHostKey:         input.TrustHostKey,
 		AcceptHostKey:        input.AcceptHostKey,
 		ReplaceHostKey:       input.ReplaceHostKey,
 	}
-	sessionInput = applyAuthPreference(resource, sessionInput)
+	sessionInput, err = a.prepareSessionInput(resource, sessionInput)
+	if err != nil {
+		return SSHTunnelInfo{}, err
+	}
 	dialInput := a.resolveSessionKeyPath(sessionInput)
 
 	client, err := a.dialResource(resource, dialInput, remotessh.DefaultTimeout)
 	if err != nil {
+		return SSHTunnelInfo{}, err
+	}
+	if err := a.persistPasswordChoice(resource.ID, sessionInput); err != nil {
+		client.Close()
 		return SSHTunnelInfo{}, err
 	}
 

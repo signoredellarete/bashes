@@ -48,7 +48,12 @@ export function parsePublicTunnelBindError(error) {
 }
 
 export function isAuthError(error) {
-	return /unable to authenticate|no supported methods|no SSH authentication method|attempted methods|permission denied/i.test(errorDetail(error));
+	return /unable to authenticate|no supported methods|no SSH authentication method|attempted methods|permission denied/i.test(errorDetail(error)) ||
+		isCredentialStoreError(error);
+}
+
+export function isCredentialStoreError(error) {
+	return /saved SSH password|system keyring/i.test(errorDetail(error));
 }
 
 export function isUnknownHostKeyError(error) {

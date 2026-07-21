@@ -13,6 +13,12 @@ export async function startFileTransfer(input) {
   return await appAPI('StartFileTransfer')(input);
 }
 
+export async function hasSavedPassword(resourceID) {
+  const api = wailsAPI();
+  if (!api?.HasSavedPassword) return false;
+  return await api.HasSavedPassword(resourceID);
+}
+
 export async function closeFileTransfer(sessionID) {
   return await appAPI('CloseFileTransfer')(sessionID);
 }

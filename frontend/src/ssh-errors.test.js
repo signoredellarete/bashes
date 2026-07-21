@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ERROR_CODE,
   isAuthError,
+  isCredentialStoreError,
   parseHostKeyMismatchError,
   parsePublicTunnelBindError,
   parseUnknownHostKeyError,
@@ -43,7 +44,9 @@ describe('SSH error contracts', () => {
 
   it('classifies common SSH authentication failures', () => {
     expect(isAuthError(new Error('ssh: unable to authenticate'))).toBe(true);
-	expect(isAuthError(new Error('ssh: handshake failed: host key mismatch'))).toBe(false);
+    expect(isAuthError(new Error('read saved SSH password: system keyring unavailable'))).toBe(true);
+    expect(isCredentialStoreError(new Error('read saved SSH password: system keyring unavailable'))).toBe(true);
+    expect(isAuthError(new Error('ssh: handshake failed: host key mismatch'))).toBe(false);
     expect(isAuthError(new Error('connection refused'))).toBe(false);
   });
 });

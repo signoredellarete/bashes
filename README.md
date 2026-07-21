@@ -168,7 +168,11 @@ The important portable file is:
 hosts.json
 ```
 
-It contains hosts, subsystems, saved connection metadata and authentication preferences that are safe to store in the JSON datastore. Passwords and key passphrases are not saved.
+It contains hosts, subsystems, saved connection metadata and authentication preferences that are safe to store in the JSON datastore. Passwords and key passphrases are never written to this file.
+
+When requested from the password login form, Bashes stores SSH passwords in the operating system credential store: macOS Keychain, Windows Credential Manager, or a Secret Service-compatible keyring on Linux. These credentials are local to that operating-system account and are not included in database exports or backups of `hosts.json`.
+
+On Linux, password storage requires an active Secret Service-compatible provider. SSH password login remains available without it by leaving the save option disabled.
 
 `settings.json` is intentionally separate from `hosts.json`: it stores local machine preferences such as the optional custom SSH keys directory. Those paths are usually OS-specific and are not part of the portable host database.
 

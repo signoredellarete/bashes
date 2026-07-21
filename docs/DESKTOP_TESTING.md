@@ -226,8 +226,10 @@ When the desktop shell starts:
 - The Connect action opens an SSH panel and starts a backend-managed shell session.
 - SSH authentication can use a session-only password, `SSH_AUTH_SOCK`, default `~/.ssh` keys, or an explicit key path.
 - The `Keys` panel can generate Ed25519 keys under the platform data directory and install the selected public key on a selected remote resource.
-- Passwords and key passphrases are not saved in the JSON datastore.
+- Passwords and key passphrases are not saved in the JSON datastore. Optional saved SSH passwords use macOS Keychain, Windows Credential Manager, or Secret Service on Linux and are excluded from JSON exports.
 - Generated private keys under the platform data directory must be handled as secrets.
+
+To verify saved-password behavior, connect with password authentication and enable `Save password in system keyring`. Close the session and reconnect without entering the password, then export the database and confirm that the password is absent from the JSON. Finally, reconnect from the form with the save option disabled to remove the stored credential. On Linux, run this test inside a desktop session with an active Secret Service-compatible provider.
 
 ## Troubleshooting
 

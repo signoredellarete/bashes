@@ -6,6 +6,7 @@ import { externalHttpURL } from './external-links.js';
 import {
   errorDetail,
   isAuthError,
+  isCredentialStoreError,
   parseHostKeyMismatchError,
   parsePublicTunnelBindError,
   parseUnknownHostKeyError,
@@ -107,6 +108,10 @@ function authFieldsMarkup(context) {
     <label data-auth-field="password">
       <span>Password</span>
       <input name="password" type="password" autocomplete="current-password" />
+    </label>
+    <label class="checkbox-row" data-auth-field="password">
+      <input name="savePassword" type="checkbox" />
+      <span>Save password in system keyring</span>
     </label>
     <label data-auth-field="path">
       <span class="field-label-with-help">
@@ -754,6 +759,7 @@ async function submitTunnel(event) {
         trustHostKey: form.elements.trustHostKey.checked,
       }, selected);
       state.tunnels.set(tunnel.tunnelId, tunnel);
+      form.dataset.hadSavedPassword = String(auth.savePassword === true);
       await refreshHosts();
       renderHosts(searchInput.value);
       renderTunnelStatus();
@@ -1810,6 +1816,7 @@ async function openConnectPanel(statusMessage = '', statusKind = '') {
   form.elements.trustHostKey.checked = trustHostKeyFromPreference(selected);
   renderKeyOptions(form.elements.keyName, true);
   applyConnectDefaults(form, selected);
+  await applySavedPasswordDefault(form, selected);
   const realSessionCount = realSessionsForResource(selected.id).length;
   document.querySelector('#connect-summary').textContent =
     `${realSessionCount > 0 ? 'New session: ' : ''}${selected.user}@${selected.ip || selected.hostname}:${selected.port}`;
@@ -1867,6 +1874,7 @@ async function openTunnelPanel() {
   form.elements.trustHostKey.checked = trustHostKeyFromPreference(selected);
   renderKeyOptions(form.elements.keyName, true);
   applyConnectDefaults(form, selected);
+  await applySavedPasswordDefault(form, selected);
   updateTunnelMode();
   renderTunnelStatus();
   panel.hidden = false;
@@ -2290,8 +2298,11 @@ function updateAuthFields(form) {
 function authInputFromForm(form) {
   const method = form.elements.authMethod?.value || 'agent';
   if (method === 'password') {
+    const savePassword = form.elements.savePassword.checked;
     return {
       password: form.elements.password.value,
+      managePassword: savePassword || form.dataset.hadSavedPassword === 'true',
+      savePassword,
       keyName: '',
       privateKeyPath: '',
       privateKeyPassphrase: '',
@@ -2351,6 +2362,7 @@ function applyConnectDefaults(form, resource) {
   form.elements.keyName.value = '';
   form.elements.privateKeyPath.value = '';
   form.elements.password.value = '';
+  form.elements.savePassword.checked = false;
   form.elements.privateKeyPassphrase.value = '';
   if (!auth) {
     updateAuthFields(form);
@@ -2383,6 +2395,20 @@ function applyConnectDefaults(form, resource) {
     }
   }
   updateAuthFields(form);
+}
+
+async function applySavedPasswordDefault(form, resource) {
+  if (!form?.elements?.savePassword) return;
+  form.elements.savePassword.checked = false;
+  form.dataset.hadSavedPassword = 'false';
+  if (resource?.auth?.method !== 'password') return;
+  try {
+    const hasSavedPassword = await apiHasSavedPassword(resource.id);
+    form.elements.savePassword.checked = hasSavedPassword;
+    form.dataset.hadSavedPassword = String(hasSavedPassword);
+  } catch {
+    // The keyring error is reported if the user explicitly requests password storage.
+  }
 }
 
 function selectedKeyChoice(select) {
@@ -2586,6 +2612,9 @@ function connectErrorMessage(error, resource) {
   const mismatch = parseHostKeyMismatchError(error);
   if (mismatch) {
     return `Could not verify ${target}: SSH host key changed. Expected ${mismatch.expected}, got ${mismatch.actual}.`;
+  }
+  if (isCredentialStoreError(error)) {
+    return `Could not access the system keyring for ${resource.hostname}: ${detail}`;
   }
   if (isAuthError(error)) {
     return `Could not authenticate to ${target}. Enter the remote password or configure a valid SSH key.`;
@@ -3487,6 +3516,12 @@ async function apiStartSSHSession(input) {
   const api = wailsAPI();
   if (api?.StartSSHSession) return await api.StartSSHSession(input);
   return `demo-session-${Date.now()}`;
+}
+
+async function apiHasSavedPassword(resourceID) {
+  const api = wailsAPI();
+  if (api?.HasSavedPassword) return await api.HasSavedPassword(resourceID);
+  return false;
 }
 
 async function apiStartLocalSession(input) {

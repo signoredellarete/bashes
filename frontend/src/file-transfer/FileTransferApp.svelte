@@ -1,7 +1,7 @@
 <script>
   import { onDestroy, onMount } from 'svelte';
 	import { Filemanager, WillowDark } from '@svar-ui/svelte-filemanager';
-	import { isAuthError, isHostKeyMismatchError, isUnknownHostKeyError } from '../ssh-errors.js';
+	import { isAuthError, isCredentialStoreError, isHostKeyMismatchError, isUnknownHostKeyError } from '../ssh-errors.js';
 	import { visibleFileEntries } from './file-visibility.js';
   import {
 		cancelJob,
@@ -9,6 +9,7 @@
     createItem,
 		deleteItems,
 		dismissJob as dismissBackendJob,
+    hasSavedPassword,
     listJobs,
     listFiles,
     renameItem,
@@ -35,6 +36,8 @@
   let busy = false;
   let needsPassword = false;
   let password = '';
+  let savePassword = false;
+  let hadSavedPassword = false;
   let trustHostKey = trustHostKeyFromResource();
   let passwordInput = null;
   let dragging = false;
@@ -56,12 +59,21 @@
 
   onMount(() => {
     cleanupJobEvents = registerJobEvents();
-    if (resource?.auth?.method === 'password') {
-      showPasswordPrompt('');
-      return;
-    }
-    startSession();
+    void initializeSession();
   });
+
+  async function initializeSession() {
+    if (resource?.auth?.method === 'password') {
+      try {
+        hadSavedPassword = await hasSavedPassword(resource.id);
+        savePassword = hadSavedPassword;
+      } catch {
+        hadSavedPassword = false;
+        savePassword = false;
+      }
+    }
+    await startSession();
+  }
 
   async function startSession(authInput = {}) {
     busy = true;
@@ -72,6 +84,7 @@
         trustHostKey: trustHostKeyFromResource(),
         ...authInput,
       });
+      if (authInput.managePassword) hadSavedPassword = authInput.savePassword === true;
       needsPassword = false;
       password = '';
       status = `Local: ${session.localRoot} | Remote: ${session.remoteRoot}`;
@@ -79,7 +92,9 @@
       await loadInitial();
     } catch (err) {
       const message = String(err?.message ?? err);
-      if (isAuthError(message)) {
+      if (isCredentialStoreError(message)) {
+        showPasswordPrompt('Could not access the system keyring. Enter the password and leave the save option disabled.');
+      } else if (isAuthError(message)) {
         showPasswordPrompt(authInput.password ? 'Authentication failed. Check the password and try again.' : 'Enter the SSH password to open file transfer.');
       } else if (isUnknownHostKeyError(message)) {
         error = 'SSH host key is not trusted yet. Open a terminal or tunnel for this node first, verify the fingerprint, and trust the host key.';
@@ -130,6 +145,8 @@
     }
     await startSession({
       password,
+      managePassword: savePassword || hadSavedPassword,
+      savePassword,
       trustHostKey,
     });
   }
@@ -815,6 +832,10 @@
       <label>
         <span>Password</span>
         <input bind:this={passwordInput} bind:value={password} type="password" autocomplete="current-password" disabled={busy} />
+      </label>
+      <label class="transfer-auth-check">
+        <input bind:checked={savePassword} type="checkbox" disabled={busy} />
+        <span>Save password in system keyring</span>
       </label>
       <label class="transfer-auth-check">
         <input bind:checked={trustHostKey} type="checkbox" disabled={busy} />
