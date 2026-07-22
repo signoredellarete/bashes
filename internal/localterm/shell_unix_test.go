@@ -64,6 +64,48 @@ func TestLocalShellCommandUsesLoginShellOnUnixDesktops(t *testing.T) {
 	}
 }
 
+func TestShellResizeAndCloseAreSafeConcurrently(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	shell, err := StartShell(ShellOptions{
+		Size: remotessh.TerminalSize{Cols: 80, Rows: 24},
+	})
+	if err != nil {
+		t.Fatalf("StartShell() error = %v", err)
+	}
+
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- shell.Wait()
+	}()
+
+	var resizeGroup sync.WaitGroup
+	for worker := 0; worker < 8; worker++ {
+		resizeGroup.Add(1)
+		go func(offset int) {
+			defer resizeGroup.Done()
+			for iteration := 0; iteration < 100; iteration++ {
+				_ = shell.Resize(remotessh.TerminalSize{
+					Cols: 80 + (iteration+offset)%20,
+					Rows: 24 + (iteration+offset)%10,
+				})
+			}
+		}(worker)
+	}
+
+	if err := shell.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	resizeGroup.Wait()
+	select {
+	case <-waitDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Wait() did not return after Close()")
+	}
+	if err := shell.Resize(remotessh.TerminalSize{Cols: 80, Rows: 24}); err == nil {
+		t.Fatal("Resize() succeeded after Close()")
+	}
+}
+
 type lockedBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer

@@ -25,9 +25,10 @@ type ShellOptions struct {
 }
 
 type Shell struct {
-	cmd  *exec.Cmd
-	file *os.File
-	once sync.Once
+	cmd    *exec.Cmd
+	file   *os.File
+	fileMu sync.RWMutex
+	once   sync.Once
 }
 
 func StartShell(options ShellOptions) (*Shell, error) {
@@ -75,11 +76,16 @@ func StartShell(options ShellOptions) (*Shell, error) {
 }
 
 func (s *Shell) Resize(size remotessh.TerminalSize) error {
-	if s == nil || s.file == nil {
+	if s == nil {
 		return fmt.Errorf("local shell is not started")
 	}
 	if size.Rows <= 0 || size.Cols <= 0 {
 		return fmt.Errorf("terminal size must be positive")
+	}
+	s.fileMu.RLock()
+	defer s.fileMu.RUnlock()
+	if s.file == nil {
+		return fmt.Errorf("local shell is not started")
 	}
 	return pty.Setsize(s.file, &pty.Winsize{
 		Rows: uint16(size.Rows),
@@ -111,6 +117,8 @@ func (s *Shell) Close() error {
 }
 
 func (s *Shell) closeFile() error {
+	s.fileMu.Lock()
+	defer s.fileMu.Unlock()
 	if s.file == nil {
 		return nil
 	}
