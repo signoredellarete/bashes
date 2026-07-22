@@ -44,6 +44,8 @@ const (
 
 type App struct {
 	ctx          context.Context
+	lifecycleMu  sync.RWMutex
+	shutdownOnce sync.Once
 	service      *application.Service
 	passwords    credentials.Store
 	dataPath     string
@@ -149,11 +151,27 @@ func getenv(name string) string {
 }
 
 func (a *App) startup(ctx context.Context) {
+	a.lifecycleMu.Lock()
+	defer a.lifecycleMu.Unlock()
 	a.ctx = ctx
 }
 
+func (a *App) beforeClose(context.Context) bool {
+	a.beginShutdown()
+	return false
+}
+
 func (a *App) shutdown(context.Context) {
-	a.stopAllRuntimeConnections()
+	a.beginShutdown()
+}
+
+func (a *App) beginShutdown() {
+	a.shutdownOnce.Do(func() {
+		a.lifecycleMu.Lock()
+		a.ctx = nil
+		a.lifecycleMu.Unlock()
+		a.stopAllRuntimeConnections()
+	})
 }
 
 func (a *App) ListHosts() ([]domain.Host, error) {
@@ -1296,7 +1314,7 @@ func (a *App) serveTunnel(ctx context.Context, tunnel *sshTunnel) {
 	if !removed {
 		return
 	}
-	if err != nil && a.ctx != nil {
+	if err != nil {
 		a.emit("ssh:tunnel-closed", SSHEvent{SessionID: tunnel.id, Message: fmt.Sprintf("Tunnel closed: %v", err)})
 	}
 }
@@ -1614,6 +1632,8 @@ func nestedResourceByID(subsystems []domain.Endpoint, id string) (domain.Endpoin
 }
 
 func (a *App) emit(name string, event SSHEvent) {
+	a.lifecycleMu.RLock()
+	defer a.lifecycleMu.RUnlock()
 	if a.ctx == nil {
 		return
 	}
@@ -1621,17 +1641,26 @@ func (a *App) emit(name string, event SSHEvent) {
 }
 
 func (a *App) emitData(name string, data interface{}) {
+	a.lifecycleMu.RLock()
+	defer a.lifecycleMu.RUnlock()
 	if a.ctx == nil {
 		return
 	}
 	wailsruntime.EventsEmit(a.ctx, name, data)
 }
 
+func (a *App) runtimeContext() context.Context {
+	a.lifecycleMu.RLock()
+	defer a.lifecycleMu.RUnlock()
+	return a.ctx
+}
+
 func (a *App) exportDatabaseFromMenu() {
-	if a.ctx == nil {
+	ctx := a.runtimeContext()
+	if ctx == nil {
 		return
 	}
-	path, err := wailsruntime.SaveFileDialog(a.ctx, wailsruntime.SaveDialogOptions{
+	path, err := wailsruntime.SaveFileDialog(ctx, wailsruntime.SaveDialogOptions{
 		Title:           "Export Bashes Database",
 		DefaultFilename: fmt.Sprintf("bashes-hosts-%s.json", time.Now().Format("20060102")),
 		Filters: []wailsruntime.FileFilter{
@@ -1654,10 +1683,11 @@ func (a *App) exportDatabaseFromMenu() {
 }
 
 func (a *App) importDatabaseFromMenu() {
-	if a.ctx == nil {
+	ctx := a.runtimeContext()
+	if ctx == nil {
 		return
 	}
-	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
+	path, err := wailsruntime.OpenFileDialog(ctx, wailsruntime.OpenDialogOptions{
 		Title: "Import Bashes Database",
 		Filters: []wailsruntime.FileFilter{
 			{DisplayName: "JSON files (*.json)", Pattern: "*.json"},
@@ -1671,7 +1701,7 @@ func (a *App) importDatabaseFromMenu() {
 		return
 	}
 
-	choice, err := wailsruntime.MessageDialog(a.ctx, wailsruntime.MessageDialogOptions{
+	choice, err := wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
 		Type:          wailsruntime.QuestionDialog,
 		Title:         "Import Database",
 		Message:       "Importing a database replaces the current hosts.json after creating hosts.json.bak. Active sessions, tunnels and file transfers will be closed.",
@@ -1727,22 +1757,23 @@ func (a *App) checkForUpdatesFromMenu() {
 }
 
 func (a *App) openReadmeFromMenu() {
-	if a.ctx != nil {
-		wailsruntime.BrowserOpenURL(a.ctx, readmeURL)
+	if ctx := a.runtimeContext(); ctx != nil {
+		wailsruntime.BrowserOpenURL(ctx, readmeURL)
 	}
 }
 
 func (a *App) openReleasesFromMenu() {
-	if a.ctx != nil {
-		wailsruntime.BrowserOpenURL(a.ctx, releasesURL)
+	if ctx := a.runtimeContext(); ctx != nil {
+		wailsruntime.BrowserOpenURL(ctx, releasesURL)
 	}
 }
 
 func (a *App) showInfoDialog(title string, message string) {
-	if a.ctx == nil {
+	ctx := a.runtimeContext()
+	if ctx == nil {
 		return
 	}
-	_, _ = wailsruntime.MessageDialog(a.ctx, wailsruntime.MessageDialogOptions{
+	_, _ = wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
 		Type:    wailsruntime.InfoDialog,
 		Title:   title,
 		Message: message,
@@ -1750,10 +1781,11 @@ func (a *App) showInfoDialog(title string, message string) {
 }
 
 func (a *App) showErrorDialog(title string, err error) {
-	if a.ctx == nil {
+	ctx := a.runtimeContext()
+	if ctx == nil {
 		return
 	}
-	_, _ = wailsruntime.MessageDialog(a.ctx, wailsruntime.MessageDialogOptions{
+	_, _ = wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
 		Type:    wailsruntime.ErrorDialog,
 		Title:   title,
 		Message: err.Error(),

@@ -586,6 +586,31 @@ func TestStopSessionsForResourceOnlyStopsMatchingSessions(t *testing.T) {
 	_ = app.StopSSHSession(other.id)
 }
 
+func TestBeforeCloseDisablesEventsBeforeStoppingSessions(t *testing.T) {
+	app := NewApp(filepath.Join(t.TempDir(), "hosts.json"))
+	app.startup(context.Background())
+	session := newTestSSHSession("closing", "host-1")
+	app.sessions[session.id] = session
+
+	if prevent := app.beforeClose(context.Background()); prevent {
+		t.Fatal("beforeClose() prevented application shutdown")
+	}
+	if ctx := app.runtimeContext(); ctx != nil {
+		t.Fatal("runtime context remains available during shutdown")
+	}
+	if _, exists := app.sessions[session.id]; exists {
+		t.Fatal("session remains registered after shutdown")
+	}
+	if got := session.shell.(*testTerminalShell).closeCount(); got != 1 {
+		t.Fatalf("shell close count = %d, want 1", got)
+	}
+
+	app.shutdown(context.Background())
+	if got := session.shell.(*testTerminalShell).closeCount(); got != 1 {
+		t.Fatalf("idempotent shutdown close count = %d, want 1", got)
+	}
+}
+
 type testTerminalShell struct {
 	mu     sync.Mutex
 	closed int

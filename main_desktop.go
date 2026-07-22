@@ -24,12 +24,13 @@ func main() {
 	app := NewApp("")
 
 	err := wails.Run(&options.App{
-		Title:      "Bashes",
-		Width:      1180,
-		Height:     760,
-		Menu:       applicationMenu(app),
-		OnStartup:  app.startup,
-		OnShutdown: app.shutdown,
+		Title:         "Bashes",
+		Width:         1180,
+		Height:        760,
+		Menu:          applicationMenu(app),
+		OnStartup:     app.startup,
+		OnBeforeClose: app.beforeClose,
+		OnShutdown:    app.shutdown,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
