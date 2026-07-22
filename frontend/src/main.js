@@ -79,10 +79,12 @@ const state = {
 let appModalActions = {};
 let searchRenderFrame = 0;
 let terminalFitFrame = 0;
+let sidebarTooltipTimer = 0;
 
 const FILE_TRANSFER_ENABLED = true;
 const DEMO_MODE = import.meta.env.DEV && globalThis.__BASHES_DEMO__ === true;
 const LOCAL_RESOURCE_ID = '__bashes_localhost__';
+const SIDEBAR_TOOLTIP_DELAY = 1000;
 const customKeyPathHelp = [
   'Select the private key file, not the .pub file.',
   'Linux/macOS: ~/.ssh/id_ed25519',
@@ -1202,7 +1204,7 @@ function resourceRow(resource, type, depth = 0, rootHostId = resource.id, canReo
   selectButton.className = 'host-select';
   if (tunnel) selectButton.classList.add('tunnel-active');
   selectButton.draggable = canReorder && !isLocalResource(resource);
-  selectButton.title = tooltip;
+  selectButton.setAttribute('aria-label', tooltip);
   selectButton.dataset.tooltip = tooltip;
   selectButton.innerHTML = `
     <span class="type"></span>
@@ -1218,7 +1220,7 @@ function resourceRow(resource, type, depth = 0, rootHostId = resource.id, canReo
     const chip = document.createElement('span');
     chip.className = 'smart-chip tunnel-chip';
     chip.textContent = 'tun';
-    chip.title = tunnelLabel(tunnel.type);
+    chip.setAttribute('aria-label', tunnelLabel(tunnel.type));
     selectButton.querySelector('.resource-name-line').append(chip);
   }
   selectButton.querySelector('.type').textContent = type;
@@ -1362,11 +1364,24 @@ function applySidebarState() {
   toggle.title = state.sidebarCollapsed ? 'Expand sidebar' : 'Compact sidebar';
   toggle.setAttribute('aria-label', toggle.title);
   toggle.setAttribute('aria-expanded', String(!state.sidebarCollapsed));
-  if (!state.sidebarCollapsed) hideSidebarTooltip();
+  hideSidebarTooltip();
 }
 
 function showSidebarTooltip(anchor) {
-  if (!state.sidebarCollapsed) return;
+  hideSidebarTooltip();
+  if (state.sidebarCollapsed) {
+    renderSidebarTooltip(anchor);
+    return;
+  }
+
+  sidebarTooltipTimer = window.setTimeout(() => {
+    sidebarTooltipTimer = 0;
+    renderSidebarTooltip(anchor);
+  }, SIDEBAR_TOOLTIP_DELAY);
+}
+
+function renderSidebarTooltip(anchor) {
+  if (!anchor.isConnected) return;
   const tooltip = document.querySelector('#sidebar-tooltip');
   const text = anchor.dataset.tooltip;
   if (!tooltip || !text) return;
@@ -1379,6 +1394,10 @@ function showSidebarTooltip(anchor) {
 }
 
 function hideSidebarTooltip() {
+  if (sidebarTooltipTimer) {
+    window.clearTimeout(sidebarTooltipTimer);
+    sidebarTooltipTimer = 0;
+  }
   const tooltip = document.querySelector('#sidebar-tooltip');
   if (tooltip) tooltip.hidden = true;
 }
