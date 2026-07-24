@@ -909,6 +909,7 @@ textarea {
   border: 0 !important;
   background: transparent !important;
   color: #2f3945 !important;
+  cursor: pointer;
   padding: 0 !important;
   font-family: "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols 2", system-ui, sans-serif;
   font-size: 24px !important;
