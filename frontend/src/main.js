@@ -1231,14 +1231,8 @@ function resourceRow(resource, type, depth = 0, rootHostId = resource.id, canReo
   selectButton.addEventListener('click', () => {
     selectResource(resource);
   });
-  selectButton.addEventListener('dblclick', async () => {
+  selectButton.addEventListener('dblclick', () => {
     state.selectedId = resource.id;
-    const realSessions = realSessionsForResource(resource.id);
-    if (realSessions.length > 0 && !isLocalResource(resource)) {
-      selectResource(resource);
-      await openConnectPanel();
-      return;
-    }
     createPendingTab(resource);
     quickConnect(resource);
   });
