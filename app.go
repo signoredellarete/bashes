@@ -190,6 +190,10 @@ func (a *App) UpdateResource(id string, input application.EndpointInput) error {
 	return a.service.UpdateResource(id, input)
 }
 
+func (a *App) SetResourceTags(id string, tags []string) error {
+	return a.service.SetResourceTags(id, tags)
+}
+
 func (a *App) ReorderHosts(order []string) error {
 	return a.service.ReorderHosts(order)
 }
@@ -1607,6 +1611,7 @@ func (a *App) resourceByID(id string) (domain.Endpoint, error) {
 				IP:                 host.IP,
 				Port:               host.Port,
 				User:               host.User,
+				Tags:               host.Tags,
 				HostKeyFingerprint: host.HostKeyFingerprint,
 				Auth:               host.Auth,
 			}, nil

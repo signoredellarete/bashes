@@ -24,6 +24,7 @@ type EndpointInput struct {
 	IP       string              `json:"ip"`
 	Port     int                 `json:"port"`
 	User     string              `json:"user"`
+	Tags     []string            `json:"tags,omitempty"`
 	Type     domain.ResourceType `json:"type,omitempty"`
 }
 
@@ -88,6 +89,7 @@ func (s *Service) AddHost(input EndpointInput) (domain.Host, error) {
 		IP:         strings.TrimSpace(input.IP),
 		Port:       input.Port,
 		User:       strings.TrimSpace(input.User),
+		Tags:       domain.NormalizeTags(input.Tags),
 		Subsystems: []domain.Endpoint{},
 	}
 	host.ID = domain.StableID(domain.ResourceHost, host.Hostname, host.IP, host.Port, host.User, len(data.Hosts))
@@ -126,6 +128,7 @@ func (s *Service) AddSubsystem(hostID string, input EndpointInput) (domain.Endpo
 		IP:         strings.TrimSpace(input.IP),
 		Port:       input.Port,
 		User:       strings.TrimSpace(input.User),
+		Tags:       domain.NormalizeTags(input.Tags),
 		Subsystems: []domain.Endpoint{},
 	}
 	parts = append(parts, len(*parent))
@@ -169,6 +172,9 @@ func (s *Service) UpdateResource(id string, input EndpointInput) error {
 			data.Hosts[i].IP = strings.TrimSpace(input.IP)
 			data.Hosts[i].Port = input.Port
 			data.Hosts[i].User = strings.TrimSpace(input.User)
+			if input.Tags != nil {
+				data.Hosts[i].Tags = domain.NormalizeTags(input.Tags)
+			}
 			return s.store.Save(data)
 		}
 	}
@@ -185,9 +191,42 @@ func (s *Service) UpdateResource(id string, input EndpointInput) error {
 		subsystem.IP = strings.TrimSpace(input.IP)
 		subsystem.Port = input.Port
 		subsystem.User = strings.TrimSpace(input.User)
+		if input.Tags != nil {
+			subsystem.Tags = domain.NormalizeTags(input.Tags)
+		}
 		return s.store.Save(data)
 	}
 
+	return fmt.Errorf("resource %q not found", id)
+}
+
+func (s *Service) SetResourceTags(id string, tags []string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("resource id is required")
+	}
+	tags = domain.NormalizeTags(tags)
+	if err := domain.ValidateTags(tags); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	data, err := s.store.Load()
+	if err != nil {
+		return err
+	}
+	for i := range data.Hosts {
+		if data.Hosts[i].ID == id {
+			data.Hosts[i].Tags = tags
+			return s.store.Save(data)
+		}
+	}
+	if subsystem := findSubsystemByID(data.Hosts, id); subsystem != nil {
+		subsystem.Tags = tags
+		return s.store.Save(data)
+	}
 	return fmt.Errorf("resource %q not found", id)
 }
 

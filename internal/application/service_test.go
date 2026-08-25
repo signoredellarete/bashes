@@ -54,6 +54,60 @@ func TestServiceAddsHostAndSubsystem(t *testing.T) {
 	}
 }
 
+func TestServicePersistsAndUpdatesResourceTags(t *testing.T) {
+	store := newMemoryStore()
+	service := NewService(store)
+
+	host, err := service.AddHost(EndpointInput{
+		Hostname: "server-01",
+		IP:       "10.0.0.10",
+		Port:     22,
+		User:     "root",
+		Tags:     []string{" prod ", "HPC", "PROD"},
+	})
+	if err != nil {
+		t.Fatalf("AddHost() error = %v", err)
+	}
+	if len(host.Tags) != 2 || host.Tags[0] != "prod" || host.Tags[1] != "HPC" {
+		t.Fatalf("Host tags = %v, want normalized tags", host.Tags)
+	}
+
+	subsystem, err := service.AddSubsystem(host.ID, EndpointInput{
+		Type:     domain.ResourceVM,
+		Hostname: "vm-app",
+		IP:       "10.0.0.20",
+		Port:     22,
+		User:     "ubuntu",
+		Tags:     []string{"lab"},
+	})
+	if err != nil {
+		t.Fatalf("AddSubsystem() error = %v", err)
+	}
+	if err := service.SetResourceTags(subsystem.ID, []string{" edge ", "EDGE", "work"}); err != nil {
+		t.Fatalf("SetResourceTags() error = %v", err)
+	}
+	if err := service.UpdateResource(host.ID, EndpointInput{
+		Hostname: "server-renamed",
+		IP:       "10.0.0.10",
+		Port:     22,
+		User:     "root",
+	}); err != nil {
+		t.Fatalf("UpdateResource() error = %v", err)
+	}
+
+	hosts, err := service.ListHosts()
+	if err != nil {
+		t.Fatalf("ListHosts() error = %v", err)
+	}
+	if len(hosts[0].Tags) != 2 {
+		t.Fatalf("Host tags were cleared by ordinary edit: %v", hosts[0].Tags)
+	}
+	got := hosts[0].Subsystems[0].Tags
+	if len(got) != 2 || got[0] != "edge" || got[1] != "work" {
+		t.Fatalf("Subsystem tags = %v, want [edge work]", got)
+	}
+}
+
 func TestServiceAddsNestedSubsystem(t *testing.T) {
 	store := newMemoryStore()
 	service := NewService(store)

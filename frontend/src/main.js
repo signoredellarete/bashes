@@ -30,6 +30,7 @@ import {
   persistTerminalSettings,
 } from './terminal-settings.js';
 import { repeatedKeyData } from './terminal-keyboard.js';
+import { canonicalTag, collectResourceTags, filterResourceTree, resourceTags, tagHue } from './resource-tags.js';
 import './styles.css';
 
 const terminalSettings = loadTerminalSettings(localStorage);
@@ -68,6 +69,8 @@ const state = {
   editContextTarget: null,
   draggedHostId: null,
   draggedSessionId: null,
+  activeTagFilters: [],
+  tagFilterMode: 'any',
   lastSessionByResource: new Map(),
   sessionFocusHistory: [],
   messageLog: [],
@@ -167,9 +170,29 @@ app.innerHTML = `
     </header>
 
     <div class="toolbar">
-      <input id="search" type="search" placeholder="Search hosts" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" />
-      <button id="open-host-panel" type="button" title="Add host">Add Host</button>
+      <label class="search-control" aria-label="Search connections">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <circle cx="11" cy="11" r="8"></circle>
+          <path d="m21 21-4.3-4.3"></path>
+        </svg>
+        <input id="search" type="search" placeholder="Search hosts, users, tags" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" />
+      </label>
+      <button id="open-host-panel" class="toolbar-icon-button" type="button" title="Add host" aria-label="Add host">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"></path></svg>
+      </button>
     </div>
+
+    <section id="tag-filters" class="tag-filters" aria-label="Filter connections by tag" hidden>
+      <header>
+        <span>Filter by tag</span>
+        <div class="tag-filter-mode" aria-label="Tag matching mode">
+          <button id="tag-mode-any" type="button" title="Match any selected tag">ANY</button>
+          <button id="tag-mode-all" type="button" title="Match all selected tags">ALL</button>
+        </div>
+      </header>
+      <div id="tag-filter-chips" class="tag-filter-chips"></div>
+      <button id="clear-tag-filters" class="clear-tag-filters" type="button" hidden>Clear filters</button>
+    </section>
 
     <section id="hosts" class="hosts" aria-label="Hosts"></section>
   </aside>
@@ -511,6 +534,9 @@ searchInput.addEventListener('input', () => scheduleHostRender());
   searchInput.addEventListener(eventName, (event) => event.stopPropagation());
 });
 document.querySelector('#open-host-panel').addEventListener('click', () => openResourcePanel('host'));
+document.querySelector('#tag-mode-any').addEventListener('click', () => setTagFilterMode('any'));
+document.querySelector('#tag-mode-all').addEventListener('click', () => setTagFilterMode('all'));
+document.querySelector('#clear-tag-filters').addEventListener('click', () => clearTagFilters());
 document.querySelector('#open-keys-panel').addEventListener('click', () => openKeysPanel());
 document.querySelector('#open-tunnel-panel').addEventListener('click', () => openTunnelPanel());
 document.querySelector('#open-file-transfer').addEventListener('click', () => openFileTransferModal());
@@ -1168,24 +1194,38 @@ function scheduleHostRender() {
 function renderHosts(filter = '') {
   const container = document.querySelector('#hosts');
   const query = filter.trim().toLowerCase();
-  const canReorder = query === '';
+  renderTagFilters();
+  const hasFilters = query !== '' || state.activeTagFilters.length > 0;
+  const canReorder = !hasFilters;
   const rows = [];
 
   if (state.localShellSupported) {
     rows.push(resourceRow(localResource(), 'local', 0, LOCAL_RESOURCE_ID, false));
   }
-  for (const host of state.hosts) {
-    rows.push(...resourceRows(host, 'host', 0, host.id, canReorder));
+  const filteredHosts = filterResourceTree(state.hosts, {
+    query,
+    activeTags: state.activeTagFilters,
+    mode: state.tagFilterMode,
+  });
+  for (const node of filteredHosts) {
+    rows.push(...resourceRows(node, 'host', 0, node.resource.id, canReorder));
   }
 
-  const visibleRows = rows.filter((row) => row.search.includes(query));
-  container.replaceChildren(...visibleRows.map((row) => row.element));
+  const elements = rows.map((row) => row.element);
+  if (hasFilters && filteredHosts.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'host-filter-empty';
+    empty.textContent = 'No connection matches the current filters.';
+    elements.push(empty);
+  }
+  container.replaceChildren(...elements);
 }
 
-function resourceRows(resource, type, depth, rootHostId, canReorder) {
+function resourceRows(node, type, depth, rootHostId, canReorder) {
+  const resource = node.resource;
   const rows = [resourceRow(resource, type, depth, rootHostId, canReorder)];
-  for (const subsystem of resource.subsystems ?? []) {
-    rows.push(...resourceRows(subsystem, subsystem.type, depth + 1, rootHostId, canReorder));
+  for (const child of node.children) {
+    rows.push(...resourceRows(child, child.resource.type, depth + 1, rootHostId, canReorder));
   }
   return rows;
 }
@@ -1198,13 +1238,15 @@ function resourceRow(resource, type, depth = 0, rootHostId = resource.id, canReo
   row.dataset.rootHostId = rootHostId;
   row.style.setProperty('--tree-offset', `${depth * 18}px`);
   const target = resourceTarget(resource);
-  const tooltip = `${resource.hostname} - ${target}`;
+  const tags = resourceTags(resource);
+  const tooltip = `${resource.hostname} - ${target}${tags.length ? ` - ${tags.map((tag) => tag.name).join(', ')}` : ''}`;
   const tunnel = tunnelForResource(resource.id);
 
   const selectButton = document.createElement('button');
   selectButton.type = 'button';
   selectButton.className = 'host-select';
   if (tunnel) selectButton.classList.add('tunnel-active');
+  if (tags.length) selectButton.classList.add('has-tags');
   selectButton.draggable = canReorder && !isLocalResource(resource);
   selectButton.setAttribute('aria-label', tooltip);
   selectButton.dataset.tooltip = tooltip;
@@ -1217,6 +1259,7 @@ function resourceRow(resource, type, depth = 0, rootHostId = resource.id, canReo
       </span>
       <small></small>
     </span>
+    <span class="resource-tags" aria-label="Connection tags"></span>
   `;
   if (tunnel) {
     const chip = document.createElement('span');
@@ -1229,6 +1272,7 @@ function resourceRow(resource, type, depth = 0, rootHostId = resource.id, canReo
   selectButton.querySelector('.compact-name').textContent = compactResourceName(resource.hostname);
   selectButton.querySelector('strong').textContent = resource.hostname;
   selectButton.querySelector('small').textContent = target;
+  renderResourceTagPills(selectButton.querySelector('.resource-tags'), tags);
   selectButton.addEventListener('click', () => {
     selectResource(resource);
   });
@@ -1253,8 +1297,91 @@ function resourceRow(resource, type, depth = 0, rootHostId = resource.id, canReo
 
   return {
     element: row,
-    search: `${resource.hostname} ${resource.ip} ${resource.user} ${type}`.toLowerCase(),
   };
+}
+
+function renderTagFilters() {
+  const section = document.querySelector('#tag-filters');
+  const container = document.querySelector('#tag-filter-chips');
+  const clear = document.querySelector('#clear-tag-filters');
+  const tags = collectResourceTags(state.hosts);
+  const available = new Set(tags.map((tag) => tag.key));
+  state.activeTagFilters = state.activeTagFilters.filter((tag) => available.has(tag));
+  section.hidden = tags.length === 0;
+
+  const any = document.querySelector('#tag-mode-any');
+  const all = document.querySelector('#tag-mode-all');
+  any.classList.toggle('active', state.tagFilterMode === 'any');
+  all.classList.toggle('active', state.tagFilterMode === 'all');
+  any.setAttribute('aria-pressed', state.tagFilterMode === 'any' ? 'true' : 'false');
+  all.setAttribute('aria-pressed', state.tagFilterMode === 'all' ? 'true' : 'false');
+
+  container.replaceChildren(...tags.map((tag) => {
+    const button = document.createElement('button');
+    const active = state.activeTagFilters.includes(tag.key);
+    button.type = 'button';
+    button.className = `tag-filter-chip${active ? ' active' : ''}`;
+    button.title = `${tag.count} connection${tag.count === 1 ? '' : 's'} tagged ${tag.name}`;
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    applyTagPalette(button, tag.name);
+
+    const dot = document.createElement('span');
+    dot.className = 'tag-dot';
+    const label = document.createElement('span');
+    label.textContent = tag.name;
+    const count = document.createElement('small');
+    count.textContent = String(tag.count);
+    button.append(dot, label, count);
+    button.addEventListener('click', () => toggleTagFilter(tag.key));
+    return button;
+  }));
+  clear.hidden = state.activeTagFilters.length === 0;
+}
+
+function renderResourceTagPills(container, tags) {
+  if (!container || tags.length === 0) return;
+  const shown = tags.length > 3 ? tags.slice(0, 2) : tags.slice(0, 3);
+  const pills = shown.map((tag) => {
+    const pill = document.createElement('span');
+    pill.className = `resource-tag${state.activeTagFilters.includes(tag.key) ? ' active' : ''}`;
+    pill.textContent = tag.name;
+    pill.title = `Tag: ${tag.name}`;
+    applyTagPalette(pill, tag.name);
+    return pill;
+  });
+  if (tags.length > shown.length) {
+    const overflow = document.createElement('span');
+    overflow.className = 'resource-tag overflow';
+    overflow.textContent = `+${tags.length - shown.length}`;
+    overflow.title = tags.slice(shown.length).map((tag) => tag.name).join(', ');
+    pills.push(overflow);
+  }
+  container.replaceChildren(...pills);
+}
+
+function applyTagPalette(element, name) {
+  element.style.setProperty('--tag-hue', String(tagHue(name)));
+}
+
+function toggleTagFilter(tag) {
+  tag = canonicalTag(tag);
+  state.activeTagFilters = state.activeTagFilters.includes(tag)
+    ? state.activeTagFilters.filter((active) => active !== tag)
+    : [...state.activeTagFilters, tag];
+  renderHosts(searchInput.value);
+  renderSelection();
+}
+
+function clearTagFilters() {
+  state.activeTagFilters = [];
+  renderHosts(searchInput.value);
+  renderSelection();
+}
+
+function setTagFilterMode(mode) {
+  state.tagFilterMode = mode === 'all' ? 'all' : 'any';
+  renderHosts(searchInput.value);
+  renderSelection();
 }
 
 function startHostDrag(event, rootHostId) {

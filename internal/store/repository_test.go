@@ -168,6 +168,40 @@ func TestSaveAndLoadPreservesAuthPreference(t *testing.T) {
 	}
 }
 
+func TestSaveAndLoadPreservesResourceTags(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hosts.json")
+	repo := NewRepository(path)
+	store := domain.Store{
+		Version: domain.CurrentSchemaVersion,
+		Hosts: []domain.Host{
+			{
+				ID:       "host-tagged",
+				Hostname: "tagged",
+				IP:       "192.168.1.10",
+				Port:     22,
+				User:     "admin",
+				Tags:     []string{"prod", "milan"},
+				Subsystems: []domain.Endpoint{
+					{ID: "vm-tagged", Type: domain.ResourceVM, Hostname: "vm", IP: "192.168.1.11", Port: 22, User: "root", Tags: []string{"lab"}},
+				},
+			},
+		},
+	}
+	if err := repo.Save(store); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	loaded, err := repo.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if strings.Join(loaded.Hosts[0].Tags, ",") != "prod,milan" {
+		t.Fatalf("Host tags = %v", loaded.Hosts[0].Tags)
+	}
+	if strings.Join(loaded.Hosts[0].Subsystems[0].Tags, ",") != "lab" {
+		t.Fatalf("Subsystem tags = %v", loaded.Hosts[0].Subsystems[0].Tags)
+	}
+}
+
 func TestLoadRejectsInvalidLegacyPort(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hosts.json")
 	legacy := `[{"hostname":"bad","ip":"127.0.0.1","port":"nope","user":"root","lxc":[],"vm":[],"docker":[]}]`

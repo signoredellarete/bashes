@@ -9,9 +9,15 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 const CurrentSchemaVersion = 1
+
+const (
+	MaxTagsPerResource = 32
+	MaxTagLength       = 40
+)
 
 type ResourceType string
 
@@ -33,6 +39,7 @@ type Host struct {
 	IP                 string     `json:"ip"`
 	Port               int        `json:"port"`
 	User               string     `json:"user"`
+	Tags               []string   `json:"tags,omitempty"`
 	HostKeyFingerprint string     `json:"hostKeyFingerprint,omitempty"`
 	Auth               *Auth      `json:"auth,omitempty"`
 	Subsystems         []Endpoint `json:"subsystems"`
@@ -45,6 +52,7 @@ type Endpoint struct {
 	IP                 string       `json:"ip"`
 	Port               int          `json:"port"`
 	User               string       `json:"user"`
+	Tags               []string     `json:"tags,omitempty"`
 	HostKeyFingerprint string       `json:"hostKeyFingerprint,omitempty"`
 	Auth               *Auth        `json:"auth,omitempty"`
 	Subsystems         []Endpoint   `json:"subsystems,omitempty"`
@@ -82,6 +90,9 @@ func (s Store) Validate() error {
 		if hasControl(host.HostKeyFingerprint) {
 			return fmt.Errorf("hosts[%d]: host key fingerprint contains control characters", i)
 		}
+		if err := ValidateTags(host.Tags); err != nil {
+			return fmt.Errorf("hosts[%d].tags: %w", i, err)
+		}
 		if err := validateAuth(host.Auth); err != nil {
 			return fmt.Errorf("hosts[%d].auth: %w", i, err)
 		}
@@ -109,6 +120,9 @@ func validateSubsystem(sub Endpoint, path string, seen map[string]struct{}) erro
 	}
 	if hasControl(sub.HostKeyFingerprint) {
 		return fmt.Errorf("%s: host key fingerprint contains control characters", path)
+	}
+	if err := ValidateTags(sub.Tags); err != nil {
+		return fmt.Errorf("%s.tags: %w", path, err)
 	}
 	if err := validateAuth(sub.Auth); err != nil {
 		return fmt.Errorf("%s.auth: %w", path, err)
@@ -145,6 +159,7 @@ func NormalizeStore(store Store) Store {
 
 	for i := range store.Hosts {
 		host := &store.Hosts[i]
+		host.Tags = NormalizeTags(host.Tags)
 		if host.ID == "" {
 			host.ID = StableID(ResourceHost, host.Hostname, host.IP, host.Port, host.User, i)
 		}
@@ -160,6 +175,7 @@ func NormalizeStore(store Store) Store {
 }
 
 func normalizeSubsystem(sub *Endpoint, parts ...int) {
+	sub.Tags = NormalizeTags(sub.Tags)
 	if sub.ID == "" {
 		sub.ID = StableID(sub.Type, sub.Hostname, sub.IP, sub.Port, sub.User, parts...)
 	}
@@ -169,6 +185,55 @@ func normalizeSubsystem(sub *Endpoint, parts ...int) {
 	for i := range sub.Subsystems {
 		normalizeSubsystem(&sub.Subsystems[i], append(parts, i)...)
 	}
+}
+
+func NormalizeTags(tags []string) []string {
+	if len(tags) == 0 {
+		return nil
+	}
+
+	normalized := make([]string, 0, len(tags))
+	seen := make(map[string]struct{}, len(tags))
+	for _, tag := range tags {
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			continue
+		}
+		key := strings.ToLower(tag)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, tag)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
+}
+
+func ValidateTags(tags []string) error {
+	if len(tags) > MaxTagsPerResource {
+		return fmt.Errorf("at most %d tags are allowed", MaxTagsPerResource)
+	}
+	seen := make(map[string]struct{}, len(tags))
+	for i, tag := range tags {
+		if strings.TrimSpace(tag) == "" {
+			return fmt.Errorf("tag %d is empty", i)
+		}
+		if hasControl(tag) {
+			return fmt.Errorf("tag %q contains control characters", tag)
+		}
+		if utf8.RuneCountInString(tag) > MaxTagLength {
+			return fmt.Errorf("tag %q exceeds %d characters", tag, MaxTagLength)
+		}
+		key := strings.ToLower(tag)
+		if _, exists := seen[key]; exists {
+			return fmt.Errorf("duplicate tag %q", tag)
+		}
+		seen[key] = struct{}{}
+	}
+	return nil
 }
 
 func ValidResourceType(kind ResourceType) bool {
