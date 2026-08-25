@@ -92,8 +92,6 @@ const state = {
   draggedSessionId: null,
   activeTagFilters: [],
   tagFilterMode: 'any',
-  tagPanelMode: 'global',
-  tagPanelResourceId: null,
   editingTagKey: null,
   lastSessionByResource: new Map(),
   sessionFocusHistory: [],
@@ -239,7 +237,7 @@ app.innerHTML = `
             <div class="session-action-group">
               <button id="edit-resource" class="secondary icon-action" type="button" title="Edit connection" aria-label="Edit connection" disabled>${iconMarkup(Pencil)}</button>
               <button id="header-add-subsystem" class="secondary icon-action" type="button" title="Add subsystem" aria-label="Add subsystem" disabled>${iconMarkup(GitBranchPlus)}</button>
-              <button id="manage-resource-tags" class="secondary icon-action" type="button" title="Assign tags" aria-label="Assign tags" disabled>${iconMarkup(Tag)}</button>
+              <button id="manage-resource-tags" class="secondary icon-action" type="button" title="Manage tags" aria-label="Manage tags" disabled>${iconMarkup(Tag)}</button>
             </div>
             <div class="session-action-group">
               <button id="open-keys-panel" class="secondary icon-action" type="button" title="SSH keys" aria-label="SSH keys" disabled>${iconMarkup(KeyRound)}</button>
@@ -318,6 +316,10 @@ app.innerHTML = `
           <input name="user" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required />
         </label>
       </div>
+      <fieldset class="resource-tag-field">
+        <legend>Tags</legend>
+        <div id="resource-tag-options" class="resource-tag-options"></div>
+      </fieldset>
 
       <footer class="panel-actions">
         <button class="secondary" type="button" data-close-panel>Cancel</button>
@@ -608,7 +610,7 @@ searchInput.addEventListener('input', () => scheduleHostRender());
   searchInput.addEventListener(eventName, (event) => event.stopPropagation());
 });
 document.querySelector('#open-host-panel').addEventListener('click', () => openResourcePanel('host'));
-document.querySelector('#open-tag-manager').addEventListener('click', () => openTagPanel('global'));
+document.querySelector('#open-tag-manager').addEventListener('click', () => openTagPanel());
 document.querySelector('#tag-mode-any').addEventListener('click', () => setTagFilterMode('any'));
 document.querySelector('#tag-mode-all').addEventListener('click', () => setTagFilterMode('all'));
 document.querySelector('#clear-tag-filters').addEventListener('click', () => clearTagFilters());
@@ -616,7 +618,7 @@ document.querySelector('#open-keys-panel').addEventListener('click', () => openK
 document.querySelector('#open-tunnel-panel').addEventListener('click', () => openTunnelPanel());
 document.querySelector('#open-file-transfer').addEventListener('click', () => openFileTransferModal());
 document.querySelector('#edit-resource').addEventListener('click', () => openEditPanel());
-document.querySelector('#manage-resource-tags').addEventListener('click', () => openTagPanel('resource'));
+document.querySelector('#manage-resource-tags').addEventListener('click', () => openTagPanel());
 document.querySelector('#header-add-subsystem').addEventListener('click', () => {
   const selected = findResource(state.selectedId);
   if (selected && !isLocalResource(selected.resource)) openResourcePanel('subsystem', selected.resource.id);
@@ -1263,8 +1265,40 @@ function endpointInput(form, type) {
     ip: form.elements.ip.value.trim(),
     port: Number.parseInt(form.elements.port.value, 10),
     user: form.elements.user.value.trim(),
+    tags: [...form.querySelectorAll('input[name="tags"]:checked')].map((input) => input.value),
     ...(type ? { type } : {}),
   };
+}
+
+function renderResourceTagOptions(selectedTags = []) {
+  const container = document.querySelector('#resource-tag-options');
+  const selected = new Set((selectedTags ?? []).map(canonicalTag));
+  const tags = mergeTagCatalog(state.tags, state.hosts);
+  if (tags.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'resource-tag-options-empty';
+    empty.textContent = 'No tags available.';
+    container.replaceChildren(empty);
+    return;
+  }
+
+  container.replaceChildren(...tags.map((tag) => {
+    const option = document.createElement('label');
+    option.className = `resource-tag-option${selected.has(tag.key) ? ' selected' : ''}`;
+    applyTagPalette(option, tag.name);
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.name = 'tags';
+    input.value = tag.name;
+    input.checked = selected.has(tag.key);
+    input.addEventListener('change', () => option.classList.toggle('selected', input.checked));
+    const dot = document.createElement('span');
+    dot.className = 'tag-dot';
+    const name = document.createElement('span');
+    name.textContent = tag.name;
+    option.append(input, dot, name);
+    return option;
+  }));
 }
 
 function scheduleHostRender() {
@@ -1469,12 +1503,7 @@ function setTagFilterMode(mode) {
   renderSelection();
 }
 
-function openTagPanel(mode = 'global') {
-  const selected = findResource(state.selectedId)?.resource;
-  if (mode === 'resource' && (!selected || isLocalResource(selected))) return;
-
-  state.tagPanelMode = mode === 'resource' ? 'resource' : 'global';
-  state.tagPanelResourceId = state.tagPanelMode === 'resource' ? selected.id : null;
+function openTagPanel() {
   state.editingTagKey = null;
   renderTagPanel();
 
@@ -1489,16 +1518,11 @@ function closeTagPanel() {
   panel.classList.remove('open');
   panel.hidden = true;
   state.editingTagKey = null;
-  state.tagPanelResourceId = null;
   restoreTerminalFocusAfterOverlay();
 }
 
 function renderTagPanel() {
   const tags = mergeTagCatalog(state.tags, state.hosts);
-  const selected = state.tagPanelMode === 'resource'
-    ? findResource(state.tagPanelResourceId)?.resource
-    : null;
-  const assigned = new Set(resourceTags(selected).map((tag) => tag.key));
   const title = document.querySelector('#tag-panel-title');
   const subtitle = document.querySelector('#tag-panel-subtitle');
   const hint = document.querySelector('#tag-list-hint');
@@ -1506,26 +1530,15 @@ function renderTagPanel() {
   const clear = document.querySelector('#tag-panel-clear');
   const list = document.querySelector('#tag-manager-list');
 
-  if (state.tagPanelMode === 'resource') {
-    title.textContent = `Tags for ${selected?.hostname ?? 'connection'}`;
-    subtitle.textContent = `${assigned.size} tag${assigned.size === 1 ? '' : 's'} assigned`;
-    hint.textContent = 'Click a tag to assign';
-    status.textContent = assigned.size > 0
-      ? `${assigned.size} assigned tag${assigned.size === 1 ? '' : 's'}`
-      : 'No assigned tags';
-    clear.textContent = 'Clear tags';
-    clear.disabled = assigned.size === 0;
-  } else {
-    const systems = countResources(state.hosts);
-    title.textContent = 'Manage tags';
-    subtitle.textContent = `${tags.length} tag${tags.length === 1 ? '' : 's'} across ${systems} system${systems === 1 ? '' : 's'}`;
-    hint.textContent = 'Click a tag to filter';
-    status.textContent = state.activeTagFilters.length > 0
-      ? `${state.activeTagFilters.length} active filter${state.activeTagFilters.length === 1 ? '' : 's'}`
-      : 'No active filters';
-    clear.textContent = 'Clear filter';
-    clear.disabled = state.activeTagFilters.length === 0;
-  }
+  const systems = countResources(state.hosts);
+  title.textContent = 'Manage tags';
+  subtitle.textContent = `${tags.length} tag${tags.length === 1 ? '' : 's'} across ${systems} system${systems === 1 ? '' : 's'}`;
+  hint.textContent = 'Click a tag to filter';
+  status.textContent = state.activeTagFilters.length > 0
+    ? `${state.activeTagFilters.length} active filter${state.activeTagFilters.length === 1 ? '' : 's'}`
+    : 'No active filters';
+  clear.textContent = 'Clear filter';
+  clear.disabled = state.activeTagFilters.length === 0;
 
   if (tags.length === 0) {
     const empty = document.createElement('p');
@@ -1534,14 +1547,12 @@ function renderTagPanel() {
     list.replaceChildren(empty);
     return;
   }
-  list.replaceChildren(...tags.map((tag) => renderTagManagerRow(tag, assigned)));
+  list.replaceChildren(...tags.map((tag) => renderTagManagerRow(tag)));
 }
 
-function renderTagManagerRow(tag, assigned) {
+function renderTagManagerRow(tag) {
   const row = document.createElement('div');
-  const selected = state.tagPanelMode === 'resource'
-    ? assigned.has(tag.key)
-    : state.activeTagFilters.includes(tag.key);
+  const selected = state.activeTagFilters.includes(tag.key);
   row.className = `tag-manager-row${selected ? ' selected' : ''}`;
   applyTagPalette(row, tag.name);
 
@@ -1574,9 +1585,7 @@ function renderTagManagerRow(tag, assigned) {
   select.type = 'button';
   select.className = 'tag-manager-select';
   select.setAttribute('aria-pressed', selected ? 'true' : 'false');
-  select.title = state.tagPanelMode === 'resource'
-    ? `${selected ? 'Remove' : 'Assign'} ${tag.name}`
-    : `${selected ? 'Remove' : 'Apply'} ${tag.name} filter`;
+  select.title = `${selected ? 'Remove' : 'Apply'} ${tag.name} filter`;
   const swatch = document.createElement('span');
   swatch.className = 'tag-manager-swatch';
   const name = document.createElement('strong');
@@ -1617,12 +1626,7 @@ async function submitCreateTag(event) {
   if (!name) return;
 
   await withBusy(async () => {
-    const created = await apiCreateTag(name);
-    if (state.tagPanelMode === 'resource' && state.tagPanelResourceId) {
-      const resource = findResource(state.tagPanelResourceId)?.resource;
-      const tags = resourceTags(resource).map((tag) => tag.name);
-      await apiSetResourceTags(state.tagPanelResourceId, [...tags, created]);
-    }
+    await apiCreateTag(name);
     input.value = '';
     await refreshHosts();
     renderTagPanel();
@@ -1663,38 +1667,14 @@ async function deleteManagedTag(tag) {
   });
 }
 
-async function toggleTagPanelTag(tag) {
-  if (state.tagPanelMode === 'global') {
-    toggleTagFilter(tag.key);
-    renderTagPanel();
-    return;
-  }
-
-  const resource = findResource(state.tagPanelResourceId)?.resource;
-  if (!resource) return;
-  const assigned = resourceTags(resource);
-  const next = assigned.some((current) => current.key === tag.key)
-    ? assigned.filter((current) => current.key !== tag.key).map((current) => current.name)
-    : [...assigned.map((current) => current.name), tag.name];
-  await withBusy(async () => {
-    await apiSetResourceTags(resource.id, next);
-    await refreshHosts();
-    renderTagPanel();
-  });
+function toggleTagPanelTag(tag) {
+  toggleTagFilter(tag.key);
+  renderTagPanel();
 }
 
-async function clearTagPanelSelection() {
-  if (state.tagPanelMode === 'global') {
-    clearTagFilters();
-    renderTagPanel();
-    return;
-  }
-  if (!state.tagPanelResourceId) return;
-  await withBusy(async () => {
-    await apiSetResourceTags(state.tagPanelResourceId, []);
-    await refreshHosts();
-    renderTagPanel();
-  });
+function clearTagPanelSelection() {
+  clearTagFilters();
+  renderTagPanel();
 }
 
 function countResources(resources) {
@@ -2175,6 +2155,7 @@ function openResourcePanel(mode, hostID = '') {
   state.editResourceId = null;
   form.reset();
   form.elements.port.value = '22';
+  renderResourceTagOptions();
 
   const subsystemMode = mode === 'subsystem';
   typeField.hidden = !subsystemMode;
@@ -2220,6 +2201,7 @@ function openEditPanel() {
   form.elements.ip.value = resource.ip;
   form.elements.port.value = String(resource.port);
   form.elements.user.value = resource.user;
+  renderResourceTagOptions(resource.tags);
   typeField.hidden = !subsystemMode;
   parentSummary.hidden = !subsystemMode;
   if (subsystemMode) {
@@ -2637,7 +2619,7 @@ function renderSelection() {
     edit.disabled = true;
     addSubsystem.disabled = true;
     addSubsystem.hidden = false;
-    manageTags.disabled = true;
+    manageTags.disabled = state.busy;
     keys.disabled = true;
     fileTransfer.disabled = true;
     fileTransfer.hidden = !FILE_TRANSFER_ENABLED;
@@ -2652,7 +2634,7 @@ function renderSelection() {
   addSubsystem.hidden = false;
   edit.disabled = state.busy || !selected || localSelected;
   addSubsystem.disabled = state.busy || !selected || localSelected;
-  manageTags.disabled = state.busy || !selected || localSelected;
+  manageTags.disabled = state.busy;
   keys.disabled = state.busy || !selected || localSelected;
   fileTransfer.hidden = !FILE_TRANSFER_ENABLED;
   fileTransfer.disabled = state.busy || !selected || localSelected || !FILE_TRANSFER_ENABLED;
@@ -3875,19 +3857,6 @@ async function apiDeleteTag(name) {
   });
 }
 
-async function apiSetResourceTags(id, tags) {
-  const api = wailsAPI();
-  if (api?.SetResourceTags) return await api.SetResourceTags(id, tags);
-  const resource = findDemoResource(id);
-  if (!resource) throw new Error(`Resource ${id} not found`);
-  resource.tags = [...tags];
-  for (const tag of tags) {
-    if (!demoStore.tags.some((existing) => canonicalTag(existing) === canonicalTag(tag))) {
-      demoStore.tags.push(tag);
-    }
-  }
-}
-
 async function apiGetAppInfo() {
   const api = wailsAPI();
   if (api?.GetAppInfo) return await api.GetAppInfo();
@@ -3925,7 +3894,7 @@ async function apiSupportsLocalShell() {
 async function apiAddHost(input) {
   const api = wailsAPI();
   if (api?.AddHost) return await api.AddHost(input);
-  const host = { id: `host-${Date.now()}`, hostname: input.hostname, ip: input.ip, port: input.port, user: input.user, subsystems: [] };
+  const host = { id: `host-${Date.now()}`, hostname: input.hostname, ip: input.ip, port: input.port, user: input.user, tags: input.tags ?? [], subsystems: [] };
   demoStore.hosts.push(host);
   return clone(host);
 }
@@ -3936,7 +3905,7 @@ async function apiAddSubsystem(hostID, input) {
   const parent = findDemoResource(hostID);
   if (!parent) throw new Error(`Resource ${hostID} not found`);
   if (!parent.subsystems) parent.subsystems = [];
-  const subsystem = { id: `${input.type}-${Date.now()}`, type: input.type, hostname: input.hostname, ip: input.ip, port: input.port, user: input.user, subsystems: [] };
+  const subsystem = { id: `${input.type}-${Date.now()}`, type: input.type, hostname: input.hostname, ip: input.ip, port: input.port, user: input.user, tags: input.tags ?? [], subsystems: [] };
   parent.subsystems.push(subsystem);
   return clone(subsystem);
 }
@@ -3950,6 +3919,7 @@ async function apiUpdateResource(id, input) {
       host.ip = input.ip;
       host.port = input.port;
       host.user = input.user;
+      host.tags = input.tags ?? host.tags ?? [];
       return;
     }
     const resource = findDemoNestedResource(host.subsystems ?? [], id);
@@ -3959,6 +3929,7 @@ async function apiUpdateResource(id, input) {
       resource.ip = input.ip;
       resource.port = input.port;
       resource.user = input.user;
+      resource.tags = input.tags ?? resource.tags ?? [];
       return;
     }
   }
