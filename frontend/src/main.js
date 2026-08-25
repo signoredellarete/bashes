@@ -239,11 +239,11 @@ app.innerHTML = `
       </label>
 
       <label>
-        <span>Hostname</span>
+        <span>Name</span>
         <input name="hostname" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required />
       </label>
       <label>
-        <span>IP / DNS</span>
+        <span>IP / Hostname</span>
         <input name="ip" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required />
       </label>
       <div class="form-grid">
@@ -2175,9 +2175,9 @@ function renderSelection() {
   const remove = document.querySelector('#delete-resource');
 
   if (activeSession) {
-    title.textContent = activeSession.target;
+    title.textContent = activeSession.title;
   } else if (selected) {
-    title.textContent = isLocalResource(selected.resource) ? 'localhost' : `${selected.resource.user}@${selected.resource.hostname}`;
+    title.textContent = selected.resource.hostname;
   } else {
     title.textContent = 'No session selected';
   }
