@@ -37,3 +37,37 @@ func TestValidateTagsRejectsInvalidValues(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeStoreBuildsTagCatalogFromNestedResources(t *testing.T) {
+	store := NormalizeStore(Store{
+		Version: CurrentSchemaVersion,
+		Tags:    []string{"Unassigned"},
+		Hosts: []Host{{
+			ID:       "host-1",
+			Hostname: "host",
+			IP:       "127.0.0.1",
+			Port:     22,
+			User:     "root",
+			Tags:     []string{"Prod"},
+			Subsystems: []Endpoint{{
+				ID:       "vm-1",
+				Type:     ResourceVM,
+				Hostname: "vm",
+				IP:       "127.0.0.2",
+				Port:     22,
+				User:     "root",
+				Tags:     []string{"prod", "Data"},
+			}},
+		}},
+	})
+
+	want := []string{"Unassigned", "Prod", "Data"}
+	if len(store.Tags) != len(want) {
+		t.Fatalf("Store tags = %v, want %v", store.Tags, want)
+	}
+	for i := range want {
+		if store.Tags[i] != want[i] {
+			t.Fatalf("Store tags[%d] = %q, want %q", i, store.Tags[i], want[i])
+		}
+	}
+}

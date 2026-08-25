@@ -178,6 +178,22 @@ func (a *App) ListHosts() ([]domain.Host, error) {
 	return a.service.ListHosts()
 }
 
+func (a *App) ListTags() ([]string, error) {
+	return a.service.ListTags()
+}
+
+func (a *App) CreateTag(name string) (string, error) {
+	return a.service.CreateTag(name)
+}
+
+func (a *App) RenameTag(currentName, newName string) error {
+	return a.service.RenameTag(currentName, newName)
+}
+
+func (a *App) DeleteTag(name string) error {
+	return a.service.DeleteTag(name)
+}
+
 func (a *App) AddHost(input application.EndpointInput) (domain.Host, error) {
 	return a.service.AddHost(input)
 }

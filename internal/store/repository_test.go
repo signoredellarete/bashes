@@ -173,6 +173,7 @@ func TestSaveAndLoadPreservesResourceTags(t *testing.T) {
 	repo := NewRepository(path)
 	store := domain.Store{
 		Version: domain.CurrentSchemaVersion,
+		Tags:    []string{"unassigned"},
 		Hosts: []domain.Host{
 			{
 				ID:       "host-tagged",
@@ -199,6 +200,9 @@ func TestSaveAndLoadPreservesResourceTags(t *testing.T) {
 	}
 	if strings.Join(loaded.Hosts[0].Subsystems[0].Tags, ",") != "lab" {
 		t.Fatalf("Subsystem tags = %v", loaded.Hosts[0].Subsystems[0].Tags)
+	}
+	if strings.Join(loaded.Tags, ",") != "unassigned,prod,milan,lab" {
+		t.Fatalf("Tag catalog = %v", loaded.Tags)
 	}
 }
 

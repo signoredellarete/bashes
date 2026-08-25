@@ -29,6 +29,21 @@ export function collectResourceTags(resources) {
   return [...tags.values()].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }));
 }
 
+export function mergeTagCatalog(catalog, resources) {
+  const assigned = new Map(collectResourceTags(resources).map((tag) => [tag.key, tag]));
+  const merged = new Map();
+  for (const value of catalog ?? []) {
+    const name = String(value ?? '').trim();
+    const key = canonicalTag(name);
+    if (!key || merged.has(key)) continue;
+    merged.set(key, { key, name, count: assigned.get(key)?.count ?? 0 });
+  }
+  for (const tag of assigned.values()) {
+    if (!merged.has(tag.key)) merged.set(tag.key, tag);
+  }
+  return [...merged.values()].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }));
+}
+
 export function resourceMatches(resource, { query = '', activeTags = [], mode = 'any' } = {}) {
   const normalizedQuery = String(query).trim().toLowerCase();
   const tags = resourceTags(resource);

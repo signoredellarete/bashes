@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collectResourceTags, filterResourceTree, resourceMatches, tagHue } from './resource-tags.js';
+import { collectResourceTags, filterResourceTree, mergeTagCatalog, resourceMatches, tagHue } from './resource-tags.js';
 
 const resources = [
   {
@@ -43,5 +43,16 @@ describe('resource tag filtering', () => {
 
   it('derives stable colors without case sensitivity', () => {
     expect(tagHue('Prod')).toBe(tagHue('prod'));
+  });
+
+  it('keeps unassigned catalog tags and resource counts', () => {
+    expect(mergeTagCatalog(['Unassigned', 'prod'], resources)).toEqual([
+      { key: 'data', name: 'data', count: 1 },
+      { key: 'hpc', name: 'HPC', count: 1 },
+      { key: 'lab', name: 'lab', count: 1 },
+      { key: 'milan', name: 'Milan', count: 1 },
+      { key: 'prod', name: 'prod', count: 2 },
+      { key: 'unassigned', name: 'Unassigned', count: 0 },
+    ]);
   });
 });

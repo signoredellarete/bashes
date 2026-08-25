@@ -1,5 +1,24 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import {
+  ArrowLeftRight,
+  Check,
+  ChevronLeft,
+  createElement as createIconElement,
+  FileText,
+  Folder,
+  GitBranchPlus,
+  KeyRound,
+  Pencil,
+  Play,
+  Plus,
+  Search,
+  Tag,
+  Tags,
+  Trash2,
+  Unplug,
+  X,
+} from 'lucide';
 import '@xterm/xterm/css/xterm.css';
 import bashesLogo from './assets/bashes.png';
 import { externalHttpURL } from './external-links.js';
@@ -30,12 +49,13 @@ import {
   persistTerminalSettings,
 } from './terminal-settings.js';
 import { repeatedKeyData } from './terminal-keyboard.js';
-import { canonicalTag, collectResourceTags, filterResourceTree, resourceTags, tagHue } from './resource-tags.js';
+import { canonicalTag, filterResourceTree, mergeTagCatalog, resourceTags, tagHue } from './resource-tags.js';
 import './styles.css';
 
 const terminalSettings = loadTerminalSettings(localStorage);
 
 const demoStore = {
+  tags: ['Production', 'Development'],
   hosts: [
     {
       id: 'demo-host',
@@ -53,6 +73,7 @@ const demoStore = {
 
 const state = {
   hosts: [],
+  tags: [],
   keys: [],
   keySettings: { customDirectory: '' },
   tunnels: new Map(),
@@ -71,6 +92,9 @@ const state = {
   draggedSessionId: null,
   activeTagFilters: [],
   tagFilterMode: 'any',
+  tagPanelMode: 'global',
+  tagPanelResourceId: null,
+  editingTagKey: null,
   lastSessionByResource: new Map(),
   sessionFocusHistory: [],
   messageLog: [],
@@ -95,7 +119,17 @@ const customKeyPathHelp = [
   'Linux/macOS: ~/.ssh/id_ed25519',
   'Windows: C:\\Users\\YourUser\\.ssh\\id_ed25519',
 ].join('\n\n');
-const ICON_CLOSE = '✕';
+const iconMarkup = (icon, className = '') => createIconElement(icon, {
+  'aria-hidden': 'true',
+  class: className,
+  focusable: 'false',
+}).outerHTML;
+const iconElement = (icon, className = '') => createIconElement(icon, {
+  'aria-hidden': 'true',
+  class: className,
+  focusable: 'false',
+});
+const ICON_CLOSE = iconMarkup(X);
 
 function authFieldsMarkup(context) {
   return `
@@ -163,22 +197,20 @@ app.innerHTML = `
         <span>Remote sessions</span>
       </div>
       <button id="toggle-sidebar" class="sidebar-toggle" type="button" title="Compact sidebar" aria-label="Compact sidebar">
-        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <path d="m15 18-6-6 6-6"></path>
-        </svg>
+        ${iconMarkup(ChevronLeft)}
       </button>
     </header>
 
     <div class="toolbar">
       <label class="search-control" aria-label="Search connections">
-        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <circle cx="11" cy="11" r="8"></circle>
-          <path d="m21 21-4.3-4.3"></path>
-        </svg>
+        ${iconMarkup(Search)}
         <input id="search" type="search" placeholder="Search hosts, users, tags" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" />
       </label>
       <button id="open-host-panel" class="toolbar-icon-button" type="button" title="Add host" aria-label="Add host">
-        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"></path></svg>
+        ${iconMarkup(Plus)}
+      </button>
+      <button id="open-tag-manager" class="toolbar-icon-button secondary" type="button" title="Manage tags" aria-label="Manage tags">
+        ${iconMarkup(Tags)}
       </button>
     </div>
 
@@ -203,15 +235,22 @@ app.innerHTML = `
         <p class="eyebrow">Session</p>
         <div class="session-title-row">
           <h2 id="session-title">No session selected</h2>
-          <div class="session-actions">
-            <button id="edit-resource" class="secondary" type="button" disabled>Edit</button>
-            <button id="header-add-subsystem" class="secondary" type="button" disabled>Add Subsystem</button>
-            <button id="open-keys-panel" class="secondary" type="button" disabled>Keys</button>
-            <button id="delete-resource" class="secondary" type="button" disabled>Delete</button>
-            <button id="open-file-transfer" class="secondary" type="button" disabled>Files</button>
-            <button id="open-tunnel-panel" class="secondary" type="button" disabled>Tunnel</button>
-            <button id="disconnect" class="secondary" type="button" disabled>Disconnect</button>
-            <button id="connect" type="button" disabled>Connect</button>
+          <div class="session-actions" aria-label="Connection actions">
+            <div class="session-action-group">
+              <button id="edit-resource" class="secondary icon-action" type="button" title="Edit connection" aria-label="Edit connection" disabled>${iconMarkup(Pencil)}</button>
+              <button id="header-add-subsystem" class="secondary icon-action" type="button" title="Add subsystem" aria-label="Add subsystem" disabled>${iconMarkup(GitBranchPlus)}</button>
+              <button id="manage-resource-tags" class="secondary icon-action" type="button" title="Assign tags" aria-label="Assign tags" disabled>${iconMarkup(Tag)}</button>
+            </div>
+            <div class="session-action-group">
+              <button id="open-keys-panel" class="secondary icon-action" type="button" title="SSH keys" aria-label="SSH keys" disabled>${iconMarkup(KeyRound)}</button>
+              <button id="open-file-transfer" class="secondary icon-action" type="button" title="Files" aria-label="Files" disabled>${iconMarkup(Folder)}</button>
+              <button id="open-tunnel-panel" class="secondary icon-action" type="button" title="SSH tunnel" aria-label="SSH tunnel" disabled>${iconMarkup(ArrowLeftRight)}</button>
+            </div>
+            <div class="session-action-group">
+              <button id="disconnect" class="secondary icon-action" type="button" title="Disconnect" aria-label="Disconnect" disabled>${iconMarkup(Unplug)}</button>
+              <button id="delete-resource" class="secondary icon-action danger-icon" type="button" title="Delete connection" aria-label="Delete connection" disabled>${iconMarkup(Trash2)}</button>
+            </div>
+            <button id="connect" class="connect-action" type="button" disabled><span class="connect-action-icon">${iconMarkup(Play)}</span><span class="connect-action-label">Connect</span></button>
           </div>
         </div>
       </div>
@@ -228,7 +267,7 @@ app.innerHTML = `
 
     <footer class="workspace-footer">
       <p id="app-status" class="app-status" aria-live="polite"></p>
-      <button id="message-log-button" class="status-log-button" type="button" title="Show message log">Log</button>
+      <button id="message-log-button" class="status-log-button" type="button" title="Show message log">${iconMarkup(FileText)}<span>Log</span></button>
       <div class="terminal-font-controls" aria-label="Terminal font size">
         <button id="decrease-terminal-font" type="button" title="Decrease terminal font size">-</button>
         <span aria-hidden="true">A</span>
@@ -470,6 +509,41 @@ app.innerHTML = `
     </section>
   </section>
 
+  <section id="tag-panel" class="slide-panel tag-panel" hidden>
+    <div class="panel-scrim"></div>
+    <section class="panel-card tag-panel-card" role="dialog" aria-modal="true" aria-labelledby="tag-panel-title">
+      <header class="panel-header tag-panel-header">
+        <div class="tag-panel-heading">
+          <span class="tag-panel-heading-icon">${iconMarkup(Tags)}</span>
+          <div>
+            <h3 id="tag-panel-title">Manage tags</h3>
+            <p id="tag-panel-subtitle">No tags</p>
+          </div>
+        </div>
+        <button class="close-panel" type="button" data-close-tags title="Close" aria-label="Close tag manager">${ICON_CLOSE}</button>
+      </header>
+
+      <form id="tag-create-form" class="tag-create-form">
+        <input name="name" maxlength="40" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="New tag name..." aria-label="New tag name" required />
+        <button type="submit">${iconMarkup(Plus)}<span>Create</span></button>
+      </form>
+
+      <div class="tag-list-heading">
+        <span>All tags</span>
+        <small id="tag-list-hint">Click a tag to filter</small>
+      </div>
+      <div id="tag-manager-list" class="tag-manager-list"></div>
+
+      <footer class="tag-panel-footer">
+        <span id="tag-panel-status">No active filters</span>
+        <div>
+          <button id="tag-panel-clear" class="secondary" type="button">Clear filter</button>
+          <button type="button" data-close-tags>Done</button>
+        </div>
+      </footer>
+    </section>
+  </section>
+
   <section id="confirm-modal" class="confirm-modal" hidden>
     <div class="confirm-scrim" data-confirm-cancel></div>
     <section class="confirm-card" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
@@ -534,6 +608,7 @@ searchInput.addEventListener('input', () => scheduleHostRender());
   searchInput.addEventListener(eventName, (event) => event.stopPropagation());
 });
 document.querySelector('#open-host-panel').addEventListener('click', () => openResourcePanel('host'));
+document.querySelector('#open-tag-manager').addEventListener('click', () => openTagPanel('global'));
 document.querySelector('#tag-mode-any').addEventListener('click', () => setTagFilterMode('any'));
 document.querySelector('#tag-mode-all').addEventListener('click', () => setTagFilterMode('all'));
 document.querySelector('#clear-tag-filters').addEventListener('click', () => clearTagFilters());
@@ -541,6 +616,7 @@ document.querySelector('#open-keys-panel').addEventListener('click', () => openK
 document.querySelector('#open-tunnel-panel').addEventListener('click', () => openTunnelPanel());
 document.querySelector('#open-file-transfer').addEventListener('click', () => openFileTransferModal());
 document.querySelector('#edit-resource').addEventListener('click', () => openEditPanel());
+document.querySelector('#manage-resource-tags').addEventListener('click', () => openTagPanel('resource'));
 document.querySelector('#header-add-subsystem').addEventListener('click', () => {
   const selected = findResource(state.selectedId);
   if (selected && !isLocalResource(selected.resource)) openResourcePanel('subsystem', selected.resource.id);
@@ -552,6 +628,8 @@ document.querySelector('#message-log-button').addEventListener('click', () => sh
 document.querySelector('#decrease-terminal-font').addEventListener('click', () => adjustTerminalFontSize(-1));
 document.querySelector('#increase-terminal-font').addEventListener('click', () => adjustTerminalFontSize(1));
 document.querySelector('#resource-form').addEventListener('submit', (event) => submitResource(event));
+document.querySelector('#tag-create-form').addEventListener('submit', (event) => submitCreateTag(event));
+document.querySelector('#tag-panel-clear').addEventListener('click', () => clearTagPanelSelection());
 document.querySelector('#connect-form').addEventListener('submit', (event) => submitConnect(event));
 document.querySelector('#tunnel-form').addEventListener('submit', (event) => submitTunnel(event));
 document.querySelector('#settings-form').addEventListener('submit', (event) => submitSettings(event));
@@ -578,6 +656,9 @@ document.querySelectorAll('[data-close-settings]').forEach((element) => {
 });
 document.querySelectorAll('[data-close-keys]').forEach((element) => {
   element.addEventListener('click', () => closeKeysPanel());
+});
+document.querySelectorAll('[data-close-tags]').forEach((element) => {
+  element.addEventListener('click', () => closeTagPanel());
 });
 document.querySelectorAll('[data-close-file-transfer]').forEach((element) => {
   element.addEventListener('click', () => closeFileTransferModal());
@@ -615,6 +696,8 @@ window.addEventListener('keydown', (event) => {
     closeAppModal();
   } else if (event.key === 'Escape' && !document.querySelector('#settings-panel').hidden) {
     closeSettingsPanel();
+  } else if (event.key === 'Escape' && !document.querySelector('#tag-panel').hidden) {
+    closeTagPanel();
   } else if (event.key === 'Escape') {
     closeFieldHelpPopovers();
     hideEditContextMenu();
@@ -663,7 +746,9 @@ async function loadHosts() {
 }
 
 async function refreshHosts() {
-  state.hosts = await apiListHosts();
+  const [hosts, tags] = await Promise.all([apiListHosts(), apiListTags()]);
+  state.hosts = hosts;
+  state.tags = tags;
   const activeSession = state.sessions.get(state.activeSessionId);
   if (activeSession && findResource(activeSession.resourceId)) {
     state.selectedId = activeSession.resourceId;
@@ -1304,7 +1389,7 @@ function renderTagFilters() {
   const section = document.querySelector('#tag-filters');
   const container = document.querySelector('#tag-filter-chips');
   const clear = document.querySelector('#clear-tag-filters');
-  const tags = collectResourceTags(state.hosts);
+  const tags = mergeTagCatalog(state.tags, state.hosts);
   const available = new Set(tags.map((tag) => tag.key));
   state.activeTagFilters = state.activeTagFilters.filter((tag) => available.has(tag));
   section.hidden = tags.length === 0;
@@ -1382,6 +1467,244 @@ function setTagFilterMode(mode) {
   state.tagFilterMode = mode === 'all' ? 'all' : 'any';
   renderHosts(searchInput.value);
   renderSelection();
+}
+
+function openTagPanel(mode = 'global') {
+  const selected = findResource(state.selectedId)?.resource;
+  if (mode === 'resource' && (!selected || isLocalResource(selected))) return;
+
+  state.tagPanelMode = mode === 'resource' ? 'resource' : 'global';
+  state.tagPanelResourceId = state.tagPanelMode === 'resource' ? selected.id : null;
+  state.editingTagKey = null;
+  renderTagPanel();
+
+  const panel = document.querySelector('#tag-panel');
+  panel.hidden = false;
+  requestAnimationFrame(() => panel.classList.add('open'));
+  window.setTimeout(() => document.querySelector('#tag-create-form').elements.name.focus(), 0);
+}
+
+function closeTagPanel() {
+  const panel = document.querySelector('#tag-panel');
+  panel.classList.remove('open');
+  panel.hidden = true;
+  state.editingTagKey = null;
+  state.tagPanelResourceId = null;
+  restoreTerminalFocusAfterOverlay();
+}
+
+function renderTagPanel() {
+  const tags = mergeTagCatalog(state.tags, state.hosts);
+  const selected = state.tagPanelMode === 'resource'
+    ? findResource(state.tagPanelResourceId)?.resource
+    : null;
+  const assigned = new Set(resourceTags(selected).map((tag) => tag.key));
+  const title = document.querySelector('#tag-panel-title');
+  const subtitle = document.querySelector('#tag-panel-subtitle');
+  const hint = document.querySelector('#tag-list-hint');
+  const status = document.querySelector('#tag-panel-status');
+  const clear = document.querySelector('#tag-panel-clear');
+  const list = document.querySelector('#tag-manager-list');
+
+  if (state.tagPanelMode === 'resource') {
+    title.textContent = `Tags for ${selected?.hostname ?? 'connection'}`;
+    subtitle.textContent = `${assigned.size} tag${assigned.size === 1 ? '' : 's'} assigned`;
+    hint.textContent = 'Click a tag to assign';
+    status.textContent = assigned.size > 0
+      ? `${assigned.size} assigned tag${assigned.size === 1 ? '' : 's'}`
+      : 'No assigned tags';
+    clear.textContent = 'Clear tags';
+    clear.disabled = assigned.size === 0;
+  } else {
+    const systems = countResources(state.hosts);
+    title.textContent = 'Manage tags';
+    subtitle.textContent = `${tags.length} tag${tags.length === 1 ? '' : 's'} across ${systems} system${systems === 1 ? '' : 's'}`;
+    hint.textContent = 'Click a tag to filter';
+    status.textContent = state.activeTagFilters.length > 0
+      ? `${state.activeTagFilters.length} active filter${state.activeTagFilters.length === 1 ? '' : 's'}`
+      : 'No active filters';
+    clear.textContent = 'Clear filter';
+    clear.disabled = state.activeTagFilters.length === 0;
+  }
+
+  if (tags.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'tag-manager-empty';
+    empty.textContent = 'Create the first tag to organize your connections.';
+    list.replaceChildren(empty);
+    return;
+  }
+  list.replaceChildren(...tags.map((tag) => renderTagManagerRow(tag, assigned)));
+}
+
+function renderTagManagerRow(tag, assigned) {
+  const row = document.createElement('div');
+  const selected = state.tagPanelMode === 'resource'
+    ? assigned.has(tag.key)
+    : state.activeTagFilters.includes(tag.key);
+  row.className = `tag-manager-row${selected ? ' selected' : ''}`;
+  applyTagPalette(row, tag.name);
+
+  if (state.editingTagKey === tag.key) {
+    const form = document.createElement('form');
+    form.className = 'tag-rename-form';
+    const input = document.createElement('input');
+    input.value = tag.name;
+    input.maxLength = 40;
+    input.required = true;
+    input.setAttribute('aria-label', `Rename ${tag.name}`);
+    const save = tagIconButton(Check, 'Save tag name');
+    save.type = 'submit';
+    const cancel = tagIconButton(X, 'Cancel rename');
+    cancel.addEventListener('click', () => {
+      state.editingTagKey = null;
+      renderTagPanel();
+    });
+    form.append(input, save, cancel);
+    form.addEventListener('submit', (event) => submitRenameTag(event, tag));
+    row.append(form);
+    window.setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 0);
+    return row;
+  }
+
+  const select = document.createElement('button');
+  select.type = 'button';
+  select.className = 'tag-manager-select';
+  select.setAttribute('aria-pressed', selected ? 'true' : 'false');
+  select.title = state.tagPanelMode === 'resource'
+    ? `${selected ? 'Remove' : 'Assign'} ${tag.name}`
+    : `${selected ? 'Remove' : 'Apply'} ${tag.name} filter`;
+  const swatch = document.createElement('span');
+  swatch.className = 'tag-manager-swatch';
+  const name = document.createElement('strong');
+  name.textContent = tag.name;
+  const count = document.createElement('small');
+  count.textContent = `${tag.count} system${tag.count === 1 ? '' : 's'}`;
+  select.append(swatch, name, count);
+  select.addEventListener('click', () => toggleTagPanelTag(tag));
+
+  const actions = document.createElement('div');
+  actions.className = 'tag-manager-actions';
+  const edit = tagIconButton(Pencil, `Rename ${tag.name}`);
+  edit.addEventListener('click', () => {
+    state.editingTagKey = tag.key;
+    renderTagPanel();
+  });
+  const remove = tagIconButton(Trash2, `Delete ${tag.name}`, 'danger-icon');
+  remove.addEventListener('click', () => deleteManagedTag(tag));
+  actions.append(edit, remove);
+  row.append(select, actions);
+  return row;
+}
+
+function tagIconButton(icon, label, className = '') {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = `tag-row-action ${className}`.trim();
+  button.title = label;
+  button.setAttribute('aria-label', label);
+  button.append(iconElement(icon));
+  return button;
+}
+
+async function submitCreateTag(event) {
+  event.preventDefault();
+  const input = event.currentTarget.elements.name;
+  const name = input.value.trim();
+  if (!name) return;
+
+  await withBusy(async () => {
+    const created = await apiCreateTag(name);
+    if (state.tagPanelMode === 'resource' && state.tagPanelResourceId) {
+      const resource = findResource(state.tagPanelResourceId)?.resource;
+      const tags = resourceTags(resource).map((tag) => tag.name);
+      await apiSetResourceTags(state.tagPanelResourceId, [...tags, created]);
+    }
+    input.value = '';
+    await refreshHosts();
+    renderTagPanel();
+  });
+}
+
+async function submitRenameTag(event, tag) {
+  event.preventDefault();
+  const newName = event.currentTarget.querySelector('input').value.trim();
+  if (!newName) return;
+
+  await withBusy(async () => {
+    await apiRenameTag(tag.name, newName);
+    const replacement = canonicalTag(newName);
+    state.activeTagFilters = state.activeTagFilters.map((active) => active === tag.key ? replacement : active);
+    state.editingTagKey = null;
+    await refreshHosts();
+    renderTagPanel();
+  });
+}
+
+async function deleteManagedTag(tag) {
+  const accepted = await openConfirmModal({
+    kicker: 'Tags',
+    title: `Delete ${tag.name}?`,
+    message: tag.count > 0
+      ? `This tag will be removed from ${tag.count} system${tag.count === 1 ? '' : 's'}.`
+      : 'This tag is not assigned to any system.',
+    confirmLabel: 'Delete',
+  });
+  if (!accepted) return;
+
+  await withBusy(async () => {
+    await apiDeleteTag(tag.name);
+    state.activeTagFilters = state.activeTagFilters.filter((active) => active !== tag.key);
+    await refreshHosts();
+    renderTagPanel();
+  });
+}
+
+async function toggleTagPanelTag(tag) {
+  if (state.tagPanelMode === 'global') {
+    toggleTagFilter(tag.key);
+    renderTagPanel();
+    return;
+  }
+
+  const resource = findResource(state.tagPanelResourceId)?.resource;
+  if (!resource) return;
+  const assigned = resourceTags(resource);
+  const next = assigned.some((current) => current.key === tag.key)
+    ? assigned.filter((current) => current.key !== tag.key).map((current) => current.name)
+    : [...assigned.map((current) => current.name), tag.name];
+  await withBusy(async () => {
+    await apiSetResourceTags(resource.id, next);
+    await refreshHosts();
+    renderTagPanel();
+  });
+}
+
+async function clearTagPanelSelection() {
+  if (state.tagPanelMode === 'global') {
+    clearTagFilters();
+    renderTagPanel();
+    return;
+  }
+  if (!state.tagPanelResourceId) return;
+  await withBusy(async () => {
+    await apiSetResourceTags(state.tagPanelResourceId, []);
+    await refreshHosts();
+    renderTagPanel();
+  });
+}
+
+function countResources(resources) {
+  let count = 0;
+  const visit = (resource) => {
+    count += 1;
+    for (const child of resource?.subsystems ?? []) visit(child);
+  };
+  for (const resource of resources ?? []) visit(resource);
+  return count;
 }
 
 function startHostDrag(event, rootHostId) {
@@ -2294,6 +2617,7 @@ function renderSelection() {
   const title = document.querySelector('#session-title');
   const edit = document.querySelector('#edit-resource');
   const addSubsystem = document.querySelector('#header-add-subsystem');
+  const manageTags = document.querySelector('#manage-resource-tags');
   const keys = document.querySelector('#open-keys-panel');
   const fileTransfer = document.querySelector('#open-file-transfer');
   const tunnel = document.querySelector('#open-tunnel-panel');
@@ -2313,6 +2637,7 @@ function renderSelection() {
     edit.disabled = true;
     addSubsystem.disabled = true;
     addSubsystem.hidden = false;
+    manageTags.disabled = true;
     keys.disabled = true;
     fileTransfer.disabled = true;
     fileTransfer.hidden = !FILE_TRANSFER_ENABLED;
@@ -2327,11 +2652,15 @@ function renderSelection() {
   addSubsystem.hidden = false;
   edit.disabled = state.busy || !selected || localSelected;
   addSubsystem.disabled = state.busy || !selected || localSelected;
+  manageTags.disabled = state.busy || !selected || localSelected;
   keys.disabled = state.busy || !selected || localSelected;
   fileTransfer.hidden = !FILE_TRANSFER_ENABLED;
   fileTransfer.disabled = state.busy || !selected || localSelected || !FILE_TRANSFER_ENABLED;
   tunnel.disabled = state.busy || !selected || localSelected;
-  connect.textContent = realSessionsForResource(selected.resource.id).length > 0 ? 'New Session' : 'Connect';
+  const connectLabel = realSessionsForResource(selected.resource.id).length > 0 ? 'New Session' : 'Connect';
+  connect.querySelector('.connect-action-label').textContent = connectLabel;
+  connect.title = connectLabel;
+  connect.setAttribute('aria-label', connectLabel);
   connect.disabled = state.busy || !selected;
   disconnect.disabled = state.busy || !activeSession || activeSession.closed;
   remove.disabled = state.busy || !selected || localSelected;
@@ -3504,6 +3833,61 @@ async function apiListHosts() {
   return clone(demoStore.hosts);
 }
 
+async function apiListTags() {
+  const api = wailsAPI();
+  if (api?.ListTags) return (await api.ListTags()) ?? [];
+  return mergeTagCatalog(demoStore.tags, demoStore.hosts).map((tag) => tag.name);
+}
+
+async function apiCreateTag(name) {
+  const api = wailsAPI();
+  if (api?.CreateTag) return await api.CreateTag(name);
+  name = String(name ?? '').trim();
+  if (!name) throw new Error('Tag name is required');
+  if (demoStore.tags.some((tag) => canonicalTag(tag) === canonicalTag(name))) {
+    throw new Error(`Tag ${name} already exists`);
+  }
+  demoStore.tags.push(name);
+  return name;
+}
+
+async function apiRenameTag(currentName, newName) {
+  const api = wailsAPI();
+  if (api?.RenameTag) return await api.RenameTag(currentName, newName);
+  const currentKey = canonicalTag(currentName);
+  const index = demoStore.tags.findIndex((tag) => canonicalTag(tag) === currentKey);
+  if (index < 0) throw new Error(`Tag ${currentName} not found`);
+  const duplicate = demoStore.tags.findIndex((tag) => canonicalTag(tag) === canonicalTag(newName));
+  if (duplicate >= 0 && duplicate !== index) throw new Error(`Tag ${newName} already exists`);
+  demoStore.tags[index] = newName;
+  visitDemoResources((resource) => {
+    resource.tags = (resource.tags ?? []).map((tag) => canonicalTag(tag) === currentKey ? newName : tag);
+  });
+}
+
+async function apiDeleteTag(name) {
+  const api = wailsAPI();
+  if (api?.DeleteTag) return await api.DeleteTag(name);
+  const key = canonicalTag(name);
+  demoStore.tags = demoStore.tags.filter((tag) => canonicalTag(tag) !== key);
+  visitDemoResources((resource) => {
+    resource.tags = (resource.tags ?? []).filter((tag) => canonicalTag(tag) !== key);
+  });
+}
+
+async function apiSetResourceTags(id, tags) {
+  const api = wailsAPI();
+  if (api?.SetResourceTags) return await api.SetResourceTags(id, tags);
+  const resource = findDemoResource(id);
+  if (!resource) throw new Error(`Resource ${id} not found`);
+  resource.tags = [...tags];
+  for (const tag of tags) {
+    if (!demoStore.tags.some((existing) => canonicalTag(existing) === canonicalTag(tag))) {
+      demoStore.tags.push(tag);
+    }
+  }
+}
+
 async function apiGetAppInfo() {
   const api = wailsAPI();
   if (api?.GetAppInfo) return await api.GetAppInfo();
@@ -3638,6 +4022,14 @@ function deleteDemoNestedResource(subsystems, id) {
     }
   }
   return false;
+}
+
+function visitDemoResources(visitor) {
+  const visit = (resource) => {
+    visitor(resource);
+    for (const child of resource.subsystems ?? []) visit(child);
+  };
+  for (const host of demoStore.hosts) visit(host);
 }
 
 async function apiStartSSHSession(input) {

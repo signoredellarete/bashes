@@ -16,6 +16,7 @@ const CurrentSchemaVersion = 1
 
 const (
 	MaxTagsPerResource = 32
+	MaxTagsPerStore    = 512
 	MaxTagLength       = 40
 )
 
@@ -29,8 +30,9 @@ const (
 )
 
 type Store struct {
-	Version int    `json:"version"`
-	Hosts   []Host `json:"hosts"`
+	Version int      `json:"version"`
+	Tags    []string `json:"tags,omitempty"`
+	Hosts   []Host   `json:"hosts"`
 }
 
 type Host struct {
@@ -80,6 +82,9 @@ func NewStore() Store {
 func (s Store) Validate() error {
 	if s.Version != CurrentSchemaVersion {
 		return fmt.Errorf("unsupported schema version %d", s.Version)
+	}
+	if err := ValidateTagCatalog(s.Tags); err != nil {
+		return fmt.Errorf("tags: %w", err)
 	}
 
 	seen := map[string]struct{}{}
@@ -156,10 +161,12 @@ func NormalizeStore(store Store) Store {
 	if store.Hosts == nil {
 		store.Hosts = []Host{}
 	}
+	store.Tags = NormalizeTags(store.Tags)
 
 	for i := range store.Hosts {
 		host := &store.Hosts[i]
 		host.Tags = NormalizeTags(host.Tags)
+		store.Tags = MergeTags(store.Tags, host.Tags)
 		if host.ID == "" {
 			host.ID = StableID(ResourceHost, host.Hostname, host.IP, host.Port, host.User, i)
 		}
@@ -168,10 +175,19 @@ func NormalizeStore(store Store) Store {
 		}
 		for j := range host.Subsystems {
 			normalizeSubsystem(&host.Subsystems[j], i, j)
+			store.Tags = mergeSubsystemTags(store.Tags, host.Subsystems[j])
 		}
 	}
 
 	return store
+}
+
+func mergeSubsystemTags(catalog []string, subsystem Endpoint) []string {
+	catalog = MergeTags(catalog, subsystem.Tags)
+	for _, child := range subsystem.Subsystems {
+		catalog = mergeSubsystemTags(catalog, child)
+	}
+	return catalog
 }
 
 func normalizeSubsystem(sub *Endpoint, parts ...int) {
@@ -212,9 +228,21 @@ func NormalizeTags(tags []string) []string {
 	return normalized
 }
 
+func MergeTags(catalog, tags []string) []string {
+	return NormalizeTags(append(append([]string{}, catalog...), tags...))
+}
+
 func ValidateTags(tags []string) error {
-	if len(tags) > MaxTagsPerResource {
-		return fmt.Errorf("at most %d tags are allowed", MaxTagsPerResource)
+	return validateTags(tags, MaxTagsPerResource)
+}
+
+func ValidateTagCatalog(tags []string) error {
+	return validateTags(tags, MaxTagsPerStore)
+}
+
+func validateTags(tags []string, limit int) error {
+	if len(tags) > limit {
+		return fmt.Errorf("at most %d tags are allowed", limit)
 	}
 	seen := make(map[string]struct{}, len(tags))
 	for i, tag := range tags {

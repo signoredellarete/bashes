@@ -108,6 +108,61 @@ func TestServicePersistsAndUpdatesResourceTags(t *testing.T) {
 	}
 }
 
+func TestServiceManagesGlobalTags(t *testing.T) {
+	store := newMemoryStore()
+	service := NewService(store)
+
+	host, err := service.AddHost(EndpointInput{
+		Hostname: "server-01",
+		IP:       "10.0.0.10",
+		Port:     22,
+		User:     "root",
+		Tags:     []string{"Prod"},
+	})
+	if err != nil {
+		t.Fatalf("AddHost() error = %v", err)
+	}
+	if _, err := service.CreateTag(" Unassigned "); err != nil {
+		t.Fatalf("CreateTag() error = %v", err)
+	}
+	if _, err := service.CreateTag("prod"); err == nil {
+		t.Fatal("CreateTag() duplicate error = nil")
+	}
+	if err := service.RenameTag("prod", "Production"); err != nil {
+		t.Fatalf("RenameTag() error = %v", err)
+	}
+
+	tags, err := service.ListTags()
+	if err != nil {
+		t.Fatalf("ListTags() error = %v", err)
+	}
+	if len(tags) != 2 || tags[0] != "Production" || tags[1] != "Unassigned" {
+		t.Fatalf("ListTags() = %v, want [Production Unassigned]", tags)
+	}
+	hosts, err := service.ListHosts()
+	if err != nil {
+		t.Fatalf("ListHosts() error = %v", err)
+	}
+	if len(hosts[0].Tags) != 1 || hosts[0].Tags[0] != "Production" {
+		t.Fatalf("Host tags = %v, want renamed tag", hosts[0].Tags)
+	}
+
+	if err := service.SetResourceTags(host.ID, []string{"Production", "New"}); err != nil {
+		t.Fatalf("SetResourceTags() error = %v", err)
+	}
+	if err := service.DeleteTag("production"); err != nil {
+		t.Fatalf("DeleteTag() error = %v", err)
+	}
+	tags, _ = service.ListTags()
+	if len(tags) != 2 || tags[0] != "Unassigned" || tags[1] != "New" {
+		t.Fatalf("ListTags() after delete = %v, want [Unassigned New]", tags)
+	}
+	hosts, _ = service.ListHosts()
+	if len(hosts[0].Tags) != 1 || hosts[0].Tags[0] != "New" {
+		t.Fatalf("Host tags after delete = %v, want [New]", hosts[0].Tags)
+	}
+}
+
 func TestServiceAddsNestedSubsystem(t *testing.T) {
 	store := newMemoryStore()
 	service := NewService(store)

@@ -43,6 +43,100 @@ func (s *Service) ListHosts() ([]domain.Host, error) {
 	return data.Hosts, nil
 }
 
+func (s *Service) ListTags() ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	data, err := s.store.Load()
+	if err != nil {
+		return nil, err
+	}
+	return append([]string(nil), data.Tags...), nil
+}
+
+func (s *Service) CreateTag(name string) (string, error) {
+	name, err := normalizeTagName(name)
+	if err != nil {
+		return "", err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	data, err := s.store.Load()
+	if err != nil {
+		return "", err
+	}
+	if tagIndex(data.Tags, name) >= 0 {
+		return "", fmt.Errorf("tag %q already exists", name)
+	}
+	data.Tags = append(data.Tags, name)
+	if err := s.store.Save(data); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+func (s *Service) RenameTag(currentName, newName string) error {
+	currentName = strings.TrimSpace(currentName)
+	if currentName == "" {
+		return errors.New("current tag name is required")
+	}
+	newName, err := normalizeTagName(newName)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	data, err := s.store.Load()
+	if err != nil {
+		return err
+	}
+	currentIndex := tagIndex(data.Tags, currentName)
+	if currentIndex < 0 {
+		return fmt.Errorf("tag %q not found", currentName)
+	}
+	if duplicateIndex := tagIndex(data.Tags, newName); duplicateIndex >= 0 && duplicateIndex != currentIndex {
+		return fmt.Errorf("tag %q already exists", newName)
+	}
+
+	oldName := data.Tags[currentIndex]
+	data.Tags[currentIndex] = newName
+	for i := range data.Hosts {
+		renameResourceTag(&data.Hosts[i].Tags, oldName, newName)
+		renameSubsystemTags(data.Hosts[i].Subsystems, oldName, newName)
+	}
+	return s.store.Save(data)
+}
+
+func (s *Service) DeleteTag(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("tag name is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	data, err := s.store.Load()
+	if err != nil {
+		return err
+	}
+	index := tagIndex(data.Tags, name)
+	if index < 0 {
+		return fmt.Errorf("tag %q not found", name)
+	}
+	canonicalName := data.Tags[index]
+	data.Tags = append(data.Tags[:index], data.Tags[index+1:]...)
+	for i := range data.Hosts {
+		removeResourceTag(&data.Hosts[i].Tags, canonicalName)
+		removeSubsystemTags(data.Hosts[i].Subsystems, canonicalName)
+	}
+	return s.store.Save(data)
+}
+
 func (s *Service) StoreSnapshot() (domain.Store, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -95,6 +189,7 @@ func (s *Service) AddHost(input EndpointInput) (domain.Host, error) {
 	host.ID = domain.StableID(domain.ResourceHost, host.Hostname, host.IP, host.Port, host.User, len(data.Hosts))
 
 	data.Hosts = append(data.Hosts, host)
+	data.Tags = domain.MergeTags(data.Tags, host.Tags)
 	if err := s.store.Save(data); err != nil {
 		return domain.Host{}, err
 	}
@@ -142,6 +237,7 @@ func (s *Service) AddSubsystem(hostID string, input EndpointInput) (domain.Endpo
 	)
 
 	*parent = append(*parent, subsystem)
+	data.Tags = domain.MergeTags(data.Tags, subsystem.Tags)
 	if err := s.store.Save(data); err != nil {
 		return domain.Endpoint{}, err
 	}
@@ -174,6 +270,7 @@ func (s *Service) UpdateResource(id string, input EndpointInput) error {
 			data.Hosts[i].User = strings.TrimSpace(input.User)
 			if input.Tags != nil {
 				data.Hosts[i].Tags = domain.NormalizeTags(input.Tags)
+				data.Tags = domain.MergeTags(data.Tags, data.Hosts[i].Tags)
 			}
 			return s.store.Save(data)
 		}
@@ -193,6 +290,7 @@ func (s *Service) UpdateResource(id string, input EndpointInput) error {
 		subsystem.User = strings.TrimSpace(input.User)
 		if input.Tags != nil {
 			subsystem.Tags = domain.NormalizeTags(input.Tags)
+			data.Tags = domain.MergeTags(data.Tags, subsystem.Tags)
 		}
 		return s.store.Save(data)
 	}
@@ -220,11 +318,13 @@ func (s *Service) SetResourceTags(id string, tags []string) error {
 	for i := range data.Hosts {
 		if data.Hosts[i].ID == id {
 			data.Hosts[i].Tags = tags
+			data.Tags = domain.MergeTags(data.Tags, tags)
 			return s.store.Save(data)
 		}
 	}
 	if subsystem := findSubsystemByID(data.Hosts, id); subsystem != nil {
 		subsystem.Tags = tags
+		data.Tags = domain.MergeTags(data.Tags, tags)
 		return s.store.Save(data)
 	}
 	return fmt.Errorf("resource %q not found", id)
@@ -460,4 +560,57 @@ func hasControl(value string) bool {
 	return strings.ContainsFunc(value, func(r rune) bool {
 		return r < 0x20 || r == 0x7f
 	})
+}
+
+func normalizeTagName(name string) (string, error) {
+	tags := domain.NormalizeTags([]string{name})
+	if len(tags) != 1 {
+		return "", errors.New("tag name is required")
+	}
+	if err := domain.ValidateTags(tags); err != nil {
+		return "", err
+	}
+	return tags[0], nil
+}
+
+func tagIndex(tags []string, name string) int {
+	for i, tag := range tags {
+		if strings.EqualFold(tag, strings.TrimSpace(name)) {
+			return i
+		}
+	}
+	return -1
+}
+
+func renameResourceTag(tags *[]string, currentName, newName string) {
+	for i, tag := range *tags {
+		if strings.EqualFold(tag, currentName) {
+			(*tags)[i] = newName
+		}
+	}
+	*tags = domain.NormalizeTags(*tags)
+}
+
+func renameSubsystemTags(subsystems []domain.Endpoint, currentName, newName string) {
+	for i := range subsystems {
+		renameResourceTag(&subsystems[i].Tags, currentName, newName)
+		renameSubsystemTags(subsystems[i].Subsystems, currentName, newName)
+	}
+}
+
+func removeResourceTag(tags *[]string, name string) {
+	filtered := (*tags)[:0]
+	for _, tag := range *tags {
+		if !strings.EqualFold(tag, name) {
+			filtered = append(filtered, tag)
+		}
+	}
+	*tags = filtered
+}
+
+func removeSubsystemTags(subsystems []domain.Endpoint, name string) {
+	for i := range subsystems {
+		removeResourceTag(&subsystems[i].Tags, name)
+		removeSubsystemTags(subsystems[i].Subsystems, name)
+	}
 }
