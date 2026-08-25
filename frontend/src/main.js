@@ -234,19 +234,21 @@ app.innerHTML = `
         <div class="session-title-row">
           <h2 id="session-title">No session selected</h2>
           <div class="session-actions" aria-label="Connection actions">
-            <div class="session-action-group">
-              <button id="edit-resource" class="secondary icon-action" type="button" title="Edit connection" aria-label="Edit connection" disabled>${iconMarkup(Pencil)}</button>
-              <button id="header-add-subsystem" class="secondary icon-action" type="button" title="Add subsystem" aria-label="Add subsystem" disabled>${iconMarkup(GitBranchPlus)}</button>
-              <button id="manage-resource-tags" class="secondary icon-action" type="button" title="Manage tags" aria-label="Manage tags" disabled>${iconMarkup(Tag)}</button>
-            </div>
-            <div class="session-action-group">
-              <button id="open-keys-panel" class="secondary icon-action" type="button" title="SSH keys" aria-label="SSH keys" disabled>${iconMarkup(KeyRound)}</button>
-              <button id="open-file-transfer" class="secondary icon-action" type="button" title="Files" aria-label="Files" disabled>${iconMarkup(Folder)}</button>
-              <button id="open-tunnel-panel" class="secondary icon-action" type="button" title="SSH tunnel" aria-label="SSH tunnel" disabled>${iconMarkup(ArrowLeftRight)}</button>
-            </div>
-            <div class="session-action-group">
-              <button id="disconnect" class="secondary icon-action" type="button" title="Disconnect" aria-label="Disconnect" disabled>${iconMarkup(Unplug)}</button>
-              <button id="delete-resource" class="secondary icon-action danger-icon" type="button" title="Delete connection" aria-label="Delete connection" disabled>${iconMarkup(Trash2)}</button>
+            <div class="session-action-toolbar">
+              <div class="session-action-group">
+                <button id="edit-resource" class="secondary icon-action" type="button" title="Edit connection" aria-label="Edit connection" disabled>${iconMarkup(Pencil)}</button>
+                <button id="header-add-subsystem" class="secondary icon-action" type="button" title="Add subsystem" aria-label="Add subsystem" disabled>${iconMarkup(GitBranchPlus)}</button>
+                <button id="manage-resource-tags" class="secondary icon-action" type="button" title="Manage tags" aria-label="Manage tags" disabled>${iconMarkup(Tag)}</button>
+              </div>
+              <div class="session-action-group">
+                <button id="open-keys-panel" class="secondary icon-action" type="button" title="SSH keys" aria-label="SSH keys" disabled>${iconMarkup(KeyRound)}</button>
+                <button id="open-file-transfer" class="secondary icon-action" type="button" title="Files" aria-label="Files" disabled>${iconMarkup(Folder)}</button>
+                <button id="open-tunnel-panel" class="secondary icon-action" type="button" title="SSH tunnel" aria-label="SSH tunnel" disabled>${iconMarkup(ArrowLeftRight)}</button>
+              </div>
+              <div class="session-action-group">
+                <button id="disconnect" class="secondary icon-action danger-icon" type="button" title="Disconnect" aria-label="Disconnect" disabled>${iconMarkup(Unplug)}</button>
+                <button id="delete-resource" class="secondary icon-action danger-icon" type="button" title="Delete connection" aria-label="Delete connection" disabled>${iconMarkup(Trash2)}</button>
+              </div>
             </div>
             <button id="connect" class="connect-action" type="button" disabled><span class="connect-action-icon">${iconMarkup(Play)}</span><span class="connect-action-label">Connect</span></button>
           </div>
@@ -526,8 +528,11 @@ app.innerHTML = `
       </header>
 
       <form id="tag-create-form" class="tag-create-form">
-        <input name="name" maxlength="40" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="New tag name..." aria-label="New tag name" required />
-        <button type="submit">${iconMarkup(Plus)}<span>Create</span></button>
+        <label class="tag-create-control">
+          ${iconMarkup(Tag)}
+          <input name="name" maxlength="40" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="New tag name..." aria-label="New tag name" required />
+        </label>
+        <button id="tag-create-submit" type="submit" disabled>Create</button>
       </form>
 
       <div class="tag-list-heading">
@@ -631,6 +636,7 @@ document.querySelector('#decrease-terminal-font').addEventListener('click', () =
 document.querySelector('#increase-terminal-font').addEventListener('click', () => adjustTerminalFontSize(1));
 document.querySelector('#resource-form').addEventListener('submit', (event) => submitResource(event));
 document.querySelector('#tag-create-form').addEventListener('submit', (event) => submitCreateTag(event));
+document.querySelector('#tag-create-form').elements.name.addEventListener('input', () => updateTagCreateButton());
 document.querySelector('#tag-panel-clear').addEventListener('click', () => clearTagPanelSelection());
 document.querySelector('#connect-form').addEventListener('submit', (event) => submitConnect(event));
 document.querySelector('#tunnel-form').addEventListener('submit', (event) => submitTunnel(event));
@@ -1677,6 +1683,11 @@ function clearTagPanelSelection() {
   renderTagPanel();
 }
 
+function updateTagCreateButton() {
+  const form = document.querySelector('#tag-create-form');
+  document.querySelector('#tag-create-submit').disabled = state.busy || form.elements.name.value.trim() === '';
+}
+
 function countResources(resources) {
   let count = 0;
   const visit = (resource) => {
@@ -2071,7 +2082,7 @@ function renderTabs() {
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'tab-close';
-    close.textContent = ICON_CLOSE;
+    close.append(iconElement(X));
     close.title = `Close ${session.title}`;
     close.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -3257,6 +3268,7 @@ async function withBusy(task) {
 
   state.busy = true;
   renderSelection();
+  updateTagCreateButton();
   try {
     return await task();
   } catch (error) {
@@ -3265,6 +3277,7 @@ async function withBusy(task) {
   } finally {
     state.busy = false;
     renderSelection();
+    updateTagCreateButton();
   }
 }
 
@@ -3523,7 +3536,7 @@ function notify(message, level = 'info') {
   text.textContent = message;
   const close = document.createElement('button');
   close.type = 'button';
-  close.textContent = ICON_CLOSE;
+  close.append(iconElement(X));
   close.title = 'Dismiss';
   close.addEventListener('click', () => toast.remove());
   toast.append(text, close);
