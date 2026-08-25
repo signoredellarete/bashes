@@ -259,6 +259,11 @@ textarea {
 
 .host-row.dragging-block .host-select {
   opacity: 0.52;
+  cursor: grabbing;
+}
+
+.host-select.drag-hold {
+  cursor: grab;
 }
 
 .host-row.drop-before .host-select {
@@ -605,6 +610,10 @@ textarea {
   opacity: 0.55;
 }
 
+.session-tab-wrap.dragging-tab .session-tab {
+  cursor: grabbing;
+}
+
 .session-tab-wrap.drop-before {
   box-shadow: -3px 0 0 #2f8f63;
 }
@@ -633,11 +642,11 @@ textarea {
 }
 
 .session-tab[draggable="true"] {
-  cursor: grab;
+  cursor: pointer;
 }
 
-.session-tab[draggable="true"]:active {
-  cursor: grabbing;
+.session-tab.drag-hold {
+  cursor: grab;
 }
 
 .session-tab span {

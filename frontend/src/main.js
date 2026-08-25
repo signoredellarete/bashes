@@ -86,6 +86,7 @@ const FILE_TRANSFER_ENABLED = true;
 const DEMO_MODE = import.meta.env.DEV && globalThis.__BASHES_DEMO__ === true;
 const LOCAL_RESOURCE_ID = '__bashes_localhost__';
 const SIDEBAR_TOOLTIP_DELAY = 1000;
+const DRAG_CURSOR_HOLD_DELAY = 1500;
 const customKeyPathHelp = [
   'Select the private key file, not the .pub file.',
   'Linux/macOS: ~/.ssh/id_ed25519',
@@ -1241,6 +1242,7 @@ function resourceRow(resource, type, depth = 0, rootHostId = resource.id, canReo
   selectButton.addEventListener('mouseleave', () => hideSidebarTooltip());
   selectButton.addEventListener('blur', () => hideSidebarTooltip());
   if (canReorder && !isLocalResource(resource)) {
+    registerDelayedDragCursor(selectButton);
     selectButton.addEventListener('dragstart', (event) => startHostDrag(event, rootHostId));
     selectButton.addEventListener('dragend', () => endHostDrag());
     selectButton.addEventListener('dragover', (event) => previewHostDrop(event, row));
@@ -1333,6 +1335,28 @@ function movedHostOrder(draggedHostId, targetHostId, after) {
 
 function cssEscape(value) {
   return globalThis.CSS?.escape ? CSS.escape(value) : String(value).replace(/"/g, '\\"');
+}
+
+function registerDelayedDragCursor(element) {
+  let holdTimer = 0;
+  const reset = () => {
+    window.clearTimeout(holdTimer);
+    holdTimer = 0;
+    element.classList.remove('drag-hold');
+  };
+
+  element.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    reset();
+    holdTimer = window.setTimeout(() => {
+      element.classList.add('drag-hold');
+    }, DRAG_CURSOR_HOLD_DELAY);
+  });
+  element.addEventListener('pointerup', reset);
+  element.addEventListener('pointercancel', reset);
+  element.addEventListener('pointerleave', reset);
+  element.addEventListener('dragstart', reset);
+  element.addEventListener('dragend', reset);
 }
 
 function compactResourceName(name) {
@@ -1595,6 +1619,7 @@ function renderTabs() {
     tab.type = 'button';
     tab.className = `session-tab ${session.id === state.activeSessionId ? 'active' : ''} ${session.closed ? 'closed' : ''} ${session.pending ? 'pending' : ''}`;
     tab.draggable = true;
+    registerDelayedDragCursor(tab);
     tab.innerHTML = '<span></span><strong></strong>';
     tab.querySelector('span').textContent = session.closed ? 'closed' : session.pending ? 'new' : terminalKindLabel(session.kind);
     tab.querySelector('strong').textContent = session.title;
