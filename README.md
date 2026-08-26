@@ -11,7 +11,7 @@ The app is built with Wails, Go and a Vite frontend. The terminal surface uses `
 - Host management with name, address, port and user.
 - Subsystems attached to a host, with VM, LXC and Docker resource types.
 - Fast searchable sidebar for hosts and subsystems, with a compact mode for maximizing terminal space.
-- Persistent tags that can be assigned while adding or editing a connection, managed from the sidebar, and combined with `ANY` or `ALL` filters.
+- Persistent tags assignable while adding or editing a connection, or by dragging a sidebar tag onto a connection card; tags can be removed by drag and combined with `ANY` or `ALL` filters.
 - Animated drag-and-drop ordering of host blocks in the sidebar; subsystem drags move the parent host block with all children.
 - Contextual actions for the selected resource: edit, add subsystem, key management, delete and connect.
 - Tabbed terminal area for multiple SSH sessions, including multiple sessions to the same resource and drag-and-drop tab ordering.

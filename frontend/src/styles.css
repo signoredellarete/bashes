@@ -62,6 +62,7 @@ svg.ti {
 }
 
 .sidebar {
+  position: relative;
   display: flex;
   min-width: 0;
   min-height: 0;
@@ -612,6 +613,7 @@ html.hosts-drag-outline-ready .host-block.drag-outline-source .host-select {
   border-radius: 3px;
   background: oklch(0.965 0.028 var(--tag-hue));
   color: oklch(0.45 0.11 var(--tag-hue));
+  cursor: grab;
   padding: 3px 5px;
   font-size: 9.5px;
   font-weight: 600;
@@ -622,6 +624,90 @@ html.hosts-drag-outline-ready .host-block.drag-outline-source .host-select {
 
 .resource-tag.active {
   border-color: oklch(0.66 0.14 var(--tag-hue));
+}
+
+.resource-tag-drop-target {
+  position: absolute;
+  z-index: 5;
+  display: none;
+  border: 2px dashed transparent;
+  border-radius: 6px;
+  background: transparent;
+  inset: 0;
+  pointer-events: none;
+  transition: border-color 100ms ease, background-color 100ms ease;
+}
+
+html.sorting-catalog-tag .resource-tag-drop-target {
+  display: block;
+  pointer-events: auto;
+}
+
+.resource-tag-drop-target.active {
+  border-color: #68749a;
+  background: rgba(73, 84, 121, 0.08);
+}
+
+.resource-tag-drop-target > .tag-filter-chip {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tag-remove-zone {
+  position: absolute;
+  z-index: 20;
+  right: 14px;
+  bottom: 14px;
+  left: 14px;
+  display: flex;
+  height: 46px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 2px dashed #c97171;
+  border-radius: 6px;
+  background: #fff5f5;
+  box-shadow: 0 6px 18px rgba(31, 41, 51, 0.16);
+  color: #a43f3f;
+  font-size: 12px;
+  font-weight: 650;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(6px);
+  visibility: hidden;
+  transition: opacity 120ms ease, transform 120ms ease, visibility 120ms ease;
+}
+
+html.sorting-assigned-tag .tag-remove-zone {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+  visibility: visible;
+}
+
+.tag-remove-zone.active {
+  border-color: #a43f3f;
+  background: #ffe7e7;
+}
+
+.tag-remove-zone > .resource-tag {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tag-drag-ghost {
+  border-style: dashed !important;
+  opacity: 0.35;
+}
+
+.tag-drag-mirror {
+  z-index: 110;
+  cursor: grabbing;
+  opacity: 0.96;
+  filter: drop-shadow(0 8px 14px rgba(31, 41, 51, 0.2));
+  pointer-events: none;
 }
 
 .resource-tag.overflow {
@@ -1004,7 +1090,9 @@ html.tabs-drag-outline-ready .session-tab-wrap.drag-outline-source .tab-close {
 html.sorting-hosts,
 html.sorting-hosts *,
 html.sorting-tabs,
-html.sorting-tabs * {
+html.sorting-tabs *,
+html.sorting-tags,
+html.sorting-tags * {
   cursor: grabbing !important;
   user-select: none !important;
 }

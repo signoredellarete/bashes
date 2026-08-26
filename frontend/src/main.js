@@ -108,6 +108,11 @@ let terminalFitFrame = 0;
 let tooltipTimer = 0;
 let hostSortable = null;
 let tabSortable = null;
+let tagCatalogSortable = null;
+let tagRemoveSortable = null;
+let activeTagDropTarget = null;
+let resourceTagSortables = [];
+let suppressTagFilterClickUntil = 0;
 const dragOutlineTimers = { hosts: 0, tabs: 0 };
 const dragOutlineTargets = { hosts: null, tabs: null };
 
@@ -248,6 +253,10 @@ app.innerHTML = `
     </section>
 
     <section id="hosts" class="hosts" aria-label="Hosts"></section>
+    <div id="tag-remove-zone" class="tag-remove-zone" aria-hidden="true">
+      ${iconMarkup('trash')}
+      <span>Remove tag</span>
+    </div>
   </aside>
 
   <main class="workspace">
@@ -1454,6 +1463,7 @@ function renderHosts(filter = '') {
   clearDragOutline('hosts');
   hostSortable?.destroy();
   hostSortable = null;
+  destroyTagSorting();
   const query = filter.trim().toLowerCase();
   renderTagFilters();
   const hasFilters = query !== '' || state.activeTagFilters.length > 0;
@@ -1484,6 +1494,7 @@ function renderHosts(filter = '') {
   }
   container.replaceChildren(...elements);
   if (canReorder && filteredHosts.length > 1) initializeHostSorting(container);
+  initializeTagSorting();
 }
 
 function resourceRows(node, type, depth) {
@@ -1536,7 +1547,14 @@ function resourceRow(resource, type, depth = 0) {
   selectButton.querySelector('.compact-name').textContent = compactResourceName(resource.hostname);
   selectButton.querySelector('strong').textContent = resource.hostname;
   selectButton.querySelector('small').textContent = target;
-  renderResourceTagPills(selectButton.querySelector('.resource-tags'), tags);
+  renderResourceTagPills(selectButton.querySelector('.resource-tags'), tags, resource.id);
+  if (!isLocalResource(resource)) {
+    const tagDropTarget = document.createElement('span');
+    tagDropTarget.className = 'resource-tag-drop-target';
+    tagDropTarget.dataset.resourceId = resource.id;
+    tagDropTarget.setAttribute('aria-hidden', 'true');
+    selectButton.append(tagDropTarget);
+  }
   selectButton.addEventListener('click', () => {
     selectResource(resource);
   });
@@ -1576,6 +1594,8 @@ function renderTagFilters() {
     const active = state.activeTagFilters.includes(tag.key);
     button.type = 'button';
     button.className = `tag-filter-chip${active ? ' active' : ''}`;
+    button.dataset.tagKey = tag.key;
+    button.dataset.tagName = tag.name;
     button.title = `${tag.count} connection${tag.count === 1 ? '' : 's'} tagged ${tag.name}`;
     button.setAttribute('aria-pressed', active ? 'true' : 'false');
     applyTagPalette(button, tag.name);
@@ -1587,7 +1607,10 @@ function renderTagFilters() {
     const count = document.createElement('small');
     count.textContent = String(tag.count);
     button.append(dot, label, count);
-    button.addEventListener('click', () => toggleTagFilter(tag.key));
+    button.addEventListener('click', () => {
+      if (Date.now() < suppressTagFilterClickUntil) return;
+      toggleTagFilter(tag.key);
+    });
     return button;
   });
 
@@ -1607,12 +1630,16 @@ function renderTagFilters() {
   container.replaceChildren(...chips);
 }
 
-function renderResourceTagPills(container, tags) {
-  if (!container || tags.length === 0) return;
+function renderResourceTagPills(container, tags, resourceID) {
+  if (!container) return;
+  container.dataset.resourceId = resourceID;
+  if (tags.length === 0) return;
   const shown = tags.length > 3 ? tags.slice(0, 2) : tags.slice(0, 3);
   const pills = shown.map((tag) => {
     const pill = document.createElement('span');
     pill.className = `resource-tag${state.activeTagFilters.includes(tag.key) ? ' active' : ''}`;
+    pill.dataset.tagKey = tag.key;
+    pill.dataset.tagName = tag.name;
     pill.textContent = tag.name;
     pill.title = `Tag: ${tag.name}`;
     applyTagPalette(pill, tag.name);
@@ -1630,6 +1657,146 @@ function renderResourceTagPills(container, tags) {
 
 function applyTagPalette(element, name) {
   element.style.setProperty('--tag-hue', String(tagHue(name)));
+}
+
+function initializeTagSorting() {
+  const groupName = 'bashes-resource-tags';
+  const catalog = document.querySelector('#tag-filter-chips');
+  const removeZone = document.querySelector('#tag-remove-zone');
+
+  if (catalog.querySelector('.tag-filter-chip')) {
+    tagCatalogSortable = Sortable.create(catalog, {
+      animation: 150,
+      draggable: '.tag-filter-chip',
+      sort: false,
+      group: { name: groupName, pull: 'clone', put: false, revertClone: true },
+      forceFallback: true,
+      fallbackOnBody: true,
+      fallbackTolerance: 4,
+      ghostClass: 'tag-drag-ghost',
+      chosenClass: 'tag-drag-chosen',
+      fallbackClass: 'tag-drag-mirror',
+      onStart() {
+        beginTagSorting('catalog');
+      },
+      onMove(event) {
+        setActiveTagDropTarget(event.to.closest?.('.resource-tag-drop-target'));
+        return true;
+      },
+      onEnd() {
+        suppressTagFilterClickUntil = Date.now() + 120;
+        finishTagSorting();
+      },
+    });
+  }
+
+  document.querySelectorAll('.resource-tag-drop-target').forEach((target) => {
+    resourceTagSortables.push(Sortable.create(target, {
+      sort: false,
+      group: {
+        name: groupName,
+        pull: false,
+        put: (_to, from) => from.el?.id === 'tag-filter-chips',
+      },
+      onAdd(event) {
+        const resourceID = event.to.dataset.resourceId;
+        const tagName = event.item.dataset.tagName;
+        event.item.remove();
+        finishTagSorting();
+        void updateResourceTagAssignment(resourceID, tagName, true);
+      },
+    }));
+  });
+
+  document.querySelectorAll('.resource-tags').forEach((container) => {
+    if (!container.querySelector('.resource-tag:not(.overflow)')) return;
+    resourceTagSortables.push(Sortable.create(container, {
+      animation: 150,
+      draggable: '.resource-tag:not(.overflow)',
+      sort: false,
+      group: { name: groupName, pull: 'clone', put: false, revertClone: true },
+      forceFallback: true,
+      fallbackOnBody: true,
+      fallbackTolerance: 4,
+      ghostClass: 'tag-drag-ghost',
+      chosenClass: 'tag-drag-chosen',
+      fallbackClass: 'tag-drag-mirror',
+      onStart() {
+        beginTagSorting('assigned');
+      },
+      onMove(event) {
+        setActiveTagDropTarget(event.to.closest?.('.tag-remove-zone'));
+        return true;
+      },
+      onEnd() {
+        finishTagSorting();
+      },
+    }));
+  });
+
+  tagRemoveSortable = Sortable.create(removeZone, {
+    sort: false,
+    group: {
+      name: groupName,
+      pull: false,
+      put: (_to, from) => from.el?.classList.contains('resource-tags'),
+    },
+    onAdd(event) {
+      const resourceID = event.from.dataset.resourceId;
+      const tagName = event.item.dataset.tagName;
+      event.item.remove();
+      finishTagSorting();
+      void updateResourceTagAssignment(resourceID, tagName, false);
+    },
+  });
+}
+
+function destroyTagSorting() {
+  tagCatalogSortable?.destroy();
+  tagCatalogSortable = null;
+  tagRemoveSortable?.destroy();
+  tagRemoveSortable = null;
+  resourceTagSortables.forEach((sortable) => sortable.destroy());
+  resourceTagSortables = [];
+  finishTagSorting();
+}
+
+function beginTagSorting(kind) {
+  hideTooltip();
+  clearAllDragOutlines();
+  document.documentElement.classList.add('sorting-tags', `sorting-${kind}-tag`);
+}
+
+function finishTagSorting() {
+  setActiveTagDropTarget(null);
+  document.documentElement.classList.remove('sorting-tags', 'sorting-catalog-tag', 'sorting-assigned-tag');
+}
+
+function setActiveTagDropTarget(target) {
+  if (activeTagDropTarget === target) return;
+  activeTagDropTarget?.classList.remove('active');
+  activeTagDropTarget = target;
+  activeTagDropTarget?.classList.add('active');
+}
+
+async function updateResourceTagAssignment(resourceID, tagName, assigned) {
+  const found = findResource(resourceID);
+  const normalizedName = String(tagName ?? '').trim();
+  if (!found || isLocalResource(found.resource) || !normalizedName) return;
+
+  const currentTags = resourceTags(found.resource).map((tag) => tag.name);
+  const key = canonicalTag(normalizedName);
+  const alreadyAssigned = currentTags.some((tag) => canonicalTag(tag) === key);
+  if (assigned === alreadyAssigned) return;
+
+  const nextTags = assigned
+    ? [...currentTags, normalizedName]
+    : currentTags.filter((tag) => canonicalTag(tag) !== key);
+  await withBusy(async () => {
+    await apiSetResourceTags(resourceID, nextTags);
+    await refreshHosts();
+    writeNotice(`${assigned ? 'Added' : 'Removed'} tag ${normalizedName} ${assigned ? 'to' : 'from'} ${found.resource.hostname}.`);
+  });
 }
 
 function toggleTagFilter(tag) {
@@ -1847,6 +2014,8 @@ function initializeHostSorting(container) {
     animation: 170,
     easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
     draggable: '.host-block',
+    filter: '.resource-tag, .resource-tag-drop-target',
+    preventOnFilter: false,
     forceFallback: true,
     fallbackOnBody: true,
     fallbackTolerance: 4,
@@ -2235,6 +2404,7 @@ function initializeTabSorting(tabs) {
 
 function schedulePointerDragOutline(event) {
   if (event.button !== 0) return;
+  if (event.target.closest?.('.resource-tag, .tag-filter-chip')) return;
   const tab = event.target.closest?.('.session-tab');
   if (tabSortable && tab) {
     scheduleDragOutline('tabs', tab.closest('.session-tab-wrap'));
@@ -3956,6 +4126,14 @@ async function apiCreateTag(name) {
   }
   demoStore.tags.push(name);
   return name;
+}
+
+async function apiSetResourceTags(id, tags) {
+  const api = wailsAPI();
+  if (api?.SetResourceTags) return await api.SetResourceTags(id, tags);
+  const resource = findDemoResource(id);
+  if (!resource) throw new Error(`Resource ${id} not found`);
+  resource.tags = [...tags];
 }
 
 async function apiRenameTag(currentName, newName) {
