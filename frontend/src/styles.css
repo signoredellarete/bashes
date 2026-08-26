@@ -800,20 +800,19 @@ html.hosts-drag-outline-ready .host-block.drag-outline-source .host-select {
   text-transform: uppercase;
 }
 
-.sidebar-tooltip {
+.app-tooltip {
   position: fixed;
   z-index: 30;
   max-width: 320px;
-  border: 1px solid #25303b;
+  border: 1px solid #b9c1ca;
   border-radius: 6px;
-  background: #101418;
-  box-shadow: 0 8px 22px rgba(16, 20, 24, 0.22);
-  color: #f5f7fa;
+  background: #f9fafb;
+  box-shadow: 0 8px 22px rgba(16, 20, 24, 0.26);
+  color: #1f2933;
   overflow: hidden;
   padding: 7px 9px;
   pointer-events: none;
   text-overflow: ellipsis;
-  transform: translateY(-50%);
   white-space: nowrap;
 }
 

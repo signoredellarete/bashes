@@ -105,7 +105,7 @@ const state = {
 let appModalActions = {};
 let searchRenderFrame = 0;
 let terminalFitFrame = 0;
-let sidebarTooltipTimer = 0;
+let tooltipTimer = 0;
 let hostSortable = null;
 let tabSortable = null;
 const dragOutlineTimers = { hosts: 0, tabs: 0 };
@@ -114,7 +114,7 @@ const dragOutlineTargets = { hosts: null, tabs: null };
 const FILE_TRANSFER_ENABLED = true;
 const DEMO_MODE = import.meta.env.DEV && globalThis.__BASHES_DEMO__ === true;
 const LOCAL_RESOURCE_ID = '__bashes_localhost__';
-const SIDEBAR_TOOLTIP_DELAY = 1000;
+const TOOLTIP_DELAY = 500;
 const DRAG_OUTLINE_DELAY = 300;
 const customKeyPathHelp = [
   'Select the private key file, not the .pub file.',
@@ -619,7 +619,7 @@ app.innerHTML = `
     </section>
   </section>
 
-  <div id="sidebar-tooltip" class="sidebar-tooltip" hidden></div>
+  <div id="app-tooltip" class="app-tooltip" role="tooltip" hidden></div>
   <div id="edit-context-menu" class="edit-context-menu" hidden>
     <button type="button" data-edit-command="cut">Cut</button>
     <button type="button" data-edit-command="copy">Copy</button>
@@ -1503,7 +1503,7 @@ function resourceRow(resource, type, depth = 0) {
   row.style.setProperty('--tree-offset', `${depth * 18}px`);
   const target = resourceTarget(resource);
   const tags = resourceTags(resource);
-  const tooltip = `${resource.hostname} - ${target}${tags.length ? ` - ${tags.map((tag) => tag.name).join(', ')}` : ''}`;
+  const tooltip = resourceTooltip(resource);
   const tunnel = tunnelForResource(resource.id);
 
   const selectButton = document.createElement('button');
@@ -1513,6 +1513,7 @@ function resourceRow(resource, type, depth = 0) {
   if (tags.length) selectButton.classList.add('has-tags');
   selectButton.setAttribute('aria-label', tooltip);
   selectButton.dataset.tooltip = tooltip;
+  selectButton.dataset.tooltipPlacement = 'right';
   selectButton.innerHTML = `
     <span class="type"></span>
     <span class="compact-name" aria-hidden="true"></span>
@@ -1544,10 +1545,10 @@ function resourceRow(resource, type, depth = 0) {
     createPendingTab(resource);
     quickConnect(resource);
   });
-  selectButton.addEventListener('mouseenter', () => showSidebarTooltip(selectButton));
-  selectButton.addEventListener('focus', () => showSidebarTooltip(selectButton));
-  selectButton.addEventListener('mouseleave', () => hideSidebarTooltip());
-  selectButton.addEventListener('blur', () => hideSidebarTooltip());
+  selectButton.addEventListener('mouseenter', () => showTooltip(selectButton, state.sidebarCollapsed ? 0 : TOOLTIP_DELAY));
+  selectButton.addEventListener('focus', () => showTooltip(selectButton, state.sidebarCollapsed ? 0 : TOOLTIP_DELAY));
+  selectButton.addEventListener('mouseleave', () => hideTooltip());
+  selectButton.addEventListener('blur', () => hideTooltip());
   row.append(selectButton);
 
   return {
@@ -1856,7 +1857,7 @@ function initializeHostSorting(container) {
       clearDragOutline('hosts');
     },
     onStart() {
-      hideSidebarTooltip();
+      hideTooltip();
       document.documentElement.classList.add('sorting-hosts');
     },
     onEnd() {
@@ -1905,42 +1906,55 @@ function applySidebarState() {
   toggle.title = state.sidebarCollapsed ? 'Expand sidebar' : 'Compact sidebar';
   toggle.setAttribute('aria-label', toggle.title);
   toggle.setAttribute('aria-expanded', String(!state.sidebarCollapsed));
-  hideSidebarTooltip();
+  hideTooltip();
 }
 
-function showSidebarTooltip(anchor) {
-  hideSidebarTooltip();
-  if (state.sidebarCollapsed) {
-    renderSidebarTooltip(anchor);
+function showTooltip(anchor, delay = TOOLTIP_DELAY) {
+  hideTooltip();
+  if (delay <= 0) {
+    renderTooltip(anchor);
     return;
   }
 
-  sidebarTooltipTimer = window.setTimeout(() => {
-    sidebarTooltipTimer = 0;
-    renderSidebarTooltip(anchor);
-  }, SIDEBAR_TOOLTIP_DELAY);
+  tooltipTimer = window.setTimeout(() => {
+    tooltipTimer = 0;
+    renderTooltip(anchor);
+  }, delay);
 }
 
-function renderSidebarTooltip(anchor) {
+function renderTooltip(anchor) {
   if (!anchor.isConnected) return;
-  const tooltip = document.querySelector('#sidebar-tooltip');
+  const tooltip = document.querySelector('#app-tooltip');
   const text = anchor.dataset.tooltip;
   if (!tooltip || !text) return;
 
   const rect = anchor.getBoundingClientRect();
   tooltip.textContent = text;
-  tooltip.style.left = `${Math.round(rect.right + 10)}px`;
-  tooltip.style.top = `${Math.round(rect.top + rect.height / 2)}px`;
   tooltip.hidden = false;
+  const tooltipRect = tooltip.getBoundingClientRect();
+  const placement = anchor.dataset.tooltipPlacement || 'right';
+  const left = placement === 'bottom'
+    ? rect.left + rect.width / 2 - tooltipRect.width / 2
+    : rect.right + 10;
+  const top = placement === 'bottom'
+    ? rect.bottom + 8
+    : rect.top + rect.height / 2 - tooltipRect.height / 2;
+  tooltip.style.left = `${Math.round(clampNumber(left, 8, Math.max(8, window.innerWidth - tooltipRect.width - 8)))}px`;
+  tooltip.style.top = `${Math.round(clampNumber(top, 8, Math.max(8, window.innerHeight - tooltipRect.height - 8)))}px`;
 }
 
-function hideSidebarTooltip() {
-  if (sidebarTooltipTimer) {
-    window.clearTimeout(sidebarTooltipTimer);
-    sidebarTooltipTimer = 0;
+function hideTooltip() {
+  if (tooltipTimer) {
+    window.clearTimeout(tooltipTimer);
+    tooltipTimer = 0;
   }
-  const tooltip = document.querySelector('#sidebar-tooltip');
+  const tooltip = document.querySelector('#app-tooltip');
   if (tooltip) tooltip.hidden = true;
+}
+
+function resourceTooltip(resource) {
+  const tags = resourceTags(resource);
+  return `${resource.hostname} - ${resourceTarget(resource)}${tags.length ? ` - ${tags.map((tag) => tag.name).join(', ')}` : ''}`;
 }
 
 function createPendingTab(resource) {
@@ -2131,6 +2145,7 @@ function installTerminalKeyRepeatFallback(terminal, sessionID) {
 
 function renderTabs() {
   const tabs = document.querySelector('#session-tabs');
+  hideTooltip();
   clearDragOutline('tabs');
   tabSortable?.destroy();
   tabSortable = null;
@@ -2146,7 +2161,13 @@ function renderTabs() {
     tab.innerHTML = '<span></span><strong></strong>';
     tab.querySelector('span').textContent = session.closed ? 'closed' : session.pending ? 'new' : terminalKindLabel(session.kind);
     tab.querySelector('strong').textContent = session.title;
-    tab.title = session.closed ? 'Double-click to reconnect' : session.target;
+    const resource = findResource(session.resourceId)?.resource;
+    tab.dataset.tooltip = resource ? resourceTooltip(resource) : `${session.title} - ${session.target}`;
+    tab.dataset.tooltipPlacement = 'bottom';
+    tab.addEventListener('mouseenter', () => showTooltip(tab));
+    tab.addEventListener('focus', () => showTooltip(tab));
+    tab.addEventListener('mouseleave', () => hideTooltip());
+    tab.addEventListener('blur', () => hideTooltip());
     tab.addEventListener('click', () => {
       if (!session.pending) clearPendingTabs(session.resourceId);
       setActiveSession(session.id);
