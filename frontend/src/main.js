@@ -109,6 +109,7 @@ let sidebarTooltipTimer = 0;
 let hostSortable = null;
 let tabSortable = null;
 const dragOutlineTimers = { hosts: 0, tabs: 0 };
+const dragOutlineTargets = { hosts: null, tabs: null };
 
 const FILE_TRANSFER_ENABLED = true;
 const DEMO_MODE = import.meta.env.DEV && globalThis.__BASHES_DEMO__ === true;
@@ -732,7 +733,11 @@ document.addEventListener('contextmenu', (event) => openEditContextMenu(event));
 document.addEventListener('pointerdown', (event) => {
   if (!event.target.closest?.('#edit-context-menu')) hideEditContextMenu();
   if (!event.target.closest?.('.field-label-with-help')) closeFieldHelpPopovers();
+  schedulePointerDragOutline(event);
 });
+window.addEventListener('pointerup', () => clearAllDragOutlines());
+window.addEventListener('pointercancel', () => clearAllDragOutlines());
+window.addEventListener('blur', () => clearAllDragOutlines());
 window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !document.querySelector('#confirm-modal').hidden) {
     resolveConfirmModal(false);
@@ -1847,9 +1852,6 @@ function initializeHostSorting(container) {
     ghostClass: 'host-drag-ghost',
     chosenClass: 'host-drag-chosen',
     fallbackClass: 'host-drag-mirror',
-    onChoose() {
-      scheduleDragOutline('hosts');
-    },
     onUnchoose() {
       clearDragOutline('hosts');
     },
@@ -2193,9 +2195,6 @@ function initializeTabSorting(tabs) {
     ghostClass: 'tab-drag-ghost',
     chosenClass: 'tab-drag-chosen',
     fallbackClass: 'tab-drag-mirror',
-    onChoose() {
-      scheduleDragOutline('tabs');
-    },
     onUnchoose() {
       clearDragOutline('tabs');
     },
@@ -2213,8 +2212,21 @@ function initializeTabSorting(tabs) {
   });
 }
 
-function scheduleDragOutline(kind) {
+function schedulePointerDragOutline(event) {
+  if (event.button !== 0) return;
+  const tab = event.target.closest?.('.session-tab');
+  if (tabSortable && tab) {
+    scheduleDragOutline('tabs', tab.closest('.session-tab-wrap'));
+    return;
+  }
+  const host = event.target.closest?.('.host-block');
+  if (hostSortable && host) scheduleDragOutline('hosts', host);
+}
+
+function scheduleDragOutline(kind, target) {
   clearDragOutline(kind);
+  dragOutlineTargets[kind] = target;
+  target?.classList.add('drag-outline-source');
   dragOutlineTimers[kind] = window.setTimeout(() => {
     dragOutlineTimers[kind] = 0;
     document.documentElement.classList.add(`${kind}-drag-outline-ready`);
@@ -2224,7 +2236,14 @@ function scheduleDragOutline(kind) {
 function clearDragOutline(kind) {
   window.clearTimeout(dragOutlineTimers[kind]);
   dragOutlineTimers[kind] = 0;
+  dragOutlineTargets[kind]?.classList.remove('drag-outline-source');
+  dragOutlineTargets[kind] = null;
   document.documentElement.classList.remove(`${kind}-drag-outline-ready`);
+}
+
+function clearAllDragOutlines() {
+  clearDragOutline('hosts');
+  clearDragOutline('tabs');
 }
 
 function openResourcePanel(mode, hostID = '') {
