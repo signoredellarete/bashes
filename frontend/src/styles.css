@@ -82,6 +82,8 @@ svg.ti {
 .brand img {
   width: 36px;
   height: 36px;
+  align-self: start;
+  display: block;
 }
 
 .brand h1 {
@@ -679,13 +681,14 @@ svg.ti {
 #app.sidebar-collapsed .brand {
   display: grid;
   grid-template-columns: 1fr;
-  justify-items: center;
+  justify-items: start;
   gap: 8px;
+  padding: 4px 0 0 4px;
 }
 
 #app.sidebar-collapsed .brand img {
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
 }
 
 #app.sidebar-collapsed .brand div {
@@ -693,7 +696,7 @@ svg.ti {
 }
 
 #app.sidebar-collapsed .sidebar-toggle {
-  margin-left: 0;
+  margin-left: 4px;
 }
 
 #app.sidebar-collapsed .sidebar-toggle .ti {
