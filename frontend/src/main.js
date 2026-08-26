@@ -108,11 +108,13 @@ let terminalFitFrame = 0;
 let sidebarTooltipTimer = 0;
 let hostSortable = null;
 let tabSortable = null;
+const dragOutlineTimers = { hosts: 0, tabs: 0 };
 
 const FILE_TRANSFER_ENABLED = true;
 const DEMO_MODE = import.meta.env.DEV && globalThis.__BASHES_DEMO__ === true;
 const LOCAL_RESOURCE_ID = '__bashes_localhost__';
 const SIDEBAR_TOOLTIP_DELAY = 1000;
+const DRAG_OUTLINE_DELAY = 750;
 const customKeyPathHelp = [
   'Select the private key file, not the .pub file.',
   'Linux/macOS: ~/.ssh/id_ed25519',
@@ -1444,6 +1446,7 @@ function scheduleHostRender() {
 
 function renderHosts(filter = '') {
   const container = document.querySelector('#hosts');
+  clearDragOutline('hosts');
   hostSortable?.destroy();
   hostSortable = null;
   const query = filter.trim().toLowerCase();
@@ -1844,11 +1847,18 @@ function initializeHostSorting(container) {
     ghostClass: 'host-drag-ghost',
     chosenClass: 'host-drag-chosen',
     fallbackClass: 'host-drag-mirror',
+    onChoose() {
+      scheduleDragOutline('hosts');
+    },
+    onUnchoose() {
+      clearDragOutline('hosts');
+    },
     onStart() {
       hideSidebarTooltip();
       document.documentElement.classList.add('sorting-hosts');
     },
     onEnd() {
+      clearDragOutline('hosts');
       document.documentElement.classList.remove('sorting-hosts');
       persistHostOrder(container);
     },
@@ -2119,6 +2129,7 @@ function installTerminalKeyRepeatFallback(terminal, sessionID) {
 
 function renderTabs() {
   const tabs = document.querySelector('#session-tabs');
+  clearDragOutline('tabs');
   tabSortable?.destroy();
   tabSortable = null;
   const empty = document.querySelector('#empty-terminal');
@@ -2182,10 +2193,17 @@ function initializeTabSorting(tabs) {
     ghostClass: 'tab-drag-ghost',
     chosenClass: 'tab-drag-chosen',
     fallbackClass: 'tab-drag-mirror',
+    onChoose() {
+      scheduleDragOutline('tabs');
+    },
+    onUnchoose() {
+      clearDragOutline('tabs');
+    },
     onStart() {
       document.documentElement.classList.add('sorting-tabs');
     },
     onEnd() {
+      clearDragOutline('tabs');
       document.documentElement.classList.remove('sorting-tabs');
       const order = [...tabs.querySelectorAll(':scope > .session-tab-wrap')].map((tab) => tab.dataset.sessionId);
       state.sessions = orderSessions(state.sessions, order);
@@ -2193,6 +2211,20 @@ function initializeTabSorting(tabs) {
       focusActiveTerminal();
     },
   });
+}
+
+function scheduleDragOutline(kind) {
+  clearDragOutline(kind);
+  dragOutlineTimers[kind] = window.setTimeout(() => {
+    dragOutlineTimers[kind] = 0;
+    document.documentElement.classList.add(`${kind}-drag-outline-ready`);
+  }, DRAG_OUTLINE_DELAY);
+}
+
+function clearDragOutline(kind) {
+  window.clearTimeout(dragOutlineTimers[kind]);
+  dragOutlineTimers[kind] = 0;
+  document.documentElement.classList.remove(`${kind}-drag-outline-ready`);
 }
 
 function openResourcePanel(mode, hostID = '') {

@@ -522,12 +522,16 @@ svg.ti {
   color: #b85d16;
 }
 
-.host-block.host-drag-ghost {
-  --drag-outline-color: #68749a;
+.host-block.host-drag-ghost,
+.host-block.host-drag-chosen:not(.host-drag-mirror) {
   border-radius: 6px;
   outline: 1px dashed transparent;
   outline-offset: -1px;
-  animation: reveal-drag-outline 0s linear 750ms forwards;
+}
+
+html.hosts-drag-outline-ready .host-block.host-drag-ghost,
+html.hosts-drag-outline-ready .host-block.host-drag-chosen:not(.host-drag-mirror) {
+  outline-color: #68749a;
 }
 
 .host-block.host-drag-ghost .host-select {
@@ -911,13 +915,20 @@ svg.ti {
   align-items: center;
 }
 
-.session-tab-wrap.tab-drag-ghost {
-  --drag-outline-color: #8290a0;
+.session-tab-wrap.tab-drag-ghost,
+.session-tab-wrap.tab-drag-chosen:not(.tab-drag-mirror) {
   border-radius: 6px 6px 0 0;
   outline: 1px dashed transparent;
   outline-offset: -1px;
+}
+
+.session-tab-wrap.tab-drag-ghost {
   opacity: 0.32;
-  animation: reveal-drag-outline 0s linear 750ms forwards;
+}
+
+html.tabs-drag-outline-ready .session-tab-wrap.tab-drag-ghost,
+html.tabs-drag-outline-ready .session-tab-wrap.tab-drag-chosen:not(.tab-drag-mirror) {
+  outline-color: #8290a0;
 }
 
 .tab-drag-mirror {
@@ -1010,12 +1021,6 @@ html.sorting-tabs,
 html.sorting-tabs * {
   cursor: grabbing !important;
   user-select: none !important;
-}
-
-@keyframes reveal-drag-outline {
-  to {
-    outline-color: var(--drag-outline-color);
-  }
 }
 
 .terminal-stack {
