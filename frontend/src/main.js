@@ -1,5 +1,6 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import Sortable from 'sortablejs';
 import iconArrowsTransferUp from '@tabler/icons/outline/arrows-transfer-up.svg?raw';
 import iconCheck from '@tabler/icons/outline/check.svg?raw';
 import iconChevronLeft from '@tabler/icons/outline/chevron-left.svg?raw';
@@ -36,7 +37,7 @@ import {
   preferredSessionForResource as preferredSessionForResourceFromState,
   realSessionsForResource as realSessionsForResourceFromState,
   rememberFocus,
-  reorderSessions,
+  orderSessions,
   sessionsForResource as sessionsForResourceFromState,
 } from './session-state.js';
 import {
@@ -87,8 +88,6 @@ const state = {
   editResourceId: null,
   confirmResolver: null,
   editContextTarget: null,
-  draggedHostId: null,
-  draggedSessionId: null,
   activeTagFilters: [],
   tagFilterMode: 'any',
   editingTagKey: null,
@@ -107,12 +106,13 @@ let appModalActions = {};
 let searchRenderFrame = 0;
 let terminalFitFrame = 0;
 let sidebarTooltipTimer = 0;
+let hostSortable = null;
+let tabSortable = null;
 
 const FILE_TRANSFER_ENABLED = true;
 const DEMO_MODE = import.meta.env.DEV && globalThis.__BASHES_DEMO__ === true;
 const LOCAL_RESOURCE_ID = '__bashes_localhost__';
 const SIDEBAR_TOOLTIP_DELAY = 1000;
-const DRAG_CURSOR_HOLD_DELAY = 1500;
 const customKeyPathHelp = [
   'Select the private key file, not the .pub file.',
   'Linux/macOS: ~/.ssh/id_ed25519',
@@ -249,29 +249,24 @@ app.innerHTML = `
 
   <main class="workspace">
     <section class="session-header">
-      <div class="session-titlebar">
-        <p class="eyebrow">Session</p>
-        <div class="session-title-row">
-          <h2 id="session-title">No session selected</h2>
-          <div class="session-actions" aria-label="Connection actions">
-            <div class="session-action-toolbar">
-              <div class="session-action-group">
-                <button id="edit-resource" class="secondary icon-action" type="button" title="Edit connection" aria-label="Edit connection" disabled>${iconMarkup('pencil')}</button>
-                <button id="header-add-subsystem" class="secondary icon-action" type="button" title="Add subsystem" aria-label="Add subsystem" disabled>${iconMarkup('subtask')}</button>
-              </div>
-              <div class="session-action-group">
-                <button id="open-keys-panel" class="secondary icon-action" type="button" title="SSH keys" aria-label="SSH keys" disabled>${iconMarkup('key')}</button>
-                <button id="open-file-transfer" class="secondary icon-action" type="button" title="Files" aria-label="Files" disabled>${iconMarkup('folder')}</button>
-                <button id="open-tunnel-panel" class="secondary icon-action" type="button" title="SSH tunnel" aria-label="SSH tunnel" disabled>${iconMarkup('arrows-transfer-up')}</button>
-              </div>
-              <div class="session-action-group">
-                <button id="disconnect" class="secondary icon-action danger-icon" type="button" title="Disconnect" aria-label="Disconnect" disabled>${iconMarkup('plug-connected-x')}</button>
-                <button id="delete-resource" class="secondary icon-action danger-icon" type="button" title="Delete connection" aria-label="Delete connection" disabled>${iconMarkup('trash')}</button>
-              </div>
-            </div>
-            <button id="connect" class="connect-action" type="button" disabled><span class="connect-action-icon">${iconMarkup('player-play-filled')}</span><span class="connect-action-label">Connect</span></button>
+      <h2 id="session-title">No session selected</h2>
+      <div class="session-actions" aria-label="Connection actions">
+        <div class="session-action-toolbar">
+          <div class="session-action-group">
+            <button id="edit-resource" class="secondary icon-action" type="button" title="Edit connection" aria-label="Edit connection" disabled>${iconMarkup('pencil')}</button>
+            <button id="header-add-subsystem" class="secondary icon-action" type="button" title="Add subsystem" aria-label="Add subsystem" disabled>${iconMarkup('subtask')}</button>
+          </div>
+          <div class="session-action-group">
+            <button id="open-keys-panel" class="secondary icon-action" type="button" title="SSH keys" aria-label="SSH keys" disabled>${iconMarkup('key')}</button>
+            <button id="open-file-transfer" class="secondary icon-action" type="button" title="Files" aria-label="Files" disabled>${iconMarkup('folder')}</button>
+            <button id="open-tunnel-panel" class="secondary icon-action" type="button" title="SSH tunnel" aria-label="SSH tunnel" disabled>${iconMarkup('arrows-transfer-up')}</button>
+          </div>
+          <div class="session-action-group">
+            <button id="disconnect" class="secondary icon-action danger-icon" type="button" title="Disconnect" aria-label="Disconnect" disabled>${iconMarkup('plug-connected-x')}</button>
+            <button id="delete-resource" class="secondary icon-action danger-icon" type="button" title="Delete connection" aria-label="Delete connection" disabled>${iconMarkup('trash')}</button>
           </div>
         </div>
+        <button id="connect" class="connect-action" type="button" disabled><span class="connect-action-icon">${iconMarkup('player-play-filled')}</span><span class="connect-action-label">Connect</span></button>
       </div>
     </section>
 
@@ -1449,14 +1444,16 @@ function scheduleHostRender() {
 
 function renderHosts(filter = '') {
   const container = document.querySelector('#hosts');
+  hostSortable?.destroy();
+  hostSortable = null;
   const query = filter.trim().toLowerCase();
   renderTagFilters();
   const hasFilters = query !== '' || state.activeTagFilters.length > 0;
   const canReorder = !hasFilters;
-  const rows = [];
+  const elements = [];
 
   if (state.localShellSupported) {
-    rows.push(resourceRow(localResource(), 'local', 0, LOCAL_RESOURCE_ID, false));
+    elements.push(resourceRow(localResource(), 'local', 0).element);
   }
   const filteredHosts = filterResourceTree(state.hosts, {
     query,
@@ -1464,10 +1461,13 @@ function renderHosts(filter = '') {
     mode: state.tagFilterMode,
   });
   for (const node of filteredHosts) {
-    rows.push(...resourceRows(node, 'host', 0, node.resource.id, canReorder));
+    const block = document.createElement('div');
+    block.className = 'host-block';
+    block.dataset.hostId = node.resource.id;
+    block.append(...resourceRows(node, 'host', 0).map((row) => row.element));
+    elements.push(block);
   }
 
-  const elements = rows.map((row) => row.element);
   if (hasFilters && filteredHosts.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'host-filter-empty';
@@ -1475,23 +1475,23 @@ function renderHosts(filter = '') {
     elements.push(empty);
   }
   container.replaceChildren(...elements);
+  if (canReorder && filteredHosts.length > 1) initializeHostSorting(container);
 }
 
-function resourceRows(node, type, depth, rootHostId, canReorder) {
+function resourceRows(node, type, depth) {
   const resource = node.resource;
-  const rows = [resourceRow(resource, type, depth, rootHostId, canReorder)];
+  const rows = [resourceRow(resource, type, depth)];
   for (const child of node.children) {
-    rows.push(...resourceRows(child, child.resource.type, depth + 1, rootHostId, canReorder));
+    rows.push(...resourceRows(child, child.resource.type, depth + 1));
   }
   return rows;
 }
 
-function resourceRow(resource, type, depth = 0, rootHostId = resource.id, canReorder = true) {
+function resourceRow(resource, type, depth = 0) {
   const row = document.createElement('div');
   row.className = `host-row ${depth > 0 ? 'child' : ''}`;
   if (isLocalResource(resource)) row.classList.add('local-row');
   row.dataset.id = resource.id;
-  row.dataset.rootHostId = rootHostId;
   row.style.setProperty('--tree-offset', `${depth * 18}px`);
   const target = resourceTarget(resource);
   const tags = resourceTags(resource);
@@ -1503,7 +1503,6 @@ function resourceRow(resource, type, depth = 0, rootHostId = resource.id, canReo
   selectButton.className = 'host-select';
   if (tunnel) selectButton.classList.add('tunnel-active');
   if (tags.length) selectButton.classList.add('has-tags');
-  selectButton.draggable = canReorder && !isLocalResource(resource);
   selectButton.setAttribute('aria-label', tooltip);
   selectButton.dataset.tooltip = tooltip;
   selectButton.innerHTML = `
@@ -1541,14 +1540,6 @@ function resourceRow(resource, type, depth = 0, rootHostId = resource.id, canReo
   selectButton.addEventListener('focus', () => showSidebarTooltip(selectButton));
   selectButton.addEventListener('mouseleave', () => hideSidebarTooltip());
   selectButton.addEventListener('blur', () => hideSidebarTooltip());
-  if (canReorder && !isLocalResource(resource)) {
-    registerDelayedDragCursor(selectButton);
-    selectButton.addEventListener('dragstart', (event) => startHostDrag(event, rootHostId));
-    selectButton.addEventListener('dragend', () => endHostDrag());
-    selectButton.addEventListener('dragover', (event) => previewHostDrop(event, row));
-    selectButton.addEventListener('dragleave', () => clearHostDropPreview(row));
-    selectButton.addEventListener('drop', (event) => dropHostBlock(event, row));
-  }
   row.append(selectButton);
 
   return {
@@ -1842,106 +1833,40 @@ function countResources(resources) {
   return count;
 }
 
-function startHostDrag(event, rootHostId) {
-  state.draggedHostId = rootHostId;
-  event.dataTransfer.effectAllowed = 'move';
-  event.dataTransfer.setData('text/plain', rootHostId);
-  document.querySelectorAll(`.host-row[data-root-host-id="${cssEscape(rootHostId)}"]`).forEach((row) => {
-    row.classList.add('dragging-block');
+function initializeHostSorting(container) {
+  hostSortable = Sortable.create(container, {
+    animation: 170,
+    easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+    draggable: '.host-block',
+    forceFallback: true,
+    fallbackOnBody: true,
+    fallbackTolerance: 4,
+    ghostClass: 'host-drag-ghost',
+    chosenClass: 'host-drag-chosen',
+    fallbackClass: 'host-drag-mirror',
+    onStart() {
+      hideSidebarTooltip();
+      document.documentElement.classList.add('sorting-hosts');
+    },
+    onEnd() {
+      document.documentElement.classList.remove('sorting-hosts');
+      persistHostOrder(container);
+    },
   });
 }
 
-function endHostDrag() {
-  state.draggedHostId = null;
-  document.querySelectorAll('.host-row.dragging-block, .host-row.drop-before, .host-row.drop-after').forEach((row) => {
-    row.classList.remove('dragging-block', 'drop-before', 'drop-after');
-  });
-}
-
-function previewHostDrop(event, row) {
-  if (!state.draggedHostId) return;
-  const targetHostId = row.dataset.rootHostId;
-  if (!targetHostId || targetHostId === state.draggedHostId) return;
-  event.preventDefault();
-  event.dataTransfer.dropEffect = 'move';
-  showHostDropPreview(row, dropAfterRow(event, row));
-}
-
-function showHostDropPreview(row, after) {
-  document.querySelectorAll('.host-row.drop-before, .host-row.drop-after').forEach((element) => {
-    if (element !== row) element.classList.remove('drop-before', 'drop-after');
-  });
-  row.classList.toggle('drop-before', !after);
-  row.classList.toggle('drop-after', after);
-}
-
-function clearHostDropPreview(row) {
-  row.classList.remove('drop-before', 'drop-after');
-}
-
-async function dropHostBlock(event, row) {
-  if (!state.draggedHostId) return;
-  const targetHostId = row.dataset.rootHostId;
-  if (!targetHostId || targetHostId === state.draggedHostId) return;
-
-  event.preventDefault();
-  const after = dropAfterRow(event, row);
-  const order = movedHostOrder(state.draggedHostId, targetHostId, after);
-  endHostDrag();
-  if (!order) return;
+async function persistHostOrder(container) {
+  const order = [...container.querySelectorAll(':scope > .host-block')].map((block) => block.dataset.hostId);
+  const previousOrder = state.hosts.map((host) => host.id);
+  if (order.length !== previousOrder.length || order.every((id, index) => id === previousOrder[index])) return;
 
   await withBusy(async () => {
     await apiReorderHosts(order);
     state.hosts = order.map((id) => state.hosts.find((host) => host.id === id)).filter(Boolean);
-    renderHosts(searchInput.value);
-    renderSelection();
     writeNotice('Host order updated.');
   });
-}
-
-function dropAfterRow(event, row) {
-  const rect = row.getBoundingClientRect();
-  return event.clientY > rect.top + rect.height / 2;
-}
-
-function movedHostOrder(draggedHostId, targetHostId, after) {
-  const order = state.hosts.map((host) => host.id);
-  const from = order.indexOf(draggedHostId);
-  const target = order.indexOf(targetHostId);
-  if (from < 0 || target < 0) return null;
-
-  order.splice(from, 1);
-  let insertAt = order.indexOf(targetHostId);
-  if (insertAt < 0) return null;
-  if (after) insertAt += 1;
-  order.splice(insertAt, 0, draggedHostId);
-  return order;
-}
-
-function cssEscape(value) {
-  return globalThis.CSS?.escape ? CSS.escape(value) : String(value).replace(/"/g, '\\"');
-}
-
-function registerDelayedDragCursor(element) {
-  let holdTimer = 0;
-  const reset = () => {
-    window.clearTimeout(holdTimer);
-    holdTimer = 0;
-    element.classList.remove('drag-hold');
-  };
-
-  element.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0) return;
-    reset();
-    holdTimer = window.setTimeout(() => {
-      element.classList.add('drag-hold');
-    }, DRAG_CURSOR_HOLD_DELAY);
-  });
-  element.addEventListener('pointerup', reset);
-  element.addEventListener('pointercancel', reset);
-  element.addEventListener('pointerleave', reset);
-  element.addEventListener('dragstart', reset);
-  element.addEventListener('dragend', reset);
+  renderHosts(searchInput.value);
+  renderSelection();
 }
 
 function compactResourceName(name) {
@@ -2194,6 +2119,8 @@ function installTerminalKeyRepeatFallback(terminal, sessionID) {
 
 function renderTabs() {
   const tabs = document.querySelector('#session-tabs');
+  tabSortable?.destroy();
+  tabSortable = null;
   const empty = document.querySelector('#empty-terminal');
   const sessions = [...state.sessions.values()];
   tabs.hidden = sessions.length === 0;
@@ -2203,8 +2130,6 @@ function renderTabs() {
     const tab = document.createElement('button');
     tab.type = 'button';
     tab.className = `session-tab ${session.id === state.activeSessionId ? 'active' : ''} ${session.closed ? 'closed' : ''} ${session.pending ? 'pending' : ''}`;
-    tab.draggable = true;
-    registerDelayedDragCursor(tab);
     tab.innerHTML = '<span></span><strong></strong>';
     tab.querySelector('span').textContent = session.closed ? 'closed' : session.pending ? 'new' : terminalKindLabel(session.kind);
     tab.querySelector('strong').textContent = session.title;
@@ -2220,9 +2145,6 @@ function renderTabs() {
     tab.addEventListener('dblclick', () => {
       if (session.closed) reconnectClosedSession(session.id);
     });
-    tab.addEventListener('dragstart', (event) => startSessionTabDrag(event, session.id));
-    tab.addEventListener('dragend', () => endSessionTabDrag());
-
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'tab-close';
@@ -2236,64 +2158,41 @@ function renderTabs() {
     const wrapper = document.createElement('div');
     wrapper.className = `session-tab-wrap ${session.id === state.activeSessionId ? 'active' : ''}`;
     wrapper.dataset.sessionId = session.id;
-    wrapper.addEventListener('dragover', (event) => previewSessionTabDrop(event, wrapper));
-    wrapper.addEventListener('dragleave', () => clearSessionTabDropPreview(wrapper));
-    wrapper.addEventListener('drop', (event) => dropSessionTab(event, wrapper));
     wrapper.append(tab, close);
     return wrapper;
   }));
+
+  if (sessions.length > 1) initializeTabSorting(tabs);
 
   document.querySelectorAll('.terminal-pane').forEach((pane) => {
     pane.hidden = pane.dataset.sessionId !== state.activeSessionId;
   });
 }
 
-function startSessionTabDrag(event, sessionId) {
-  state.draggedSessionId = sessionId;
-  event.dataTransfer.effectAllowed = 'move';
-  event.dataTransfer.setData('text/plain', sessionId);
-  event.currentTarget.closest('.session-tab-wrap')?.classList.add('dragging-tab');
-}
-
-function endSessionTabDrag() {
-  state.draggedSessionId = null;
-  document.querySelectorAll('.session-tab-wrap.dragging-tab, .session-tab-wrap.drop-before, .session-tab-wrap.drop-after').forEach((tab) => {
-    tab.classList.remove('dragging-tab', 'drop-before', 'drop-after');
+function initializeTabSorting(tabs) {
+  tabSortable = Sortable.create(tabs, {
+    animation: 170,
+    easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+    direction: 'horizontal',
+    draggable: '.session-tab-wrap',
+    handle: '.session-tab',
+    forceFallback: true,
+    fallbackOnBody: true,
+    fallbackTolerance: 4,
+    ghostClass: 'tab-drag-ghost',
+    chosenClass: 'tab-drag-chosen',
+    fallbackClass: 'tab-drag-mirror',
+    onStart() {
+      document.documentElement.classList.add('sorting-tabs');
+    },
+    onEnd() {
+      document.documentElement.classList.remove('sorting-tabs');
+      const order = [...tabs.querySelectorAll(':scope > .session-tab-wrap')].map((tab) => tab.dataset.sessionId);
+      state.sessions = orderSessions(state.sessions, order);
+      renderTabs();
+      focusActiveTerminal();
+    },
   });
-}
-
-function previewSessionTabDrop(event, wrapper) {
-  if (!state.draggedSessionId) return;
-  const targetSessionId = wrapper.dataset.sessionId;
-  if (!targetSessionId || targetSessionId === state.draggedSessionId) return;
-  event.preventDefault();
-  const after = dropAfterTab(event, wrapper);
-  wrapper.classList.toggle('drop-before', !after);
-  wrapper.classList.toggle('drop-after', after);
-}
-
-function clearSessionTabDropPreview(wrapper) {
-  wrapper.classList.remove('drop-before', 'drop-after');
-}
-
-function dropSessionTab(event, wrapper) {
-  if (!state.draggedSessionId) return;
-  const targetSessionId = wrapper.dataset.sessionId;
-  if (!targetSessionId || targetSessionId === state.draggedSessionId) return;
-  event.preventDefault();
-  reorderSessionTabs(state.draggedSessionId, targetSessionId, dropAfterTab(event, wrapper));
-  endSessionTabDrag();
-  renderTabs();
-  focusActiveTerminal();
-}
-
-function dropAfterTab(event, wrapper) {
-  const rect = wrapper.getBoundingClientRect();
-  return event.clientX > rect.left + rect.width / 2;
-}
-
-function reorderSessionTabs(draggedSessionId, targetSessionId, after) {
-	state.sessions = reorderSessions(state.sessions, draggedSessionId, targetSessionId, after);
 }
 
 function openResourcePanel(mode, hostID = '') {

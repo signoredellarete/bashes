@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { closedSessionShortcut, lastFocusedSessionId, preferredSessionForResource, reorderSessions, rememberFocus } from './session-state.js';
+import { closedSessionShortcut, lastFocusedSessionId, orderSessions, preferredSessionForResource, rememberFocus } from './session-state.js';
 
 describe('session state', () => {
   it('prefers the last live session for a resource', () => {
@@ -10,9 +10,9 @@ describe('session state', () => {
     expect(preferredSessionForResource(sessions, new Map([['host', 'one']]), 'host')?.id).toBe('one');
   });
 
-  it('reorders tabs without losing session objects', () => {
+  it('orders tabs from their rendered order and keeps omitted sessions', () => {
     const sessions = new Map([['one', { id: 'one' }], ['two', { id: 'two' }], ['three', { id: 'three' }]]);
-    expect([...reorderSessions(sessions, 'one', 'three', true).keys()]).toEqual(['two', 'three', 'one']);
+    expect([...orderSessions(sessions, ['three', 'one']).keys()]).toEqual(['three', 'one', 'two']);
   });
 
   it('tracks focus history without duplicates', () => {

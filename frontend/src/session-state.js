@@ -19,15 +19,16 @@ export function preferredSessionForResource(sessions, lastSessionByResource, res
   return realSessions.at(-1) ?? pendingSessionForResource(sessions, resourceId);
 }
 
-export function reorderSessions(sessions, draggedSessionId, targetSessionId, after) {
-  const order = [...sessions.keys()];
-  const from = order.indexOf(draggedSessionId);
-  if (from < 0 || !order.includes(targetSessionId)) return sessions;
-  order.splice(from, 1);
-  let insertAt = order.indexOf(targetSessionId);
-  if (after) insertAt += 1;
-  order.splice(insertAt, 0, draggedSessionId);
-  return new Map(order.map((id) => [id, sessions.get(id)]).filter(([, session]) => Boolean(session)));
+export function orderSessions(sessions, orderedSessionIds) {
+  const ordered = new Map();
+  for (const id of orderedSessionIds) {
+    const session = sessions.get(id);
+    if (session) ordered.set(id, session);
+  }
+  for (const [id, session] of sessions) {
+    if (!ordered.has(id)) ordered.set(id, session);
+  }
+  return ordered;
 }
 
 export function rememberFocus(history, sessionId) {
