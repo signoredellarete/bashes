@@ -1,24 +1,22 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import {
-  ArrowLeftRight,
-  Check,
-  ChevronLeft,
-  createElement as createIconElement,
-  FileText,
-  Folder,
-  GitBranchPlus,
-  KeyRound,
-  Pencil,
-  Play,
-  Plus,
-  Search,
-  Tag,
-  Tags,
-  Trash2,
-  Unplug,
-  X,
-} from 'lucide';
+import iconArrowsTransferUp from '@tabler/icons/outline/arrows-transfer-up.svg?raw';
+import iconCheck from '@tabler/icons/outline/check.svg?raw';
+import iconChevronLeft from '@tabler/icons/outline/chevron-left.svg?raw';
+import iconFileText from '@tabler/icons/outline/file-text.svg?raw';
+import iconFolder from '@tabler/icons/outline/folder.svg?raw';
+import iconKey from '@tabler/icons/outline/key.svg?raw';
+import iconPencil from '@tabler/icons/outline/pencil.svg?raw';
+import iconPlugConnectedX from '@tabler/icons/outline/plug-connected-x.svg?raw';
+import iconPlus from '@tabler/icons/outline/plus.svg?raw';
+import iconSearch from '@tabler/icons/outline/search.svg?raw';
+import iconServer from '@tabler/icons/outline/server-2.svg?raw';
+import iconSubtask from '@tabler/icons/outline/subtask.svg?raw';
+import iconTag from '@tabler/icons/outline/tag.svg?raw';
+import iconTags from '@tabler/icons/outline/tags.svg?raw';
+import iconTrash from '@tabler/icons/outline/trash.svg?raw';
+import iconX from '@tabler/icons/outline/x.svg?raw';
+import iconPlayerPlay from '@tabler/icons/filled/player-play.svg?raw';
 import '@xterm/xterm/css/xterm.css';
 import bashesLogo from './assets/bashes.png';
 import { externalHttpURL } from './external-links.js';
@@ -93,6 +91,8 @@ const state = {
   activeTagFilters: [],
   tagFilterMode: 'any',
   editingTagKey: null,
+  resourceDraftTags: [],
+  resourceTagQuery: '',
   lastSessionByResource: new Map(),
   sessionFocusHistory: [],
   messageLog: [],
@@ -117,17 +117,36 @@ const customKeyPathHelp = [
   'Linux/macOS: ~/.ssh/id_ed25519',
   'Windows: C:\\Users\\YourUser\\.ssh\\id_ed25519',
 ].join('\n\n');
-const iconMarkup = (icon, className = '') => createIconElement(icon, {
-  'aria-hidden': 'true',
-  class: className,
-  focusable: 'false',
-}).outerHTML;
-const iconElement = (icon, className = '') => createIconElement(icon, {
-  'aria-hidden': 'true',
-  class: className,
-  focusable: 'false',
+const TABLER_ICONS = Object.freeze({
+  'arrows-transfer-up': iconArrowsTransferUp,
+  check: iconCheck,
+  'chevron-left': iconChevronLeft,
+  'file-text': iconFileText,
+  folder: iconFolder,
+  key: iconKey,
+  pencil: iconPencil,
+  'player-play-filled': iconPlayerPlay,
+  'plug-connected-x': iconPlugConnectedX,
+  plus: iconPlus,
+  search: iconSearch,
+  'server-2': iconServer,
+  subtask: iconSubtask,
+  tag: iconTag,
+  tags: iconTags,
+  trash: iconTrash,
+  x: iconX,
 });
-const ICON_CLOSE = iconMarkup(X);
+const iconElement = (icon, className = '') => {
+  const template = document.createElement('template');
+  template.innerHTML = TABLER_ICONS[icon].trim();
+  const element = template.content.firstElementChild;
+  element.classList.add('ti', `ti-${icon}`, ...className.split(/\s+/).filter(Boolean));
+  element.setAttribute('aria-hidden', 'true');
+  element.setAttribute('focusable', 'false');
+  return element;
+};
+const iconMarkup = (icon, className = '') => iconElement(icon, className).outerHTML;
+const ICON_CLOSE = iconMarkup('x');
 
 function authFieldsMarkup(context) {
   return `
@@ -195,20 +214,20 @@ app.innerHTML = `
         <span>Remote sessions</span>
       </div>
       <button id="toggle-sidebar" class="sidebar-toggle" type="button" title="Compact sidebar" aria-label="Compact sidebar">
-        ${iconMarkup(ChevronLeft)}
+        ${iconMarkup('chevron-left')}
       </button>
     </header>
 
     <div class="toolbar">
       <label class="search-control" aria-label="Search connections">
-        ${iconMarkup(Search)}
+        ${iconMarkup('search')}
         <input id="search" type="search" placeholder="Search hosts, users, tags" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" />
       </label>
       <button id="open-host-panel" class="toolbar-icon-button" type="button" title="Add host" aria-label="Add host">
-        ${iconMarkup(Plus)}
+        ${iconMarkup('plus')}
       </button>
-      <button id="open-tag-manager" class="toolbar-icon-button secondary" type="button" title="Manage tags" aria-label="Manage tags">
-        ${iconMarkup(Tags)}
+      <button id="open-tag-manager" class="toolbar-icon-button secondary" type="button" title="Tags" aria-label="Tags">
+        ${iconMarkup('tags')}
       </button>
     </div>
 
@@ -221,7 +240,6 @@ app.innerHTML = `
         </div>
       </header>
       <div id="tag-filter-chips" class="tag-filter-chips"></div>
-      <button id="clear-tag-filters" class="clear-tag-filters" type="button" hidden>Clear filters</button>
     </section>
 
     <section id="hosts" class="hosts" aria-label="Hosts"></section>
@@ -236,21 +254,20 @@ app.innerHTML = `
           <div class="session-actions" aria-label="Connection actions">
             <div class="session-action-toolbar">
               <div class="session-action-group">
-                <button id="edit-resource" class="secondary icon-action" type="button" title="Edit connection" aria-label="Edit connection" disabled>${iconMarkup(Pencil)}</button>
-                <button id="header-add-subsystem" class="secondary icon-action" type="button" title="Add subsystem" aria-label="Add subsystem" disabled>${iconMarkup(GitBranchPlus)}</button>
-                <button id="manage-resource-tags" class="secondary icon-action" type="button" title="Manage tags" aria-label="Manage tags" disabled>${iconMarkup(Tag)}</button>
+                <button id="edit-resource" class="secondary icon-action" type="button" title="Edit connection" aria-label="Edit connection" disabled>${iconMarkup('pencil')}</button>
+                <button id="header-add-subsystem" class="secondary icon-action" type="button" title="Add subsystem" aria-label="Add subsystem" disabled>${iconMarkup('subtask')}</button>
               </div>
               <div class="session-action-group">
-                <button id="open-keys-panel" class="secondary icon-action" type="button" title="SSH keys" aria-label="SSH keys" disabled>${iconMarkup(KeyRound)}</button>
-                <button id="open-file-transfer" class="secondary icon-action" type="button" title="Files" aria-label="Files" disabled>${iconMarkup(Folder)}</button>
-                <button id="open-tunnel-panel" class="secondary icon-action" type="button" title="SSH tunnel" aria-label="SSH tunnel" disabled>${iconMarkup(ArrowLeftRight)}</button>
+                <button id="open-keys-panel" class="secondary icon-action" type="button" title="SSH keys" aria-label="SSH keys" disabled>${iconMarkup('key')}</button>
+                <button id="open-file-transfer" class="secondary icon-action" type="button" title="Files" aria-label="Files" disabled>${iconMarkup('folder')}</button>
+                <button id="open-tunnel-panel" class="secondary icon-action" type="button" title="SSH tunnel" aria-label="SSH tunnel" disabled>${iconMarkup('arrows-transfer-up')}</button>
               </div>
               <div class="session-action-group">
-                <button id="disconnect" class="secondary icon-action danger-icon" type="button" title="Disconnect" aria-label="Disconnect" disabled>${iconMarkup(Unplug)}</button>
-                <button id="delete-resource" class="secondary icon-action danger-icon" type="button" title="Delete connection" aria-label="Delete connection" disabled>${iconMarkup(Trash2)}</button>
+                <button id="disconnect" class="secondary icon-action danger-icon" type="button" title="Disconnect" aria-label="Disconnect" disabled>${iconMarkup('plug-connected-x')}</button>
+                <button id="delete-resource" class="secondary icon-action danger-icon" type="button" title="Delete connection" aria-label="Delete connection" disabled>${iconMarkup('trash')}</button>
               </div>
             </div>
-            <button id="connect" class="connect-action" type="button" disabled><span class="connect-action-icon">${iconMarkup(Play)}</span><span class="connect-action-label">Connect</span></button>
+            <button id="connect" class="connect-action" type="button" disabled><span class="connect-action-icon">${iconMarkup('player-play-filled')}</span><span class="connect-action-label">Connect</span></button>
           </div>
         </div>
       </div>
@@ -267,7 +284,7 @@ app.innerHTML = `
 
     <footer class="workspace-footer">
       <p id="app-status" class="app-status" aria-live="polite"></p>
-      <button id="message-log-button" class="status-log-button" type="button" title="Show message log">${iconMarkup(FileText)}<span>Log</span></button>
+      <button id="message-log-button" class="status-log-button" type="button" title="Show message log">${iconMarkup('file-text')}<span>Log</span></button>
       <div class="terminal-font-controls" aria-label="Terminal font size">
         <button id="decrease-terminal-font" type="button" title="Decrease terminal font size">-</button>
         <span aria-hidden="true">A</span>
@@ -280,52 +297,69 @@ app.innerHTML = `
 
   <section id="resource-panel" class="slide-panel" hidden>
     <div class="panel-scrim" data-close-panel></div>
-    <form id="resource-form" class="panel-card">
-      <header class="panel-header">
-        <div>
-          <p class="eyebrow" id="resource-panel-kicker">Host</p>
-          <h3 id="resource-panel-title">Add Host</h3>
+    <form id="resource-form" class="panel-card resource-panel-card">
+      <header class="panel-header resource-panel-header">
+        <span class="resource-panel-heading-icon">${iconMarkup('server-2', 'resource-panel-icon')}</span>
+        <div class="resource-panel-heading">
+          <h3 id="resource-panel-title">Add host</h3>
+          <p id="resource-panel-subtitle">SSH session</p>
         </div>
         <button class="close-panel" type="button" data-close-panel title="Close">${ICON_CLOSE}</button>
       </header>
 
-      <p id="parent-host-summary" class="parent-summary" hidden></p>
+      <div class="resource-form-body">
+        <p id="parent-host-summary" class="parent-summary" hidden></p>
 
-      <label id="subsystem-type-field" hidden>
-        <span>Type</span>
-        <select name="type">
-          <option value="vm">VM</option>
-          <option value="lxc">LXC</option>
-          <option value="docker">Docker</option>
-        </select>
-      </label>
+        <label id="subsystem-type-field" hidden>
+          <span>Type</span>
+          <select name="type">
+            <option value="vm">VM</option>
+            <option value="lxc">LXC</option>
+            <option value="docker">Docker</option>
+          </select>
+        </label>
 
-      <label>
-        <span>Name</span>
-        <input name="hostname" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required />
-      </label>
-      <label>
-        <span>IP / Hostname</span>
-        <input name="ip" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required />
-      </label>
-      <div class="form-grid">
         <label>
-          <span>Port</span>
-          <input name="port" type="number" min="1" max="65535" value="22" required />
+          <span>Display name</span>
+          <input name="hostname" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required />
         </label>
+        <div class="resource-endpoint-grid">
+          <label>
+            <span>Hostname / IP</span>
+            <input class="monospace-input" name="ip" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required />
+          </label>
+          <label>
+            <span>Port</span>
+            <input class="monospace-input" name="port" type="number" min="1" max="65535" value="22" required />
+          </label>
+        </div>
         <label>
-          <span>User</span>
-          <input name="user" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required />
+          <span>Username</span>
+          <input class="monospace-input" name="user" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required />
         </label>
+
+        <div class="resource-form-separator"></div>
+
+        <section class="resource-tag-editor" aria-labelledby="resource-tags-label">
+          <header>
+            <strong id="resource-tags-label">Tags</strong>
+            <span>type to search, Enter to add</span>
+          </header>
+          <div class="resource-tag-input">
+            <div id="resource-selected-tags" class="resource-selected-tags"></div>
+            <input id="resource-tag-query" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="prod, milano..." aria-label="Search or create tags" />
+          </div>
+          <div class="resource-tag-suggestion-box">
+            <span id="resource-tag-suggestion-label">Existing tags</span>
+            <div id="resource-tag-options" class="resource-tag-options"></div>
+          </div>
+        </section>
       </div>
-      <fieldset class="resource-tag-field">
-        <legend>Tags</legend>
-        <div id="resource-tag-options" class="resource-tag-options"></div>
-      </fieldset>
 
-      <footer class="panel-actions">
+      <footer class="panel-actions resource-panel-actions">
+        <span id="resource-tag-summary">No tags on this system</span>
         <button class="secondary" type="button" data-close-panel>Cancel</button>
-        <button id="resource-submit" type="submit">Add Host</button>
+        <button id="resource-submit" type="submit">Save host</button>
       </footer>
     </form>
   </section>
@@ -518,7 +552,7 @@ app.innerHTML = `
     <section class="panel-card tag-panel-card" role="dialog" aria-modal="true" aria-labelledby="tag-panel-title">
       <header class="panel-header tag-panel-header">
         <div class="tag-panel-heading">
-          <span class="tag-panel-heading-icon">${iconMarkup(Tags)}</span>
+          <span class="tag-panel-heading-icon">${iconMarkup('tags')}</span>
           <div>
             <h3 id="tag-panel-title">Manage tags</h3>
             <p id="tag-panel-subtitle">No tags</p>
@@ -529,7 +563,7 @@ app.innerHTML = `
 
       <form id="tag-create-form" class="tag-create-form">
         <label class="tag-create-control">
-          ${iconMarkup(Tag)}
+          ${iconMarkup('tag')}
           <input name="name" maxlength="40" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="New tag name..." aria-label="New tag name" required />
         </label>
         <button id="tag-create-submit" type="submit" disabled>Create</button>
@@ -618,12 +652,10 @@ document.querySelector('#open-host-panel').addEventListener('click', () => openR
 document.querySelector('#open-tag-manager').addEventListener('click', () => openTagPanel());
 document.querySelector('#tag-mode-any').addEventListener('click', () => setTagFilterMode('any'));
 document.querySelector('#tag-mode-all').addEventListener('click', () => setTagFilterMode('all'));
-document.querySelector('#clear-tag-filters').addEventListener('click', () => clearTagFilters());
 document.querySelector('#open-keys-panel').addEventListener('click', () => openKeysPanel());
 document.querySelector('#open-tunnel-panel').addEventListener('click', () => openTunnelPanel());
 document.querySelector('#open-file-transfer').addEventListener('click', () => openFileTransferModal());
 document.querySelector('#edit-resource').addEventListener('click', () => openEditPanel());
-document.querySelector('#manage-resource-tags').addEventListener('click', () => openTagPanel());
 document.querySelector('#header-add-subsystem').addEventListener('click', () => {
   const selected = findResource(state.selectedId);
   if (selected && !isLocalResource(selected.resource)) openResourcePanel('subsystem', selected.resource.id);
@@ -635,6 +667,11 @@ document.querySelector('#message-log-button').addEventListener('click', () => sh
 document.querySelector('#decrease-terminal-font').addEventListener('click', () => adjustTerminalFontSize(-1));
 document.querySelector('#increase-terminal-font').addEventListener('click', () => adjustTerminalFontSize(1));
 document.querySelector('#resource-form').addEventListener('submit', (event) => submitResource(event));
+document.querySelector('#resource-tag-query').addEventListener('input', (event) => {
+  state.resourceTagQuery = event.currentTarget.value;
+  renderResourceTagOptions();
+});
+document.querySelector('#resource-tag-query').addEventListener('keydown', (event) => handleResourceTagInput(event));
 document.querySelector('#tag-create-form').addEventListener('submit', (event) => submitCreateTag(event));
 document.querySelector('#tag-create-form').elements.name.addEventListener('input', () => updateTagCreateButton());
 document.querySelector('#tag-panel-clear').addEventListener('click', () => clearTagPanelSelection());
@@ -1271,40 +1308,132 @@ function endpointInput(form, type) {
     ip: form.elements.ip.value.trim(),
     port: Number.parseInt(form.elements.port.value, 10),
     user: form.elements.user.value.trim(),
-    tags: [...form.querySelectorAll('input[name="tags"]:checked')].map((input) => input.value),
+    tags: [...state.resourceDraftTags],
     ...(type ? { type } : {}),
   };
 }
 
-function renderResourceTagOptions(selectedTags = []) {
+function renderResourceTagOptions(selectedTags) {
+  if (selectedTags !== undefined) {
+    const seen = new Set();
+    state.resourceDraftTags = (selectedTags ?? []).reduce((tags, value) => {
+      const name = String(value ?? '').trim();
+      const key = canonicalTag(name);
+      if (!key || seen.has(key)) return tags;
+      seen.add(key);
+      tags.push(name);
+      return tags;
+    }, []);
+    state.resourceTagQuery = '';
+    document.querySelector('#resource-tag-query').value = '';
+  }
+
   const container = document.querySelector('#resource-tag-options');
-  const selected = new Set((selectedTags ?? []).map(canonicalTag));
+  const selectedContainer = document.querySelector('#resource-selected-tags');
+  const queryInput = document.querySelector('#resource-tag-query');
+  const suggestionLabel = document.querySelector('#resource-tag-suggestion-label');
+  const summary = document.querySelector('#resource-tag-summary');
+  const selected = new Set(state.resourceDraftTags.map(canonicalTag));
   const tags = mergeTagCatalog(state.tags, state.hosts);
-  if (tags.length === 0) {
+  const query = canonicalTag(state.resourceTagQuery);
+  const suggestions = tags.filter((tag) => !selected.has(tag.key) && (!query || tag.key.includes(query)));
+
+  selectedContainer.replaceChildren(...state.resourceDraftTags.map((tagName) => {
+    const chip = document.createElement('span');
+    chip.className = 'resource-selected-tag';
+    applyTagPalette(chip, tagName);
+    const name = document.createElement('span');
+    name.textContent = tagName;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.title = `Remove ${tagName}`;
+    remove.setAttribute('aria-label', `Remove ${tagName}`);
+    remove.append(iconElement('x'));
+    remove.addEventListener('click', () => removeResourceDraftTag(tagName));
+    chip.append(name, remove);
+    return chip;
+  }));
+
+  queryInput.placeholder = state.resourceDraftTags.length === 0 ? 'prod, milano...' : 'Add another...';
+  suggestionLabel.textContent = query ? 'Matching tags' : 'Existing tags';
+  summary.textContent = state.resourceDraftTags.length === 0
+    ? 'No tags on this system'
+    : `${state.resourceDraftTags.length} tag${state.resourceDraftTags.length === 1 ? '' : 's'} on this system`;
+
+  const options = suggestions.map((tag) => {
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = 'resource-tag-option';
+    option.title = `${tag.count} system${tag.count === 1 ? '' : 's'} tagged ${tag.name}`;
+    applyTagPalette(option, tag.name);
+    option.textContent = tag.name;
+    option.addEventListener('click', () => addResourceDraftTag(tag.name));
+    return option;
+  });
+
+  const exactMatch = tags.some((tag) => tag.key === query);
+  if (query && !exactMatch && !selected.has(query)) {
+    const create = document.createElement('button');
+    create.type = 'button';
+    create.className = 'resource-tag-create';
+    create.append(iconElement('plus'));
+    const label = document.createElement('span');
+    label.textContent = `Create "${state.resourceTagQuery.trim()}"`;
+    create.append(label);
+    create.addEventListener('click', () => createResourceDraftTag(state.resourceTagQuery));
+    options.push(create);
+  }
+
+  if (options.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'resource-tag-options-empty';
-    empty.textContent = 'No tags available.';
+    empty.textContent = tags.length === selected.size ? 'All existing tags already added.' : 'No matching tags.';
     container.replaceChildren(empty);
     return;
   }
 
-  container.replaceChildren(...tags.map((tag) => {
-    const option = document.createElement('label');
-    option.className = `resource-tag-option${selected.has(tag.key) ? ' selected' : ''}`;
-    applyTagPalette(option, tag.name);
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.name = 'tags';
-    input.value = tag.name;
-    input.checked = selected.has(tag.key);
-    input.addEventListener('change', () => option.classList.toggle('selected', input.checked));
-    const dot = document.createElement('span');
-    dot.className = 'tag-dot';
-    const name = document.createElement('span');
-    name.textContent = tag.name;
-    option.append(input, dot, name);
-    return option;
-  }));
+  container.replaceChildren(...options);
+}
+
+function handleResourceTagInput(event) {
+  if (event.key === 'Enter') {
+    const query = event.currentTarget.value.trim();
+    if (!query) return;
+    event.preventDefault();
+    const existing = mergeTagCatalog(state.tags, state.hosts).find((tag) => tag.key === canonicalTag(query));
+    if (existing) addResourceDraftTag(existing.name);
+    else createResourceDraftTag(query);
+  } else if (event.key === 'Backspace' && !event.currentTarget.value && state.resourceDraftTags.length > 0) {
+    event.preventDefault();
+    removeResourceDraftTag(state.resourceDraftTags.at(-1));
+  }
+}
+
+function addResourceDraftTag(name) {
+  const key = canonicalTag(name);
+  if (!key || state.resourceDraftTags.some((tag) => canonicalTag(tag) === key)) return;
+  state.resourceDraftTags.push(String(name).trim());
+  state.resourceTagQuery = '';
+  const input = document.querySelector('#resource-tag-query');
+  input.value = '';
+  renderResourceTagOptions();
+  input.focus();
+}
+
+function removeResourceDraftTag(name) {
+  const key = canonicalTag(name);
+  state.resourceDraftTags = state.resourceDraftTags.filter((tag) => canonicalTag(tag) !== key);
+  renderResourceTagOptions();
+  document.querySelector('#resource-tag-query').focus();
+}
+
+async function createResourceDraftTag(name) {
+  const normalized = String(name ?? '').trim();
+  if (!normalized) return;
+  const created = await withBusy(() => apiCreateTag(normalized));
+  if (!created) return;
+  state.tags = [...state.tags, created];
+  addResourceDraftTag(created);
 }
 
 function scheduleHostRender() {
@@ -1428,7 +1557,6 @@ function resourceRow(resource, type, depth = 0, rootHostId = resource.id, canReo
 function renderTagFilters() {
   const section = document.querySelector('#tag-filters');
   const container = document.querySelector('#tag-filter-chips');
-  const clear = document.querySelector('#clear-tag-filters');
   const tags = mergeTagCatalog(state.tags, state.hosts);
   const available = new Set(tags.map((tag) => tag.key));
   state.activeTagFilters = state.activeTagFilters.filter((tag) => available.has(tag));
@@ -1441,7 +1569,7 @@ function renderTagFilters() {
   any.setAttribute('aria-pressed', state.tagFilterMode === 'any' ? 'true' : 'false');
   all.setAttribute('aria-pressed', state.tagFilterMode === 'all' ? 'true' : 'false');
 
-  container.replaceChildren(...tags.map((tag) => {
+  const chips = tags.map((tag) => {
     const button = document.createElement('button');
     const active = state.activeTagFilters.includes(tag.key);
     button.type = 'button';
@@ -1459,8 +1587,22 @@ function renderTagFilters() {
     button.append(dot, label, count);
     button.addEventListener('click', () => toggleTagFilter(tag.key));
     return button;
-  }));
-  clear.hidden = state.activeTagFilters.length === 0;
+  });
+
+  if (state.activeTagFilters.length > 0) {
+    const clear = document.createElement('button');
+    clear.type = 'button';
+    clear.className = 'clear-tag-filters';
+    clear.title = 'Clear tag filters';
+    clear.append(iconElement('x'));
+    const label = document.createElement('span');
+    label.textContent = 'Clear';
+    clear.append(label);
+    clear.addEventListener('click', () => clearTagFilters());
+    chips.push(clear);
+  }
+
+  container.replaceChildren(...chips);
 }
 
 function renderResourceTagPills(container, tags) {
@@ -1570,9 +1712,9 @@ function renderTagManagerRow(tag) {
     input.maxLength = 40;
     input.required = true;
     input.setAttribute('aria-label', `Rename ${tag.name}`);
-    const save = tagIconButton(Check, 'Save tag name');
+    const save = tagIconButton('check', 'Save tag name');
     save.type = 'submit';
-    const cancel = tagIconButton(X, 'Cancel rename');
+    const cancel = tagIconButton('x', 'Cancel rename');
     cancel.addEventListener('click', () => {
       state.editingTagKey = null;
       renderTagPanel();
@@ -1603,12 +1745,12 @@ function renderTagManagerRow(tag) {
 
   const actions = document.createElement('div');
   actions.className = 'tag-manager-actions';
-  const edit = tagIconButton(Pencil, `Rename ${tag.name}`);
+  const edit = tagIconButton('pencil', `Rename ${tag.name}`);
   edit.addEventListener('click', () => {
     state.editingTagKey = tag.key;
     renderTagPanel();
   });
-  const remove = tagIconButton(Trash2, `Delete ${tag.name}`, 'danger-icon');
+  const remove = tagIconButton('trash', `Delete ${tag.name}`, 'danger-icon');
   remove.addEventListener('click', () => deleteManagedTag(tag));
   actions.append(edit, remove);
   row.append(select, actions);
@@ -2082,7 +2224,7 @@ function renderTabs() {
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'tab-close';
-    close.append(iconElement(X));
+    close.append(iconElement('x'));
     close.title = `Close ${session.title}`;
     close.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -2158,7 +2300,7 @@ function openResourcePanel(mode, hostID = '') {
   const typeField = document.querySelector('#subsystem-type-field');
   const parentSummary = document.querySelector('#parent-host-summary');
   const title = document.querySelector('#resource-panel-title');
-  const kicker = document.querySelector('#resource-panel-kicker');
+  const subtitle = document.querySelector('#resource-panel-subtitle');
   const submit = document.querySelector('#resource-submit');
 
   state.drawerMode = mode;
@@ -2166,21 +2308,21 @@ function openResourcePanel(mode, hostID = '') {
   state.editResourceId = null;
   form.reset();
   form.elements.port.value = '22';
-  renderResourceTagOptions();
+  renderResourceTagOptions([]);
 
   const subsystemMode = mode === 'subsystem';
   typeField.hidden = !subsystemMode;
   parentSummary.hidden = !subsystemMode;
   if (subsystemMode) {
-    kicker.textContent = 'Subsystem';
-    title.textContent = 'Add Subsystem';
-    submit.textContent = 'Add Subsystem';
+    title.textContent = 'Add subsystem';
+    subtitle.textContent = 'SSH session';
+    submit.textContent = 'Save subsystem';
     const parent = findResource(hostID)?.resource;
     parentSummary.textContent = parent ? `Parent: ${parent.hostname} (${parent.user}@${parent.ip || parent.hostname})` : '';
   } else {
-    kicker.textContent = 'Host';
-    title.textContent = 'Add Host';
-    submit.textContent = 'Add Host';
+    title.textContent = 'Add host';
+    subtitle.textContent = 'SSH session';
+    submit.textContent = 'Save host';
     parentSummary.textContent = '';
   }
 
@@ -2198,7 +2340,7 @@ function openEditPanel() {
   const typeField = document.querySelector('#subsystem-type-field');
   const parentSummary = document.querySelector('#parent-host-summary');
   const title = document.querySelector('#resource-panel-title');
-  const kicker = document.querySelector('#resource-panel-kicker');
+  const subtitle = document.querySelector('#resource-panel-subtitle');
   const submit = document.querySelector('#resource-submit');
   const resource = selected.resource;
   const subsystemMode = selected.type !== 'host';
@@ -2217,16 +2359,16 @@ function openEditPanel() {
   parentSummary.hidden = !subsystemMode;
   if (subsystemMode) {
     form.elements.type.value = resource.type;
-    kicker.textContent = 'Subsystem';
-    title.textContent = 'Edit Subsystem';
-    submit.textContent = 'Save Changes';
+    title.textContent = 'Edit subsystem';
+    subtitle.textContent = 'SSH session';
+    submit.textContent = 'Save changes';
     parentSummary.textContent = selected.parent
       ? `Parent: ${selected.parent.hostname} (${selected.parent.user}@${selected.parent.ip || selected.parent.hostname})`
       : '';
   } else {
-    kicker.textContent = 'Host';
-    title.textContent = 'Edit Host';
-    submit.textContent = 'Save Changes';
+    title.textContent = 'Edit host';
+    subtitle.textContent = 'SSH session';
+    submit.textContent = 'Save changes';
     parentSummary.textContent = '';
   }
 
@@ -2610,7 +2752,6 @@ function renderSelection() {
   const title = document.querySelector('#session-title');
   const edit = document.querySelector('#edit-resource');
   const addSubsystem = document.querySelector('#header-add-subsystem');
-  const manageTags = document.querySelector('#manage-resource-tags');
   const keys = document.querySelector('#open-keys-panel');
   const fileTransfer = document.querySelector('#open-file-transfer');
   const tunnel = document.querySelector('#open-tunnel-panel');
@@ -2630,7 +2771,6 @@ function renderSelection() {
     edit.disabled = true;
     addSubsystem.disabled = true;
     addSubsystem.hidden = false;
-    manageTags.disabled = state.busy;
     keys.disabled = true;
     fileTransfer.disabled = true;
     fileTransfer.hidden = !FILE_TRANSFER_ENABLED;
@@ -2645,7 +2785,6 @@ function renderSelection() {
   addSubsystem.hidden = false;
   edit.disabled = state.busy || !selected || localSelected;
   addSubsystem.disabled = state.busy || !selected || localSelected;
-  manageTags.disabled = state.busy;
   keys.disabled = state.busy || !selected || localSelected;
   fileTransfer.hidden = !FILE_TRANSFER_ENABLED;
   fileTransfer.disabled = state.busy || !selected || localSelected || !FILE_TRANSFER_ENABLED;
@@ -3536,7 +3675,7 @@ function notify(message, level = 'info') {
   text.textContent = message;
   const close = document.createElement('button');
   close.type = 'button';
-  close.append(iconElement(X));
+  close.append(iconElement('x'));
   close.title = 'Dismiss';
   close.addEventListener('click', () => toast.remove());
   toast.append(text, close);
