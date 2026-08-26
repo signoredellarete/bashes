@@ -523,18 +523,15 @@ svg.ti {
 }
 
 .host-block.host-drag-ghost {
+  --drag-outline-color: #68749a;
   border-radius: 6px;
-  outline: 1px dashed #68749a;
+  outline: 1px dashed transparent;
   outline-offset: -1px;
+  animation: reveal-drag-outline 0s linear 750ms forwards;
 }
 
 .host-block.host-drag-ghost .host-select {
   opacity: 0.3;
-}
-
-.host-block.host-drag-chosen:not(.host-drag-mirror) .host-select {
-  border-style: dashed;
-  border-color: #68749a;
 }
 
 .host-drag-mirror {
@@ -915,16 +912,12 @@ svg.ti {
 }
 
 .session-tab-wrap.tab-drag-ghost {
+  --drag-outline-color: #8290a0;
   border-radius: 6px 6px 0 0;
-  outline: 1px dashed #8290a0;
+  outline: 1px dashed transparent;
   outline-offset: -1px;
   opacity: 0.32;
-}
-
-.session-tab-wrap.tab-drag-chosen:not(.tab-drag-mirror) .session-tab,
-.session-tab-wrap.tab-drag-chosen:not(.tab-drag-mirror) .tab-close {
-  border-style: dashed;
-  border-color: #8290a0;
+  animation: reveal-drag-outline 0s linear 750ms forwards;
 }
 
 .tab-drag-mirror {
@@ -1017,6 +1010,12 @@ html.sorting-tabs,
 html.sorting-tabs * {
   cursor: grabbing !important;
   user-select: none !important;
+}
+
+@keyframes reveal-drag-outline {
+  to {
+    outline-color: var(--drag-outline-color);
+  }
 }
 
 .terminal-stack {
@@ -2648,6 +2647,10 @@ html.sorting-tabs * {
 
 .transfer-manager .wxi-search::before {
   --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M10 4a6 6 0 0 1 4.7 9.7l4.8 4.8-1.4 1.4-4.8-4.8A6 6 0 1 1 10 4zm0 2a4 4 0 1 0 0 8 4 4 0 0 0 0-8z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-refresh::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M20 11a8 8 0 0 0-15.5-2M4 5v4h4M4 13a8 8 0 0 0 15.5 2m.5 4v-4h-4' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 .transfer-manager .wxi-close::before {
