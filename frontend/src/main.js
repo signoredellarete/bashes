@@ -115,7 +115,7 @@ const FILE_TRANSFER_ENABLED = true;
 const DEMO_MODE = import.meta.env.DEV && globalThis.__BASHES_DEMO__ === true;
 const LOCAL_RESOURCE_ID = '__bashes_localhost__';
 const SIDEBAR_TOOLTIP_DELAY = 1000;
-const DRAG_OUTLINE_DELAY = 750;
+const DRAG_OUTLINE_DELAY = 300;
 const customKeyPathHelp = [
   'Select the private key file, not the .pub file.',
   'Linux/macOS: ~/.ssh/id_ed25519',
