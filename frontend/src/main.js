@@ -6,6 +6,7 @@ import iconChevronLeft from '@tabler/icons/outline/chevron-left.svg?raw';
 import iconFileText from '@tabler/icons/outline/file-text.svg?raw';
 import iconFolder from '@tabler/icons/outline/folder.svg?raw';
 import iconKey from '@tabler/icons/outline/key.svg?raw';
+import iconMinus from '@tabler/icons/outline/minus.svg?raw';
 import iconPencil from '@tabler/icons/outline/pencil.svg?raw';
 import iconPlugConnectedX from '@tabler/icons/outline/plug-connected-x.svg?raw';
 import iconPlus from '@tabler/icons/outline/plus.svg?raw';
@@ -124,6 +125,7 @@ const TABLER_ICONS = Object.freeze({
   'file-text': iconFileText,
   folder: iconFolder,
   key: iconKey,
+  minus: iconMinus,
   pencil: iconPencil,
   'player-play-filled': iconPlayerPlay,
   'plug-connected-x': iconPlugConnectedX,
@@ -286,9 +288,9 @@ app.innerHTML = `
       <p id="app-status" class="app-status" aria-live="polite"></p>
       <button id="message-log-button" class="status-log-button" type="button" title="Show message log">${iconMarkup('file-text')}<span>Log</span></button>
       <div class="terminal-font-controls" aria-label="Terminal font size">
-        <button id="decrease-terminal-font" type="button" title="Decrease terminal font size">-</button>
+        <button id="decrease-terminal-font" type="button" title="Decrease terminal font size" aria-label="Decrease terminal font size">${iconMarkup('minus')}</button>
         <span aria-hidden="true">A</span>
-        <button id="increase-terminal-font" type="button" title="Increase terminal font size">+</button>
+        <button id="increase-terminal-font" type="button" title="Increase terminal font size" aria-label="Increase terminal font size">${iconMarkup('plus')}</button>
       </div>
     </footer>
   </main>
