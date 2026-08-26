@@ -2327,7 +2327,7 @@ function openEditPanel() {
   form.elements.ip.value = resource.ip;
   form.elements.port.value = String(resource.port);
   form.elements.user.value = resource.user;
-  renderResourceTagOptions(resource.tags);
+  renderResourceTagOptions(resourceTags(resource).map((tag) => tag.name));
   typeField.hidden = !subsystemMode;
   parentSummary.hidden = !subsystemMode;
   if (subsystemMode) {

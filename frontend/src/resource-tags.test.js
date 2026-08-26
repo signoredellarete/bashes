@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collectResourceTags, filterResourceTree, mergeTagCatalog, resourceMatches, tagHue } from './resource-tags.js';
+import { collectResourceTags, filterResourceTree, mergeTagCatalog, resourceMatches, resourceTags, tagHue } from './resource-tags.js';
 
 const resources = [
   {
@@ -13,6 +13,10 @@ const resources = [
 ];
 
 describe('resource tag filtering', () => {
+  it('treats omitted resource tags as an empty selection', () => {
+    expect(resourceTags({ id: 'untagged' })).toEqual([]);
+  });
+
   it('collects nested tag counts case-insensitively', () => {
     expect(collectResourceTags(resources)).toEqual([
       { key: 'data', name: 'data', count: 1 },
