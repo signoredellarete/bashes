@@ -462,11 +462,14 @@ jobs:
             exit 1
           fi
 
-          previous_tag="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
-          if [ -n "$previous_tag" ]; then
-            changes="$(git log --no-merges --pretty='- %s' "$previous_tag..$GITHUB_REF_NAME")"
-          else
-            changes="$(git log --no-merges --pretty='- %s' "$GITHUB_REF_NAME")"
+          changes="$(git for-each-ref "refs/tags/$GITHUB_REF_NAME" --format='%(contents)')"
+          if [ -z "$changes" ]; then
+            previous_tag="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+            if [ -n "$previous_tag" ]; then
+              changes="$(git log --no-merges --pretty='- %s' "$previous_tag..$GITHUB_REF_NAME")"
+            else
+              changes="$(git log --no-merges --pretty='- %s' "$GITHUB_REF_NAME")"
+            fi
           fi
 
           {
