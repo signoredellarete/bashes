@@ -13,10 +13,12 @@ type ShellOptions struct {
 	Stdout io.Writer
 	Stderr io.Writer
 	Term   string
+	X11    *X11Options
 }
 
 type Shell struct {
-	session *ssh.Session
+	session      *ssh.Session
+	x11Forwarder *X11Forwarder
 }
 
 func StartShell(client *ssh.Client, options ShellOptions) (*Shell, error) {
@@ -57,12 +59,22 @@ func StartShell(client *ssh.Client, options ShellOptions) (*Shell, error) {
 		session.Close()
 		return nil, fmt.Errorf("request ssh pty: %w", err)
 	}
+
+	var x11Forwarder *X11Forwarder
+	if options.X11 != nil {
+		x11Forwarder, err = StartX11Forwarding(client, session, *options.X11)
+		if err != nil {
+			session.Close()
+			return nil, err
+		}
+	}
 	if err := session.Shell(); err != nil {
+		x11Forwarder.Close()
 		session.Close()
 		return nil, fmt.Errorf("start ssh shell: %w", err)
 	}
 
-	return &Shell{session: session}, nil
+	return &Shell{session: session, x11Forwarder: x11Forwarder}, nil
 }
 
 func (s *Shell) Resize(size TerminalSize) error {
@@ -86,5 +98,6 @@ func (s *Shell) Close() error {
 	if s == nil || s.session == nil {
 		return nil
 	}
+	_ = s.x11Forwarder.Close()
 	return s.session.Close()
 }
