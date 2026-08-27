@@ -1,5 +1,24 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import Sortable from 'sortablejs';
+import iconArrowsTransferUp from '@tabler/icons/outline/arrows-transfer-up.svg?raw';
+import iconCheck from '@tabler/icons/outline/check.svg?raw';
+import iconChevronLeft from '@tabler/icons/outline/chevron-left.svg?raw';
+import iconFileText from '@tabler/icons/outline/file-text.svg?raw';
+import iconFolder from '@tabler/icons/outline/folder.svg?raw';
+import iconKey from '@tabler/icons/outline/key.svg?raw';
+import iconMinus from '@tabler/icons/outline/minus.svg?raw';
+import iconPencil from '@tabler/icons/outline/pencil.svg?raw';
+import iconPlugConnectedX from '@tabler/icons/outline/plug-connected-x.svg?raw';
+import iconPlus from '@tabler/icons/outline/plus.svg?raw';
+import iconSearch from '@tabler/icons/outline/search.svg?raw';
+import iconServer from '@tabler/icons/outline/server-2.svg?raw';
+import iconSubtask from '@tabler/icons/outline/subtask.svg?raw';
+import iconTag from '@tabler/icons/outline/tag.svg?raw';
+import iconTags from '@tabler/icons/outline/tags.svg?raw';
+import iconTrash from '@tabler/icons/outline/trash.svg?raw';
+import iconX from '@tabler/icons/outline/x.svg?raw';
+import iconPlayerPlay from '@tabler/icons/filled/player-play.svg?raw';
 import '@xterm/xterm/css/xterm.css';
 import bashesLogo from './assets/bashes.png';
 import { externalHttpURL } from './external-links.js';
@@ -18,7 +37,7 @@ import {
   preferredSessionForResource as preferredSessionForResourceFromState,
   realSessionsForResource as realSessionsForResourceFromState,
   rememberFocus,
-  reorderSessions,
+  orderSessions,
   sessionsForResource as sessionsForResourceFromState,
 } from './session-state.js';
 import {
@@ -30,11 +49,20 @@ import {
   persistTerminalSettings,
 } from './terminal-settings.js';
 import { repeatedKeyData } from './terminal-keyboard.js';
+import {
+  canonicalTag,
+  filterResourceTree,
+  mergeTagCatalog,
+  resourceTags,
+  tagHue,
+  visibleResourceTags,
+} from './resource-tags.js';
 import './styles.css';
 
 const terminalSettings = loadTerminalSettings(localStorage);
 
 const demoStore = {
+  tags: ['Production', 'Development'],
   hosts: [
     {
       id: 'demo-host',
@@ -52,6 +80,7 @@ const demoStore = {
 
 const state = {
   hosts: [],
+  tags: [],
   keys: [],
   keySettings: { customDirectory: '' },
   tunnels: new Map(),
@@ -66,8 +95,11 @@ const state = {
   editResourceId: null,
   confirmResolver: null,
   editContextTarget: null,
-  draggedHostId: null,
-  draggedSessionId: null,
+  activeTagFilters: [],
+  tagFilterMode: 'any',
+  editingTagKey: null,
+  resourceDraftTags: [],
+  resourceTagQuery: '',
   lastSessionByResource: new Map(),
   sessionFocusHistory: [],
   messageLog: [],
@@ -80,18 +112,60 @@ const state = {
 let appModalActions = {};
 let searchRenderFrame = 0;
 let terminalFitFrame = 0;
-let sidebarTooltipTimer = 0;
+let tooltipTimer = 0;
+let hostSortable = null;
+let tabSortable = null;
+let tagCatalogSortable = null;
+let tagRemoveSortable = null;
+let activeTagDropTarget = null;
+let resourceTagSortables = [];
+let suppressTagFilterClickUntil = 0;
+let tagPopover = null;
+let tagPopoverRequest = 0;
+const dragOutlineTimers = { hosts: 0, tabs: 0 };
+const dragOutlineTargets = { hosts: null, tabs: null };
 
 const FILE_TRANSFER_ENABLED = true;
 const DEMO_MODE = import.meta.env.DEV && globalThis.__BASHES_DEMO__ === true;
 const LOCAL_RESOURCE_ID = '__bashes_localhost__';
-const SIDEBAR_TOOLTIP_DELAY = 1000;
+const TOOLTIP_DELAY = 500;
+const DRAG_OUTLINE_DELAY = 300;
 const customKeyPathHelp = [
   'Select the private key file, not the .pub file.',
   'Linux/macOS: ~/.ssh/id_ed25519',
   'Windows: C:\\Users\\YourUser\\.ssh\\id_ed25519',
 ].join('\n\n');
-const ICON_CLOSE = '✕';
+const TABLER_ICONS = Object.freeze({
+  'arrows-transfer-up': iconArrowsTransferUp,
+  check: iconCheck,
+  'chevron-left': iconChevronLeft,
+  'file-text': iconFileText,
+  folder: iconFolder,
+  key: iconKey,
+  minus: iconMinus,
+  pencil: iconPencil,
+  'player-play-filled': iconPlayerPlay,
+  'plug-connected-x': iconPlugConnectedX,
+  plus: iconPlus,
+  search: iconSearch,
+  'server-2': iconServer,
+  subtask: iconSubtask,
+  tag: iconTag,
+  tags: iconTags,
+  trash: iconTrash,
+  x: iconX,
+});
+const iconElement = (icon, className = '') => {
+  const template = document.createElement('template');
+  template.innerHTML = TABLER_ICONS[icon].trim();
+  const element = template.content.firstElementChild;
+  element.classList.add('ti', `ti-${icon}`, ...className.split(/\s+/).filter(Boolean));
+  element.setAttribute('aria-hidden', 'true');
+  element.setAttribute('focusable', 'false');
+  return element;
+};
+const iconMarkup = (icon, className = '') => iconElement(icon, className).outerHTML;
+const ICON_CLOSE = iconMarkup('x');
 
 function authFieldsMarkup(context) {
   return `
@@ -159,37 +233,61 @@ app.innerHTML = `
         <span>Remote sessions</span>
       </div>
       <button id="toggle-sidebar" class="sidebar-toggle" type="button" title="Compact sidebar" aria-label="Compact sidebar">
-        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <path d="m15 18-6-6 6-6"></path>
-        </svg>
+        ${iconMarkup('chevron-left')}
       </button>
     </header>
 
     <div class="toolbar">
-      <input id="search" type="search" placeholder="Search hosts" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" />
-      <button id="open-host-panel" type="button" title="Add host">Add Host</button>
+      <label class="search-control" aria-label="Search connections">
+        ${iconMarkup('search')}
+        <input id="search" type="search" placeholder="Search hosts, users, tags" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" />
+      </label>
+      <button id="open-host-panel" class="toolbar-icon-button" type="button" title="Add host" aria-label="Add host">
+        ${iconMarkup('plus')}
+      </button>
+      <button id="open-tag-manager" class="toolbar-icon-button secondary" type="button" title="Tags" aria-label="Tags">
+        ${iconMarkup('tags')}
+      </button>
     </div>
 
+    <section id="tag-filters" class="tag-filters" aria-label="Filter connections by tag" hidden>
+      <header>
+        <span>Filter by tag</span>
+        <div class="tag-filter-mode" aria-label="Tag matching mode">
+          <button id="tag-mode-any" type="button" title="Match any selected tag">ANY</button>
+          <button id="tag-mode-all" type="button" title="Match all selected tags">ALL</button>
+        </div>
+      </header>
+      <div id="tag-filter-chips" class="tag-filter-chips"></div>
+    </section>
+
     <section id="hosts" class="hosts" aria-label="Hosts"></section>
+    <div id="tag-remove-zone" class="tag-remove-zone" aria-hidden="true">
+      ${iconMarkup('trash')}
+      <span>Remove tag</span>
+    </div>
   </aside>
 
   <main class="workspace">
     <section class="session-header">
-      <div class="session-titlebar">
-        <p class="eyebrow">Session</p>
-        <div class="session-title-row">
-          <h2 id="session-title">No session selected</h2>
-          <div class="session-actions">
-            <button id="edit-resource" class="secondary" type="button" disabled>Edit</button>
-            <button id="header-add-subsystem" class="secondary" type="button" disabled>Add Subsystem</button>
-            <button id="open-keys-panel" class="secondary" type="button" disabled>Keys</button>
-            <button id="delete-resource" class="secondary" type="button" disabled>Delete</button>
-            <button id="open-file-transfer" class="secondary" type="button" disabled>Files</button>
-            <button id="open-tunnel-panel" class="secondary" type="button" disabled>Tunnel</button>
-            <button id="disconnect" class="secondary" type="button" disabled>Disconnect</button>
-            <button id="connect" type="button" disabled>Connect</button>
+      <h2 id="session-title">No session selected</h2>
+      <div class="session-actions" aria-label="Connection actions">
+        <div class="session-action-toolbar">
+          <div class="session-action-group">
+            <button id="edit-resource" class="secondary icon-action" type="button" title="Edit connection" aria-label="Edit connection" disabled>${iconMarkup('pencil')}</button>
+            <button id="header-add-subsystem" class="secondary icon-action" type="button" title="Add subsystem" aria-label="Add subsystem" disabled>${iconMarkup('subtask')}</button>
+          </div>
+          <div class="session-action-group">
+            <button id="open-keys-panel" class="secondary icon-action" type="button" title="SSH keys" aria-label="SSH keys" disabled>${iconMarkup('key')}</button>
+            <button id="open-file-transfer" class="secondary icon-action" type="button" title="Files" aria-label="Files" disabled>${iconMarkup('folder')}</button>
+            <button id="open-tunnel-panel" class="secondary icon-action" type="button" title="SSH tunnel" aria-label="SSH tunnel" disabled>${iconMarkup('arrows-transfer-up')}</button>
+          </div>
+          <div class="session-action-group">
+            <button id="disconnect" class="secondary icon-action danger-icon" type="button" title="Disconnect" aria-label="Disconnect" disabled>${iconMarkup('plug-connected-x')}</button>
+            <button id="delete-resource" class="secondary icon-action danger-icon" type="button" title="Delete connection" aria-label="Delete connection" disabled>${iconMarkup('trash')}</button>
           </div>
         </div>
+        <button id="connect" class="connect-action" type="button" disabled><span class="connect-action-icon">${iconMarkup('player-play-filled')}</span><span class="connect-action-label">Connect</span></button>
       </div>
     </section>
 
@@ -204,11 +302,11 @@ app.innerHTML = `
 
     <footer class="workspace-footer">
       <p id="app-status" class="app-status" aria-live="polite"></p>
-      <button id="message-log-button" class="status-log-button" type="button" title="Show message log">Log</button>
+      <button id="message-log-button" class="status-log-button" type="button" title="Show message log">${iconMarkup('file-text')}<span>Log</span></button>
       <div class="terminal-font-controls" aria-label="Terminal font size">
-        <button id="decrease-terminal-font" type="button" title="Decrease terminal font size">-</button>
+        <button id="decrease-terminal-font" type="button" title="Decrease terminal font size" aria-label="Decrease terminal font size">${iconMarkup('minus')}</button>
         <span aria-hidden="true">A</span>
-        <button id="increase-terminal-font" type="button" title="Increase terminal font size">+</button>
+        <button id="increase-terminal-font" type="button" title="Increase terminal font size" aria-label="Increase terminal font size">${iconMarkup('plus')}</button>
       </div>
     </footer>
   </main>
@@ -217,48 +315,69 @@ app.innerHTML = `
 
   <section id="resource-panel" class="slide-panel" hidden>
     <div class="panel-scrim" data-close-panel></div>
-    <form id="resource-form" class="panel-card">
-      <header class="panel-header">
-        <div>
-          <p class="eyebrow" id="resource-panel-kicker">Host</p>
-          <h3 id="resource-panel-title">Add Host</h3>
+    <form id="resource-form" class="panel-card resource-panel-card">
+      <header class="panel-header resource-panel-header">
+        <span class="resource-panel-heading-icon">${iconMarkup('server-2', 'resource-panel-icon')}</span>
+        <div class="resource-panel-heading">
+          <h3 id="resource-panel-title">Add host</h3>
+          <p id="resource-panel-subtitle">SSH session</p>
         </div>
         <button class="close-panel" type="button" data-close-panel title="Close">${ICON_CLOSE}</button>
       </header>
 
-      <p id="parent-host-summary" class="parent-summary" hidden></p>
+      <div class="resource-form-body">
+        <p id="parent-host-summary" class="parent-summary" hidden></p>
 
-      <label id="subsystem-type-field" hidden>
-        <span>Type</span>
-        <select name="type">
-          <option value="vm">VM</option>
-          <option value="lxc">LXC</option>
-          <option value="docker">Docker</option>
-        </select>
-      </label>
+        <label id="subsystem-type-field" hidden>
+          <span>Type</span>
+          <select name="type">
+            <option value="vm">VM</option>
+            <option value="lxc">LXC</option>
+            <option value="docker">Docker</option>
+          </select>
+        </label>
 
-      <label>
-        <span>Hostname</span>
-        <input name="hostname" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required />
-      </label>
-      <label>
-        <span>IP / DNS</span>
-        <input name="ip" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required />
-      </label>
-      <div class="form-grid">
         <label>
-          <span>Port</span>
-          <input name="port" type="number" min="1" max="65535" value="22" required />
+          <span>Display name</span>
+          <input name="hostname" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required />
         </label>
+        <div class="resource-endpoint-grid">
+          <label>
+            <span>Hostname / IP</span>
+            <input class="monospace-input" name="ip" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required />
+          </label>
+          <label>
+            <span>Port</span>
+            <input class="monospace-input" name="port" type="number" min="1" max="65535" value="22" required />
+          </label>
+        </div>
         <label>
-          <span>User</span>
-          <input name="user" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required />
+          <span>Username</span>
+          <input class="monospace-input" name="user" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required />
         </label>
+
+        <div class="resource-form-separator"></div>
+
+        <section class="resource-tag-editor" aria-labelledby="resource-tags-label">
+          <header>
+            <strong id="resource-tags-label">Tags</strong>
+            <span>type to search, Enter to add</span>
+          </header>
+          <div class="resource-tag-input">
+            <div id="resource-selected-tags" class="resource-selected-tags"></div>
+            <input id="resource-tag-query" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="prod, milano..." aria-label="Search or create tags" />
+          </div>
+          <div class="resource-tag-suggestion-box">
+            <span id="resource-tag-suggestion-label">Existing tags</span>
+            <div id="resource-tag-options" class="resource-tag-options"></div>
+          </div>
+        </section>
       </div>
 
-      <footer class="panel-actions">
+      <footer class="panel-actions resource-panel-actions">
+        <span id="resource-tag-summary">No tags on this system</span>
         <button class="secondary" type="button" data-close-panel>Cancel</button>
-        <button id="resource-submit" type="submit">Add Host</button>
+        <button id="resource-submit" type="submit">Save host</button>
       </footer>
     </form>
   </section>
@@ -446,6 +565,44 @@ app.innerHTML = `
     </section>
   </section>
 
+  <section id="tag-panel" class="slide-panel tag-panel" hidden>
+    <div class="panel-scrim"></div>
+    <section class="panel-card tag-panel-card" role="dialog" aria-modal="true" aria-labelledby="tag-panel-title">
+      <header class="panel-header tag-panel-header">
+        <div class="tag-panel-heading">
+          <span class="tag-panel-heading-icon">${iconMarkup('tags')}</span>
+          <div>
+            <h3 id="tag-panel-title">Manage tags</h3>
+            <p id="tag-panel-subtitle">No tags</p>
+          </div>
+        </div>
+        <button class="close-panel" type="button" data-close-tags title="Close" aria-label="Close tag manager">${ICON_CLOSE}</button>
+      </header>
+
+      <form id="tag-create-form" class="tag-create-form">
+        <label class="tag-create-control">
+          ${iconMarkup('tag')}
+          <input name="name" maxlength="40" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="New tag name..." aria-label="New tag name" required />
+        </label>
+        <button id="tag-create-submit" type="submit" disabled>Create</button>
+      </form>
+
+      <div class="tag-list-heading">
+        <span>All tags</span>
+        <small id="tag-list-hint">Click a tag to filter</small>
+      </div>
+      <div id="tag-manager-list" class="tag-manager-list"></div>
+
+      <footer class="tag-panel-footer">
+        <span id="tag-panel-status">No active filters</span>
+        <div>
+          <button id="tag-panel-clear" class="secondary" type="button">Clear filter</button>
+          <button type="button" data-close-tags>Done</button>
+        </div>
+      </footer>
+    </section>
+  </section>
+
   <section id="confirm-modal" class="confirm-modal" hidden>
     <div class="confirm-scrim" data-confirm-cancel></div>
     <section class="confirm-card" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
@@ -480,7 +637,7 @@ app.innerHTML = `
     </section>
   </section>
 
-  <div id="sidebar-tooltip" class="sidebar-tooltip" hidden></div>
+  <div id="app-tooltip" class="app-tooltip" role="tooltip" hidden></div>
   <div id="edit-context-menu" class="edit-context-menu" hidden>
     <button type="button" data-edit-command="cut">Cut</button>
     <button type="button" data-edit-command="copy">Copy</button>
@@ -510,6 +667,9 @@ searchInput.addEventListener('input', () => scheduleHostRender());
   searchInput.addEventListener(eventName, (event) => event.stopPropagation());
 });
 document.querySelector('#open-host-panel').addEventListener('click', () => openResourcePanel('host'));
+document.querySelector('#open-tag-manager').addEventListener('click', () => openTagPanel());
+document.querySelector('#tag-mode-any').addEventListener('click', () => setTagFilterMode('any'));
+document.querySelector('#tag-mode-all').addEventListener('click', () => setTagFilterMode('all'));
 document.querySelector('#open-keys-panel').addEventListener('click', () => openKeysPanel());
 document.querySelector('#open-tunnel-panel').addEventListener('click', () => openTunnelPanel());
 document.querySelector('#open-file-transfer').addEventListener('click', () => openFileTransferModal());
@@ -525,6 +685,14 @@ document.querySelector('#message-log-button').addEventListener('click', () => sh
 document.querySelector('#decrease-terminal-font').addEventListener('click', () => adjustTerminalFontSize(-1));
 document.querySelector('#increase-terminal-font').addEventListener('click', () => adjustTerminalFontSize(1));
 document.querySelector('#resource-form').addEventListener('submit', (event) => submitResource(event));
+document.querySelector('#resource-tag-query').addEventListener('input', (event) => {
+  state.resourceTagQuery = event.currentTarget.value;
+  renderResourceTagOptions();
+});
+document.querySelector('#resource-tag-query').addEventListener('keydown', (event) => handleResourceTagInput(event));
+document.querySelector('#tag-create-form').addEventListener('submit', (event) => submitCreateTag(event));
+document.querySelector('#tag-create-form').elements.name.addEventListener('input', () => updateTagCreateButton());
+document.querySelector('#tag-panel-clear').addEventListener('click', () => clearTagPanelSelection());
 document.querySelector('#connect-form').addEventListener('submit', (event) => submitConnect(event));
 document.querySelector('#tunnel-form').addEventListener('submit', (event) => submitTunnel(event));
 document.querySelector('#settings-form').addEventListener('submit', (event) => submitSettings(event));
@@ -551,6 +719,9 @@ document.querySelectorAll('[data-close-settings]').forEach((element) => {
 });
 document.querySelectorAll('[data-close-keys]').forEach((element) => {
   element.addEventListener('click', () => closeKeysPanel());
+});
+document.querySelectorAll('[data-close-tags]').forEach((element) => {
+  element.addEventListener('click', () => closeTagPanel());
 });
 document.querySelectorAll('[data-close-file-transfer]').forEach((element) => {
   element.addEventListener('click', () => closeFileTransferModal());
@@ -580,7 +751,11 @@ document.addEventListener('contextmenu', (event) => openEditContextMenu(event));
 document.addEventListener('pointerdown', (event) => {
   if (!event.target.closest?.('#edit-context-menu')) hideEditContextMenu();
   if (!event.target.closest?.('.field-label-with-help')) closeFieldHelpPopovers();
+  schedulePointerDragOutline(event);
 });
+window.addEventListener('pointerup', () => clearAllDragOutlines());
+window.addEventListener('pointercancel', () => clearAllDragOutlines());
+window.addEventListener('blur', () => clearAllDragOutlines());
 window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !document.querySelector('#confirm-modal').hidden) {
     resolveConfirmModal(false);
@@ -588,6 +763,8 @@ window.addEventListener('keydown', (event) => {
     closeAppModal();
   } else if (event.key === 'Escape' && !document.querySelector('#settings-panel').hidden) {
     closeSettingsPanel();
+  } else if (event.key === 'Escape' && !document.querySelector('#tag-panel').hidden) {
+    closeTagPanel();
   } else if (event.key === 'Escape') {
     closeFieldHelpPopovers();
     hideEditContextMenu();
@@ -636,7 +813,9 @@ async function loadHosts() {
 }
 
 async function refreshHosts() {
-  state.hosts = await apiListHosts();
+  const [hosts, tags] = await Promise.all([apiListHosts(), apiListTags()]);
+  state.hosts = hosts;
+  state.tags = tags;
   const activeSession = state.sessions.get(state.activeSessionId);
   if (activeSession && findResource(activeSession.resourceId)) {
     state.selectedId = activeSession.resourceId;
@@ -1151,8 +1330,132 @@ function endpointInput(form, type) {
     ip: form.elements.ip.value.trim(),
     port: Number.parseInt(form.elements.port.value, 10),
     user: form.elements.user.value.trim(),
+    tags: [...state.resourceDraftTags],
     ...(type ? { type } : {}),
   };
+}
+
+function renderResourceTagOptions(selectedTags) {
+  if (selectedTags !== undefined) {
+    const seen = new Set();
+    state.resourceDraftTags = (selectedTags ?? []).reduce((tags, value) => {
+      const name = String(value ?? '').trim();
+      const key = canonicalTag(name);
+      if (!key || seen.has(key)) return tags;
+      seen.add(key);
+      tags.push(name);
+      return tags;
+    }, []);
+    state.resourceTagQuery = '';
+    document.querySelector('#resource-tag-query').value = '';
+  }
+
+  const container = document.querySelector('#resource-tag-options');
+  const selectedContainer = document.querySelector('#resource-selected-tags');
+  const queryInput = document.querySelector('#resource-tag-query');
+  const suggestionLabel = document.querySelector('#resource-tag-suggestion-label');
+  const summary = document.querySelector('#resource-tag-summary');
+  const selected = new Set(state.resourceDraftTags.map(canonicalTag));
+  const tags = mergeTagCatalog(state.tags, state.hosts);
+  const query = canonicalTag(state.resourceTagQuery);
+  const suggestions = tags.filter((tag) => !selected.has(tag.key) && (!query || tag.key.includes(query)));
+
+  selectedContainer.replaceChildren(...state.resourceDraftTags.map((tagName) => {
+    const chip = document.createElement('span');
+    chip.className = 'resource-selected-tag';
+    applyTagPalette(chip, tagName);
+    const name = document.createElement('span');
+    name.textContent = tagName;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.title = `Remove ${tagName}`;
+    remove.setAttribute('aria-label', `Remove ${tagName}`);
+    remove.append(iconElement('x'));
+    remove.addEventListener('click', () => removeResourceDraftTag(tagName));
+    chip.append(name, remove);
+    return chip;
+  }));
+
+  queryInput.placeholder = state.resourceDraftTags.length === 0 ? 'prod, milano...' : 'Add another...';
+  suggestionLabel.textContent = query ? 'Matching tags' : 'Existing tags';
+  summary.textContent = state.resourceDraftTags.length === 0
+    ? 'No tags on this system'
+    : `${state.resourceDraftTags.length} tag${state.resourceDraftTags.length === 1 ? '' : 's'} on this system`;
+
+  const options = suggestions.map((tag) => {
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = 'resource-tag-option';
+    option.title = `${tag.count} system${tag.count === 1 ? '' : 's'} tagged ${tag.name}`;
+    applyTagPalette(option, tag.name);
+    option.textContent = tag.name;
+    option.addEventListener('click', () => addResourceDraftTag(tag.name));
+    return option;
+  });
+
+  const exactMatch = tags.some((tag) => tag.key === query);
+  if (query && !exactMatch && !selected.has(query)) {
+    const create = document.createElement('button');
+    create.type = 'button';
+    create.className = 'resource-tag-create';
+    create.append(iconElement('plus'));
+    const label = document.createElement('span');
+    label.textContent = `Create "${state.resourceTagQuery.trim()}"`;
+    create.append(label);
+    create.addEventListener('click', () => createResourceDraftTag(state.resourceTagQuery));
+    options.push(create);
+  }
+
+  if (options.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'resource-tag-options-empty';
+    empty.textContent = tags.length === selected.size ? 'All existing tags already added.' : 'No matching tags.';
+    container.replaceChildren(empty);
+    return;
+  }
+
+  container.replaceChildren(...options);
+}
+
+function handleResourceTagInput(event) {
+  if (event.key === 'Enter') {
+    const query = event.currentTarget.value.trim();
+    if (!query) return;
+    event.preventDefault();
+    const existing = mergeTagCatalog(state.tags, state.hosts).find((tag) => tag.key === canonicalTag(query));
+    if (existing) addResourceDraftTag(existing.name);
+    else createResourceDraftTag(query);
+  } else if (event.key === 'Backspace' && !event.currentTarget.value && state.resourceDraftTags.length > 0) {
+    event.preventDefault();
+    removeResourceDraftTag(state.resourceDraftTags.at(-1));
+  }
+}
+
+function addResourceDraftTag(name) {
+  const key = canonicalTag(name);
+  if (!key || state.resourceDraftTags.some((tag) => canonicalTag(tag) === key)) return;
+  state.resourceDraftTags.push(String(name).trim());
+  state.resourceTagQuery = '';
+  const input = document.querySelector('#resource-tag-query');
+  input.value = '';
+  renderResourceTagOptions();
+  input.focus();
+}
+
+function removeResourceDraftTag(name) {
+  const key = canonicalTag(name);
+  state.resourceDraftTags = state.resourceDraftTags.filter((tag) => canonicalTag(tag) !== key);
+  renderResourceTagOptions();
+  document.querySelector('#resource-tag-query').focus();
+}
+
+async function createResourceDraftTag(name) {
+  const normalized = String(name ?? '').trim();
+  if (!normalized) return;
+  const created = await withBusy(() => apiCreateTag(normalized));
+  if (!created) return;
+  state.tags = [...state.tags, created];
+  addResourceDraftTag(created);
 }
 
 function scheduleHostRender() {
@@ -1166,47 +1469,72 @@ function scheduleHostRender() {
 
 function renderHosts(filter = '') {
   const container = document.querySelector('#hosts');
+  closeTagPopover();
+  clearDragOutline('hosts');
+  hostSortable?.destroy();
+  hostSortable = null;
+  destroyTagSorting();
   const query = filter.trim().toLowerCase();
-  const canReorder = query === '';
-  const rows = [];
+  renderTagFilters();
+  const hasFilters = query !== '' || state.activeTagFilters.length > 0;
+  const canReorder = !hasFilters;
+  const elements = [];
 
   if (state.localShellSupported) {
-    rows.push(resourceRow(localResource(), 'local', 0, LOCAL_RESOURCE_ID, false));
+    elements.push(resourceRow(localResource(), 'local', 0).element);
   }
-  for (const host of state.hosts) {
-    rows.push(...resourceRows(host, 'host', 0, host.id, canReorder));
+  const filteredHosts = filterResourceTree(state.hosts, {
+    query,
+    activeTags: state.activeTagFilters,
+    mode: state.tagFilterMode,
+  });
+  for (const node of filteredHosts) {
+    const block = document.createElement('div');
+    block.className = 'host-block';
+    block.dataset.hostId = node.resource.id;
+    block.append(...resourceRows(node, 'host', 0).map((row) => row.element));
+    elements.push(block);
   }
 
-  const visibleRows = rows.filter((row) => row.search.includes(query));
-  container.replaceChildren(...visibleRows.map((row) => row.element));
+  if (hasFilters && filteredHosts.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'host-filter-empty';
+    empty.textContent = 'No connection matches the current filters.';
+    elements.push(empty);
+  }
+  container.replaceChildren(...elements);
+  if (canReorder && filteredHosts.length > 1) initializeHostSorting(container);
+  initializeTagSorting();
 }
 
-function resourceRows(resource, type, depth, rootHostId, canReorder) {
-  const rows = [resourceRow(resource, type, depth, rootHostId, canReorder)];
-  for (const subsystem of resource.subsystems ?? []) {
-    rows.push(...resourceRows(subsystem, subsystem.type, depth + 1, rootHostId, canReorder));
+function resourceRows(node, type, depth) {
+  const resource = node.resource;
+  const rows = [resourceRow(resource, type, depth)];
+  for (const child of node.children) {
+    rows.push(...resourceRows(child, child.resource.type, depth + 1));
   }
   return rows;
 }
 
-function resourceRow(resource, type, depth = 0, rootHostId = resource.id, canReorder = true) {
+function resourceRow(resource, type, depth = 0) {
   const row = document.createElement('div');
   row.className = `host-row ${depth > 0 ? 'child' : ''}`;
   if (isLocalResource(resource)) row.classList.add('local-row');
   row.dataset.id = resource.id;
-  row.dataset.rootHostId = rootHostId;
   row.style.setProperty('--tree-offset', `${depth * 18}px`);
   const target = resourceTarget(resource);
-  const tooltip = `${resource.hostname} - ${target}`;
+  const tags = resourceTags(resource);
+  const tooltip = resourceTooltip(resource);
   const tunnel = tunnelForResource(resource.id);
 
   const selectButton = document.createElement('button');
   selectButton.type = 'button';
   selectButton.className = 'host-select';
   if (tunnel) selectButton.classList.add('tunnel-active');
-  selectButton.draggable = canReorder && !isLocalResource(resource);
+  if (tags.length) selectButton.classList.add('has-tags');
   selectButton.setAttribute('aria-label', tooltip);
   selectButton.dataset.tooltip = tooltip;
+  selectButton.dataset.tooltipPlacement = 'right';
   selectButton.innerHTML = `
     <span class="type"></span>
     <span class="compact-name" aria-hidden="true"></span>
@@ -1216,6 +1544,7 @@ function resourceRow(resource, type, depth = 0, rootHostId = resource.id, canReo
       </span>
       <small></small>
     </span>
+    <span class="resource-tags" aria-label="Connection tags"></span>
   `;
   if (tunnel) {
     const chip = document.createElement('span');
@@ -1228,6 +1557,14 @@ function resourceRow(resource, type, depth = 0, rootHostId = resource.id, canReo
   selectButton.querySelector('.compact-name').textContent = compactResourceName(resource.hostname);
   selectButton.querySelector('strong').textContent = resource.hostname;
   selectButton.querySelector('small').textContent = target;
+  renderResourceTagPills(selectButton.querySelector('.resource-tags'), tags, resource.id);
+  if (!isLocalResource(resource)) {
+    const tagDropTarget = document.createElement('span');
+    tagDropTarget.className = 'resource-tag-drop-target';
+    tagDropTarget.dataset.resourceId = resource.id;
+    tagDropTarget.setAttribute('aria-hidden', 'true');
+    selectButton.append(tagDropTarget);
+  }
   selectButton.addEventListener('click', () => {
     selectResource(resource);
   });
@@ -1236,103 +1573,563 @@ function resourceRow(resource, type, depth = 0, rootHostId = resource.id, canReo
     createPendingTab(resource);
     quickConnect(resource);
   });
-  selectButton.addEventListener('mouseenter', () => showSidebarTooltip(selectButton));
-  selectButton.addEventListener('focus', () => showSidebarTooltip(selectButton));
-  selectButton.addEventListener('mouseleave', () => hideSidebarTooltip());
-  selectButton.addEventListener('blur', () => hideSidebarTooltip());
-  if (canReorder && !isLocalResource(resource)) {
-    selectButton.addEventListener('dragstart', (event) => startHostDrag(event, rootHostId));
-    selectButton.addEventListener('dragend', () => endHostDrag());
-    selectButton.addEventListener('dragover', (event) => previewHostDrop(event, row));
-    selectButton.addEventListener('dragleave', () => clearHostDropPreview(row));
-    selectButton.addEventListener('drop', (event) => dropHostBlock(event, row));
-  }
+  selectButton.addEventListener('mouseenter', () => showTooltip(selectButton, state.sidebarCollapsed ? 0 : TOOLTIP_DELAY));
+  selectButton.addEventListener('focus', () => showTooltip(selectButton, state.sidebarCollapsed ? 0 : TOOLTIP_DELAY));
+  selectButton.addEventListener('mouseleave', () => hideTooltip());
+  selectButton.addEventListener('blur', () => hideTooltip());
   row.append(selectButton);
 
   return {
     element: row,
-    search: `${resource.hostname} ${resource.ip} ${resource.user} ${type}`.toLowerCase(),
   };
 }
 
-function startHostDrag(event, rootHostId) {
-  state.draggedHostId = rootHostId;
-  event.dataTransfer.effectAllowed = 'move';
-  event.dataTransfer.setData('text/plain', rootHostId);
-  document.querySelectorAll(`.host-row[data-root-host-id="${cssEscape(rootHostId)}"]`).forEach((row) => {
-    row.classList.add('dragging-block');
+function renderTagFilters() {
+  const section = document.querySelector('#tag-filters');
+  const container = document.querySelector('#tag-filter-chips');
+  const tags = mergeTagCatalog(state.tags, state.hosts);
+  const available = new Set(tags.map((tag) => tag.key));
+  state.activeTagFilters = state.activeTagFilters.filter((tag) => available.has(tag));
+  section.hidden = tags.length === 0;
+
+  const any = document.querySelector('#tag-mode-any');
+  const all = document.querySelector('#tag-mode-all');
+  any.classList.toggle('active', state.tagFilterMode === 'any');
+  all.classList.toggle('active', state.tagFilterMode === 'all');
+  any.setAttribute('aria-pressed', state.tagFilterMode === 'any' ? 'true' : 'false');
+  all.setAttribute('aria-pressed', state.tagFilterMode === 'all' ? 'true' : 'false');
+
+  const chips = tags.map((tag) => {
+    const button = document.createElement('button');
+    const active = state.activeTagFilters.includes(tag.key);
+    button.type = 'button';
+    button.className = `tag-filter-chip${active ? ' active' : ''}`;
+    button.dataset.tagKey = tag.key;
+    button.dataset.tagName = tag.name;
+    button.title = `${tag.count} connection${tag.count === 1 ? '' : 's'} tagged ${tag.name}`;
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    applyTagPalette(button, tag.name);
+
+    const dot = document.createElement('span');
+    dot.className = 'tag-dot';
+    const label = document.createElement('span');
+    label.textContent = tag.name;
+    const count = document.createElement('small');
+    count.textContent = String(tag.count);
+    button.append(dot, label, count);
+    button.addEventListener('click', () => {
+      if (Date.now() < suppressTagFilterClickUntil) return;
+      toggleTagFilter(tag.key);
+    });
+    return button;
+  });
+
+  if (state.activeTagFilters.length > 0) {
+    const clear = document.createElement('button');
+    clear.type = 'button';
+    clear.className = 'clear-tag-filters';
+    clear.title = 'Clear tag filters';
+    clear.append(iconElement('x'));
+    const label = document.createElement('span');
+    label.textContent = 'Clear';
+    clear.append(label);
+    clear.addEventListener('click', () => clearTagFilters());
+    chips.push(clear);
+  }
+
+  container.replaceChildren(...chips);
+}
+
+function renderResourceTagPills(container, tags, resourceID) {
+  if (!container) return;
+  container.dataset.resourceId = resourceID;
+  if (tags.length === 0) return;
+  const { shown, hidden } = visibleResourceTags(tags);
+  container.dataset.visibleCount = String(shown.length + (hidden.length > 0 ? 1 : 0));
+  const pills = shown.map((tag) => {
+    const pill = document.createElement('span');
+    pill.className = `resource-tag${state.activeTagFilters.includes(tag.key) ? ' active' : ''}`;
+    pill.dataset.tagKey = tag.key;
+    pill.dataset.tagName = tag.name;
+    pill.textContent = tag.name;
+    pill.title = `Tag: ${tag.name}`;
+    applyTagPalette(pill, tag.name);
+    return pill;
+  });
+  if (hidden.length > 0) {
+    const overflow = document.createElement('span');
+    overflow.className = 'resource-tag overflow';
+    overflow.dataset.resourceId = resourceID;
+    overflow.textContent = `+${hidden.length}`;
+    overflow.title = hidden.map((tag) => tag.name).join(', ');
+    overflow.setAttribute('role', 'button');
+    overflow.setAttribute('tabindex', '0');
+    overflow.setAttribute('aria-label', `Show all ${tags.length} tags`);
+    overflow.setAttribute('aria-expanded', 'false');
+    overflow.addEventListener('click', (event) => {
+      event.stopPropagation();
+      toggleTagPopover(overflow, resourceID);
+    });
+    overflow.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      event.stopPropagation();
+      toggleTagPopover(overflow, resourceID);
+    });
+    pills.push(overflow);
+  }
+  container.replaceChildren(...pills);
+}
+
+function toggleTagPopover(anchor, resourceID) {
+  if (tagPopover?.resourceID === resourceID) {
+    closeTagPopover();
+    return;
+  }
+  void openTagPopover(anchor, resourceID);
+}
+
+async function openTagPopover(anchor, resourceID) {
+  const found = findResource(resourceID);
+  const tags = resourceTags(found?.resource);
+  if (!anchor?.isConnected || tags.length <= 3) return;
+
+  closeTagPopover();
+  const request = tagPopoverRequest;
+  const root = document.createElement('div');
+  root.className = 'tag-popover-root';
+  document.body.append(root);
+  const entry = { anchor, resourceID, root, unmount: null };
+  tagPopover = entry;
+  anchor.setAttribute('aria-expanded', 'true');
+
+  const { mountTagPopover } = await import('./tag-popover/mount.js');
+  if (request !== tagPopoverRequest || tagPopover !== entry || !anchor.isConnected) {
+    root.remove();
+    return;
+  }
+  entry.unmount = mountTagPopover(root, {
+    anchor,
+    resourceId: resourceID,
+    tags,
+    oncancel: () => closeTagPopover(),
+    onDragStart: () => beginTagSorting('assigned'),
+    onDragEnd: () => finishTagSorting(),
   });
 }
 
-function endHostDrag() {
-  state.draggedHostId = null;
-  document.querySelectorAll('.host-row.dragging-block, .host-row.drop-before, .host-row.drop-after').forEach((row) => {
-    row.classList.remove('dragging-block', 'drop-before', 'drop-after');
+function closeTagPopover() {
+  tagPopoverRequest += 1;
+  if (!tagPopover) return;
+  const { anchor, root, unmount } = tagPopover;
+  tagPopover = null;
+  if (anchor?.isConnected) anchor.setAttribute('aria-expanded', 'false');
+  unmount?.();
+  root.remove();
+}
+
+function restoreTagPopover(resourceID) {
+  const anchor = [...document.querySelectorAll('.resource-tag.overflow')]
+    .find((element) => element.dataset.resourceId === resourceID);
+  if (anchor) void openTagPopover(anchor, resourceID);
+}
+
+function applyTagPalette(element, name) {
+  element.style.setProperty('--tag-hue', String(tagHue(name)));
+}
+
+function initializeTagSorting() {
+  const groupName = 'bashes-resource-tags';
+  const catalog = document.querySelector('#tag-filter-chips');
+  const removeZone = document.querySelector('#tag-remove-zone');
+
+  if (catalog.querySelector('.tag-filter-chip')) {
+    tagCatalogSortable = Sortable.create(catalog, {
+      animation: 150,
+      draggable: '.tag-filter-chip',
+      sort: false,
+      group: { name: groupName, pull: 'clone', put: false, revertClone: true },
+      forceFallback: true,
+      fallbackOnBody: true,
+      fallbackTolerance: 4,
+      ghostClass: 'tag-drag-ghost',
+      chosenClass: 'tag-drag-chosen',
+      fallbackClass: 'tag-drag-mirror',
+      onStart() {
+        beginTagSorting('catalog');
+      },
+      onMove(event) {
+        setActiveTagDropTarget(event.to.closest?.('.resource-tag-drop-target'));
+        return true;
+      },
+      onEnd() {
+        suppressTagFilterClickUntil = Date.now() + 120;
+        finishTagSorting();
+      },
+    });
+  }
+
+  document.querySelectorAll('.resource-tag-drop-target').forEach((target) => {
+    resourceTagSortables.push(Sortable.create(target, {
+      sort: false,
+      group: {
+        name: groupName,
+        pull: false,
+        put: (_to, from) => from.el?.id === 'tag-filter-chips',
+      },
+      onAdd(event) {
+        const resourceID = event.to.dataset.resourceId;
+        const tagName = event.item.dataset.tagName;
+        event.item.remove();
+        finishTagSorting();
+        void updateResourceTagAssignment(resourceID, tagName, true);
+      },
+    }));
+  });
+
+  document.querySelectorAll('.resource-tags').forEach((container) => {
+    if (!container.querySelector('.resource-tag:not(.overflow)')) return;
+    resourceTagSortables.push(Sortable.create(container, {
+      animation: 150,
+      draggable: '.resource-tag:not(.overflow)',
+      sort: false,
+      group: { name: groupName, pull: 'clone', put: false, revertClone: true },
+      forceFallback: true,
+      fallbackOnBody: true,
+      fallbackTolerance: 4,
+      ghostClass: 'tag-drag-ghost',
+      chosenClass: 'tag-drag-chosen',
+      fallbackClass: 'tag-drag-mirror',
+      onStart() {
+        beginTagSorting('assigned');
+      },
+      onMove(event) {
+        setActiveTagDropTarget(event.to.closest?.('.tag-remove-zone'));
+        return true;
+      },
+      onEnd() {
+        finishTagSorting();
+      },
+    }));
+  });
+
+  tagRemoveSortable = Sortable.create(removeZone, {
+    sort: false,
+    group: {
+      name: groupName,
+      pull: false,
+      put: (_to, from) => from.el?.classList.contains('resource-tags'),
+    },
+    onAdd(event) {
+      const resourceID = event.from.dataset.resourceId;
+      const tagName = event.item.dataset.tagName;
+      event.item.remove();
+      finishTagSorting();
+      void updateResourceTagAssignment(resourceID, tagName, false);
+    },
   });
 }
 
-function previewHostDrop(event, row) {
-  if (!state.draggedHostId) return;
-  const targetHostId = row.dataset.rootHostId;
-  if (!targetHostId || targetHostId === state.draggedHostId) return;
+function destroyTagSorting() {
+  tagCatalogSortable?.destroy();
+  tagCatalogSortable = null;
+  tagRemoveSortable?.destroy();
+  tagRemoveSortable = null;
+  resourceTagSortables.forEach((sortable) => sortable.destroy());
+  resourceTagSortables = [];
+  finishTagSorting();
+}
+
+function beginTagSorting(kind) {
+  hideTooltip();
+  clearAllDragOutlines();
+  document.documentElement.classList.add('sorting-tags', `sorting-${kind}-tag`);
+}
+
+function finishTagSorting() {
+  setActiveTagDropTarget(null);
+  document.documentElement.classList.remove('sorting-tags', 'sorting-catalog-tag', 'sorting-assigned-tag');
+}
+
+function setActiveTagDropTarget(target) {
+  if (activeTagDropTarget === target) return;
+  activeTagDropTarget?.classList.remove('active');
+  activeTagDropTarget = target;
+  activeTagDropTarget?.classList.add('active');
+}
+
+async function updateResourceTagAssignment(resourceID, tagName, assigned) {
+  const found = findResource(resourceID);
+  const normalizedName = String(tagName ?? '').trim();
+  if (!found || isLocalResource(found.resource) || !normalizedName) return;
+
+  const currentTags = resourceTags(found.resource).map((tag) => tag.name);
+  const key = canonicalTag(normalizedName);
+  const alreadyAssigned = currentTags.some((tag) => canonicalTag(tag) === key);
+  if (assigned === alreadyAssigned) return;
+  const restorePopover = tagPopover?.resourceID === resourceID;
+
+  const nextTags = assigned
+    ? [...currentTags, normalizedName]
+    : currentTags.filter((tag) => canonicalTag(tag) !== key);
+  await withBusy(async () => {
+    await apiSetResourceTags(resourceID, nextTags);
+    await refreshHosts();
+    if (restorePopover) restoreTagPopover(resourceID);
+    writeNotice(`${assigned ? 'Added' : 'Removed'} tag ${normalizedName} ${assigned ? 'to' : 'from'} ${found.resource.hostname}.`);
+  });
+}
+
+function toggleTagFilter(tag) {
+  tag = canonicalTag(tag);
+  state.activeTagFilters = state.activeTagFilters.includes(tag)
+    ? state.activeTagFilters.filter((active) => active !== tag)
+    : [...state.activeTagFilters, tag];
+  renderHosts(searchInput.value);
+  renderSelection();
+}
+
+function clearTagFilters() {
+  state.activeTagFilters = [];
+  renderHosts(searchInput.value);
+  renderSelection();
+}
+
+function setTagFilterMode(mode) {
+  state.tagFilterMode = mode === 'all' ? 'all' : 'any';
+  renderHosts(searchInput.value);
+  renderSelection();
+}
+
+function openTagPanel() {
+  state.editingTagKey = null;
+  renderTagPanel();
+
+  const panel = document.querySelector('#tag-panel');
+  panel.hidden = false;
+  requestAnimationFrame(() => panel.classList.add('open'));
+  window.setTimeout(() => document.querySelector('#tag-create-form').elements.name.focus(), 0);
+}
+
+function closeTagPanel() {
+  const panel = document.querySelector('#tag-panel');
+  panel.classList.remove('open');
+  panel.hidden = true;
+  state.editingTagKey = null;
+  restoreTerminalFocusAfterOverlay();
+}
+
+function renderTagPanel() {
+  const tags = mergeTagCatalog(state.tags, state.hosts);
+  const title = document.querySelector('#tag-panel-title');
+  const subtitle = document.querySelector('#tag-panel-subtitle');
+  const hint = document.querySelector('#tag-list-hint');
+  const status = document.querySelector('#tag-panel-status');
+  const clear = document.querySelector('#tag-panel-clear');
+  const list = document.querySelector('#tag-manager-list');
+
+  const systems = countResources(state.hosts);
+  title.textContent = 'Manage tags';
+  subtitle.textContent = `${tags.length} tag${tags.length === 1 ? '' : 's'} across ${systems} system${systems === 1 ? '' : 's'}`;
+  hint.textContent = 'Click a tag to filter';
+  status.textContent = state.activeTagFilters.length > 0
+    ? `${state.activeTagFilters.length} active filter${state.activeTagFilters.length === 1 ? '' : 's'}`
+    : 'No active filters';
+  clear.textContent = 'Clear filter';
+  clear.disabled = state.activeTagFilters.length === 0;
+
+  if (tags.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'tag-manager-empty';
+    empty.textContent = 'Create the first tag to organize your connections.';
+    list.replaceChildren(empty);
+    return;
+  }
+  list.replaceChildren(...tags.map((tag) => renderTagManagerRow(tag)));
+}
+
+function renderTagManagerRow(tag) {
+  const row = document.createElement('div');
+  const selected = state.activeTagFilters.includes(tag.key);
+  row.className = `tag-manager-row${selected ? ' selected' : ''}`;
+  applyTagPalette(row, tag.name);
+
+  if (state.editingTagKey === tag.key) {
+    const form = document.createElement('form');
+    form.className = 'tag-rename-form';
+    const input = document.createElement('input');
+    input.value = tag.name;
+    input.maxLength = 40;
+    input.required = true;
+    input.setAttribute('aria-label', `Rename ${tag.name}`);
+    const save = tagIconButton('check', 'Save tag name');
+    save.type = 'submit';
+    const cancel = tagIconButton('x', 'Cancel rename');
+    cancel.addEventListener('click', () => {
+      state.editingTagKey = null;
+      renderTagPanel();
+    });
+    form.append(input, save, cancel);
+    form.addEventListener('submit', (event) => submitRenameTag(event, tag));
+    row.append(form);
+    window.setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 0);
+    return row;
+  }
+
+  const select = document.createElement('button');
+  select.type = 'button';
+  select.className = 'tag-manager-select';
+  select.setAttribute('aria-pressed', selected ? 'true' : 'false');
+  select.title = `${selected ? 'Remove' : 'Apply'} ${tag.name} filter`;
+  const swatch = document.createElement('span');
+  swatch.className = 'tag-manager-swatch';
+  const name = document.createElement('strong');
+  name.textContent = tag.name;
+  const count = document.createElement('small');
+  count.textContent = `${tag.count} system${tag.count === 1 ? '' : 's'}`;
+  select.append(swatch, name, count);
+  select.addEventListener('click', () => toggleTagPanelTag(tag));
+
+  const actions = document.createElement('div');
+  actions.className = 'tag-manager-actions';
+  const edit = tagIconButton('pencil', `Rename ${tag.name}`);
+  edit.addEventListener('click', () => {
+    state.editingTagKey = tag.key;
+    renderTagPanel();
+  });
+  const remove = tagIconButton('trash', `Delete ${tag.name}`, 'danger-icon');
+  remove.addEventListener('click', () => deleteManagedTag(tag));
+  actions.append(edit, remove);
+  row.append(select, actions);
+  return row;
+}
+
+function tagIconButton(icon, label, className = '') {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = `tag-row-action ${className}`.trim();
+  button.title = label;
+  button.setAttribute('aria-label', label);
+  button.append(iconElement(icon));
+  return button;
+}
+
+async function submitCreateTag(event) {
   event.preventDefault();
-  event.dataTransfer.dropEffect = 'move';
-  showHostDropPreview(row, dropAfterRow(event, row));
-}
+  const input = event.currentTarget.elements.name;
+  const name = input.value.trim();
+  if (!name) return;
 
-function showHostDropPreview(row, after) {
-  document.querySelectorAll('.host-row.drop-before, .host-row.drop-after').forEach((element) => {
-    if (element !== row) element.classList.remove('drop-before', 'drop-after');
+  await withBusy(async () => {
+    await apiCreateTag(name);
+    input.value = '';
+    await refreshHosts();
+    renderTagPanel();
   });
-  row.classList.toggle('drop-before', !after);
-  row.classList.toggle('drop-after', after);
 }
 
-function clearHostDropPreview(row) {
-  row.classList.remove('drop-before', 'drop-after');
-}
-
-async function dropHostBlock(event, row) {
-  if (!state.draggedHostId) return;
-  const targetHostId = row.dataset.rootHostId;
-  if (!targetHostId || targetHostId === state.draggedHostId) return;
-
+async function submitRenameTag(event, tag) {
   event.preventDefault();
-  const after = dropAfterRow(event, row);
-  const order = movedHostOrder(state.draggedHostId, targetHostId, after);
-  endHostDrag();
-  if (!order) return;
+  const newName = event.currentTarget.querySelector('input').value.trim();
+  if (!newName) return;
+
+  await withBusy(async () => {
+    await apiRenameTag(tag.name, newName);
+    const replacement = canonicalTag(newName);
+    state.activeTagFilters = state.activeTagFilters.map((active) => active === tag.key ? replacement : active);
+    state.editingTagKey = null;
+    await refreshHosts();
+    renderTagPanel();
+  });
+}
+
+async function deleteManagedTag(tag) {
+  const accepted = await openConfirmModal({
+    kicker: 'Tags',
+    title: `Delete ${tag.name}?`,
+    message: tag.count > 0
+      ? `This tag will be removed from ${tag.count} system${tag.count === 1 ? '' : 's'}.`
+      : 'This tag is not assigned to any system.',
+    confirmLabel: 'Delete',
+  });
+  if (!accepted) return;
+
+  await withBusy(async () => {
+    await apiDeleteTag(tag.name);
+    state.activeTagFilters = state.activeTagFilters.filter((active) => active !== tag.key);
+    await refreshHosts();
+    renderTagPanel();
+  });
+}
+
+function toggleTagPanelTag(tag) {
+  toggleTagFilter(tag.key);
+  renderTagPanel();
+}
+
+function clearTagPanelSelection() {
+  clearTagFilters();
+  renderTagPanel();
+}
+
+function updateTagCreateButton() {
+  const form = document.querySelector('#tag-create-form');
+  document.querySelector('#tag-create-submit').disabled = state.busy || form.elements.name.value.trim() === '';
+}
+
+function countResources(resources) {
+  let count = 0;
+  const visit = (resource) => {
+    count += 1;
+    for (const child of resource?.subsystems ?? []) visit(child);
+  };
+  for (const resource of resources ?? []) visit(resource);
+  return count;
+}
+
+function initializeHostSorting(container) {
+  hostSortable = Sortable.create(container, {
+    animation: 170,
+    easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+    draggable: '.host-block',
+    filter: '.resource-tag, .resource-tag-drop-target',
+    preventOnFilter: false,
+    forceFallback: true,
+    fallbackOnBody: true,
+    fallbackTolerance: 4,
+    ghostClass: 'host-drag-ghost',
+    chosenClass: 'host-drag-chosen',
+    fallbackClass: 'host-drag-mirror',
+    onUnchoose() {
+      clearDragOutline('hosts');
+    },
+    onStart() {
+      hideTooltip();
+      document.documentElement.classList.add('sorting-hosts');
+    },
+    onEnd() {
+      clearDragOutline('hosts');
+      document.documentElement.classList.remove('sorting-hosts');
+      persistHostOrder(container);
+    },
+  });
+}
+
+async function persistHostOrder(container) {
+  const order = [...container.querySelectorAll(':scope > .host-block')].map((block) => block.dataset.hostId);
+  const previousOrder = state.hosts.map((host) => host.id);
+  if (order.length !== previousOrder.length || order.every((id, index) => id === previousOrder[index])) return;
 
   await withBusy(async () => {
     await apiReorderHosts(order);
     state.hosts = order.map((id) => state.hosts.find((host) => host.id === id)).filter(Boolean);
-    renderHosts(searchInput.value);
-    renderSelection();
     writeNotice('Host order updated.');
   });
-}
-
-function dropAfterRow(event, row) {
-  const rect = row.getBoundingClientRect();
-  return event.clientY > rect.top + rect.height / 2;
-}
-
-function movedHostOrder(draggedHostId, targetHostId, after) {
-  const order = state.hosts.map((host) => host.id);
-  const from = order.indexOf(draggedHostId);
-  const target = order.indexOf(targetHostId);
-  if (from < 0 || target < 0) return null;
-
-  order.splice(from, 1);
-  let insertAt = order.indexOf(targetHostId);
-  if (insertAt < 0) return null;
-  if (after) insertAt += 1;
-  order.splice(insertAt, 0, draggedHostId);
-  return order;
-}
-
-function cssEscape(value) {
-  return globalThis.CSS?.escape ? CSS.escape(value) : String(value).replace(/"/g, '\\"');
+  renderHosts(searchInput.value);
+  renderSelection();
 }
 
 function compactResourceName(name) {
@@ -1359,42 +2156,55 @@ function applySidebarState() {
   toggle.title = state.sidebarCollapsed ? 'Expand sidebar' : 'Compact sidebar';
   toggle.setAttribute('aria-label', toggle.title);
   toggle.setAttribute('aria-expanded', String(!state.sidebarCollapsed));
-  hideSidebarTooltip();
+  hideTooltip();
 }
 
-function showSidebarTooltip(anchor) {
-  hideSidebarTooltip();
-  if (state.sidebarCollapsed) {
-    renderSidebarTooltip(anchor);
+function showTooltip(anchor, delay = TOOLTIP_DELAY) {
+  hideTooltip();
+  if (delay <= 0) {
+    renderTooltip(anchor);
     return;
   }
 
-  sidebarTooltipTimer = window.setTimeout(() => {
-    sidebarTooltipTimer = 0;
-    renderSidebarTooltip(anchor);
-  }, SIDEBAR_TOOLTIP_DELAY);
+  tooltipTimer = window.setTimeout(() => {
+    tooltipTimer = 0;
+    renderTooltip(anchor);
+  }, delay);
 }
 
-function renderSidebarTooltip(anchor) {
+function renderTooltip(anchor) {
   if (!anchor.isConnected) return;
-  const tooltip = document.querySelector('#sidebar-tooltip');
+  const tooltip = document.querySelector('#app-tooltip');
   const text = anchor.dataset.tooltip;
   if (!tooltip || !text) return;
 
   const rect = anchor.getBoundingClientRect();
   tooltip.textContent = text;
-  tooltip.style.left = `${Math.round(rect.right + 10)}px`;
-  tooltip.style.top = `${Math.round(rect.top + rect.height / 2)}px`;
   tooltip.hidden = false;
+  const tooltipRect = tooltip.getBoundingClientRect();
+  const placement = anchor.dataset.tooltipPlacement || 'right';
+  const left = placement === 'bottom'
+    ? rect.left + rect.width / 2 - tooltipRect.width / 2
+    : rect.right + 10;
+  const top = placement === 'bottom'
+    ? rect.bottom + 8
+    : rect.top + rect.height / 2 - tooltipRect.height / 2;
+  tooltip.style.left = `${Math.round(clampNumber(left, 8, Math.max(8, window.innerWidth - tooltipRect.width - 8)))}px`;
+  tooltip.style.top = `${Math.round(clampNumber(top, 8, Math.max(8, window.innerHeight - tooltipRect.height - 8)))}px`;
 }
 
-function hideSidebarTooltip() {
-  if (sidebarTooltipTimer) {
-    window.clearTimeout(sidebarTooltipTimer);
-    sidebarTooltipTimer = 0;
+function hideTooltip() {
+  if (tooltipTimer) {
+    window.clearTimeout(tooltipTimer);
+    tooltipTimer = 0;
   }
-  const tooltip = document.querySelector('#sidebar-tooltip');
+  const tooltip = document.querySelector('#app-tooltip');
   if (tooltip) tooltip.hidden = true;
+}
+
+function resourceTooltip(resource) {
+  const tags = resourceTags(resource);
+  return `${resource.hostname} - ${resourceTarget(resource)}${tags.length ? ` - ${tags.map((tag) => tag.name).join(', ')}` : ''}`;
 }
 
 function createPendingTab(resource) {
@@ -1585,6 +2395,10 @@ function installTerminalKeyRepeatFallback(terminal, sessionID) {
 
 function renderTabs() {
   const tabs = document.querySelector('#session-tabs');
+  hideTooltip();
+  clearDragOutline('tabs');
+  tabSortable?.destroy();
+  tabSortable = null;
   const empty = document.querySelector('#empty-terminal');
   const sessions = [...state.sessions.values()];
   tabs.hidden = sessions.length === 0;
@@ -1594,11 +2408,16 @@ function renderTabs() {
     const tab = document.createElement('button');
     tab.type = 'button';
     tab.className = `session-tab ${session.id === state.activeSessionId ? 'active' : ''} ${session.closed ? 'closed' : ''} ${session.pending ? 'pending' : ''}`;
-    tab.draggable = true;
     tab.innerHTML = '<span></span><strong></strong>';
     tab.querySelector('span').textContent = session.closed ? 'closed' : session.pending ? 'new' : terminalKindLabel(session.kind);
     tab.querySelector('strong').textContent = session.title;
-    tab.title = session.closed ? 'Double-click to reconnect' : session.target;
+    const resource = findResource(session.resourceId)?.resource;
+    tab.dataset.tooltip = resource ? resourceTooltip(resource) : `${session.title} - ${session.target}`;
+    tab.dataset.tooltipPlacement = 'bottom';
+    tab.addEventListener('mouseenter', () => showTooltip(tab));
+    tab.addEventListener('focus', () => showTooltip(tab));
+    tab.addEventListener('mouseleave', () => hideTooltip());
+    tab.addEventListener('blur', () => hideTooltip());
     tab.addEventListener('click', () => {
       if (!session.pending) clearPendingTabs(session.resourceId);
       setActiveSession(session.id);
@@ -1610,13 +2429,10 @@ function renderTabs() {
     tab.addEventListener('dblclick', () => {
       if (session.closed) reconnectClosedSession(session.id);
     });
-    tab.addEventListener('dragstart', (event) => startSessionTabDrag(event, session.id));
-    tab.addEventListener('dragend', () => endSessionTabDrag());
-
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'tab-close';
-    close.textContent = ICON_CLOSE;
+    close.append(iconElement('x'));
     close.title = `Close ${session.title}`;
     close.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -1626,64 +2442,80 @@ function renderTabs() {
     const wrapper = document.createElement('div');
     wrapper.className = `session-tab-wrap ${session.id === state.activeSessionId ? 'active' : ''}`;
     wrapper.dataset.sessionId = session.id;
-    wrapper.addEventListener('dragover', (event) => previewSessionTabDrop(event, wrapper));
-    wrapper.addEventListener('dragleave', () => clearSessionTabDropPreview(wrapper));
-    wrapper.addEventListener('drop', (event) => dropSessionTab(event, wrapper));
     wrapper.append(tab, close);
     return wrapper;
   }));
+
+  if (sessions.length > 1) initializeTabSorting(tabs);
 
   document.querySelectorAll('.terminal-pane').forEach((pane) => {
     pane.hidden = pane.dataset.sessionId !== state.activeSessionId;
   });
 }
 
-function startSessionTabDrag(event, sessionId) {
-  state.draggedSessionId = sessionId;
-  event.dataTransfer.effectAllowed = 'move';
-  event.dataTransfer.setData('text/plain', sessionId);
-  event.currentTarget.closest('.session-tab-wrap')?.classList.add('dragging-tab');
-}
-
-function endSessionTabDrag() {
-  state.draggedSessionId = null;
-  document.querySelectorAll('.session-tab-wrap.dragging-tab, .session-tab-wrap.drop-before, .session-tab-wrap.drop-after').forEach((tab) => {
-    tab.classList.remove('dragging-tab', 'drop-before', 'drop-after');
+function initializeTabSorting(tabs) {
+  tabSortable = Sortable.create(tabs, {
+    animation: 170,
+    easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+    direction: 'horizontal',
+    draggable: '.session-tab-wrap',
+    handle: '.session-tab',
+    forceFallback: true,
+    fallbackOnBody: true,
+    fallbackTolerance: 4,
+    ghostClass: 'tab-drag-ghost',
+    chosenClass: 'tab-drag-chosen',
+    fallbackClass: 'tab-drag-mirror',
+    onUnchoose() {
+      clearDragOutline('tabs');
+    },
+    onStart() {
+      document.documentElement.classList.add('sorting-tabs');
+    },
+    onEnd() {
+      clearDragOutline('tabs');
+      document.documentElement.classList.remove('sorting-tabs');
+      const order = [...tabs.querySelectorAll(':scope > .session-tab-wrap')].map((tab) => tab.dataset.sessionId);
+      state.sessions = orderSessions(state.sessions, order);
+      renderTabs();
+      focusActiveTerminal();
+    },
   });
 }
 
-function previewSessionTabDrop(event, wrapper) {
-  if (!state.draggedSessionId) return;
-  const targetSessionId = wrapper.dataset.sessionId;
-  if (!targetSessionId || targetSessionId === state.draggedSessionId) return;
-  event.preventDefault();
-  const after = dropAfterTab(event, wrapper);
-  wrapper.classList.toggle('drop-before', !after);
-  wrapper.classList.toggle('drop-after', after);
+function schedulePointerDragOutline(event) {
+  if (event.button !== 0) return;
+  if (event.target.closest?.('.resource-tag, .tag-filter-chip')) return;
+  const tab = event.target.closest?.('.session-tab');
+  if (tabSortable && tab) {
+    scheduleDragOutline('tabs', tab.closest('.session-tab-wrap'));
+    return;
+  }
+  const host = event.target.closest?.('.host-block');
+  if (hostSortable && host) scheduleDragOutline('hosts', host);
 }
 
-function clearSessionTabDropPreview(wrapper) {
-  wrapper.classList.remove('drop-before', 'drop-after');
+function scheduleDragOutline(kind, target) {
+  clearDragOutline(kind);
+  dragOutlineTargets[kind] = target;
+  target?.classList.add('drag-outline-source');
+  dragOutlineTimers[kind] = window.setTimeout(() => {
+    dragOutlineTimers[kind] = 0;
+    document.documentElement.classList.add(`${kind}-drag-outline-ready`);
+  }, DRAG_OUTLINE_DELAY);
 }
 
-function dropSessionTab(event, wrapper) {
-  if (!state.draggedSessionId) return;
-  const targetSessionId = wrapper.dataset.sessionId;
-  if (!targetSessionId || targetSessionId === state.draggedSessionId) return;
-  event.preventDefault();
-  reorderSessionTabs(state.draggedSessionId, targetSessionId, dropAfterTab(event, wrapper));
-  endSessionTabDrag();
-  renderTabs();
-  focusActiveTerminal();
+function clearDragOutline(kind) {
+  window.clearTimeout(dragOutlineTimers[kind]);
+  dragOutlineTimers[kind] = 0;
+  dragOutlineTargets[kind]?.classList.remove('drag-outline-source');
+  dragOutlineTargets[kind] = null;
+  document.documentElement.classList.remove(`${kind}-drag-outline-ready`);
 }
 
-function dropAfterTab(event, wrapper) {
-  const rect = wrapper.getBoundingClientRect();
-  return event.clientX > rect.left + rect.width / 2;
-}
-
-function reorderSessionTabs(draggedSessionId, targetSessionId, after) {
-	state.sessions = reorderSessions(state.sessions, draggedSessionId, targetSessionId, after);
+function clearAllDragOutlines() {
+  clearDragOutline('hosts');
+  clearDragOutline('tabs');
 }
 
 function openResourcePanel(mode, hostID = '') {
@@ -1692,7 +2524,7 @@ function openResourcePanel(mode, hostID = '') {
   const typeField = document.querySelector('#subsystem-type-field');
   const parentSummary = document.querySelector('#parent-host-summary');
   const title = document.querySelector('#resource-panel-title');
-  const kicker = document.querySelector('#resource-panel-kicker');
+  const subtitle = document.querySelector('#resource-panel-subtitle');
   const submit = document.querySelector('#resource-submit');
 
   state.drawerMode = mode;
@@ -1700,20 +2532,21 @@ function openResourcePanel(mode, hostID = '') {
   state.editResourceId = null;
   form.reset();
   form.elements.port.value = '22';
+  renderResourceTagOptions([]);
 
   const subsystemMode = mode === 'subsystem';
   typeField.hidden = !subsystemMode;
   parentSummary.hidden = !subsystemMode;
   if (subsystemMode) {
-    kicker.textContent = 'Subsystem';
-    title.textContent = 'Add Subsystem';
-    submit.textContent = 'Add Subsystem';
+    title.textContent = 'Add subsystem';
+    subtitle.textContent = 'SSH session';
+    submit.textContent = 'Save subsystem';
     const parent = findResource(hostID)?.resource;
     parentSummary.textContent = parent ? `Parent: ${parent.hostname} (${parent.user}@${parent.ip || parent.hostname})` : '';
   } else {
-    kicker.textContent = 'Host';
-    title.textContent = 'Add Host';
-    submit.textContent = 'Add Host';
+    title.textContent = 'Add host';
+    subtitle.textContent = 'SSH session';
+    submit.textContent = 'Save host';
     parentSummary.textContent = '';
   }
 
@@ -1731,7 +2564,7 @@ function openEditPanel() {
   const typeField = document.querySelector('#subsystem-type-field');
   const parentSummary = document.querySelector('#parent-host-summary');
   const title = document.querySelector('#resource-panel-title');
-  const kicker = document.querySelector('#resource-panel-kicker');
+  const subtitle = document.querySelector('#resource-panel-subtitle');
   const submit = document.querySelector('#resource-submit');
   const resource = selected.resource;
   const subsystemMode = selected.type !== 'host';
@@ -1745,20 +2578,21 @@ function openEditPanel() {
   form.elements.ip.value = resource.ip;
   form.elements.port.value = String(resource.port);
   form.elements.user.value = resource.user;
+  renderResourceTagOptions(resourceTags(resource).map((tag) => tag.name));
   typeField.hidden = !subsystemMode;
   parentSummary.hidden = !subsystemMode;
   if (subsystemMode) {
     form.elements.type.value = resource.type;
-    kicker.textContent = 'Subsystem';
-    title.textContent = 'Edit Subsystem';
-    submit.textContent = 'Save Changes';
+    title.textContent = 'Edit subsystem';
+    subtitle.textContent = 'SSH session';
+    submit.textContent = 'Save changes';
     parentSummary.textContent = selected.parent
       ? `Parent: ${selected.parent.hostname} (${selected.parent.user}@${selected.parent.ip || selected.parent.hostname})`
       : '';
   } else {
-    kicker.textContent = 'Host';
-    title.textContent = 'Edit Host';
-    submit.textContent = 'Save Changes';
+    title.textContent = 'Edit host';
+    subtitle.textContent = 'SSH session';
+    submit.textContent = 'Save changes';
     parentSummary.textContent = '';
   }
 
@@ -2150,9 +2984,9 @@ function renderSelection() {
   const remove = document.querySelector('#delete-resource');
 
   if (activeSession) {
-    title.textContent = activeSession.target;
+    title.textContent = activeSession.title;
   } else if (selected) {
-    title.textContent = isLocalResource(selected.resource) ? 'localhost' : `${selected.resource.user}@${selected.resource.hostname}`;
+    title.textContent = selected.resource.hostname;
   } else {
     title.textContent = 'No session selected';
   }
@@ -2179,7 +3013,10 @@ function renderSelection() {
   fileTransfer.hidden = !FILE_TRANSFER_ENABLED;
   fileTransfer.disabled = state.busy || !selected || localSelected || !FILE_TRANSFER_ENABLED;
   tunnel.disabled = state.busy || !selected || localSelected;
-  connect.textContent = realSessionsForResource(selected.resource.id).length > 0 ? 'New Session' : 'Connect';
+  const connectLabel = realSessionsForResource(selected.resource.id).length > 0 ? 'New Session' : 'Connect';
+  connect.querySelector('.connect-action-label').textContent = connectLabel;
+  connect.title = connectLabel;
+  connect.setAttribute('aria-label', connectLabel);
   connect.disabled = state.busy || !selected;
   disconnect.disabled = state.busy || !activeSession || activeSession.closed;
   remove.disabled = state.busy || !selected || localSelected;
@@ -2794,6 +3631,7 @@ async function withBusy(task) {
 
   state.busy = true;
   renderSelection();
+  updateTagCreateButton();
   try {
     return await task();
   } catch (error) {
@@ -2802,6 +3640,7 @@ async function withBusy(task) {
   } finally {
     state.busy = false;
     renderSelection();
+    updateTagCreateButton();
   }
 }
 
@@ -3060,7 +3899,7 @@ function notify(message, level = 'info') {
   text.textContent = message;
   const close = document.createElement('button');
   close.type = 'button';
-  close.textContent = ICON_CLOSE;
+  close.append(iconElement('x'));
   close.title = 'Dismiss';
   close.addEventListener('click', () => toast.remove());
   toast.append(text, close);
@@ -3352,6 +4191,56 @@ async function apiListHosts() {
   return clone(demoStore.hosts);
 }
 
+async function apiListTags() {
+  const api = wailsAPI();
+  if (api?.ListTags) return (await api.ListTags()) ?? [];
+  return mergeTagCatalog(demoStore.tags, demoStore.hosts).map((tag) => tag.name);
+}
+
+async function apiCreateTag(name) {
+  const api = wailsAPI();
+  if (api?.CreateTag) return await api.CreateTag(name);
+  name = String(name ?? '').trim();
+  if (!name) throw new Error('Tag name is required');
+  if (demoStore.tags.some((tag) => canonicalTag(tag) === canonicalTag(name))) {
+    throw new Error(`Tag ${name} already exists`);
+  }
+  demoStore.tags.push(name);
+  return name;
+}
+
+async function apiSetResourceTags(id, tags) {
+  const api = wailsAPI();
+  if (api?.SetResourceTags) return await api.SetResourceTags(id, tags);
+  const resource = findDemoResource(id);
+  if (!resource) throw new Error(`Resource ${id} not found`);
+  resource.tags = [...tags];
+}
+
+async function apiRenameTag(currentName, newName) {
+  const api = wailsAPI();
+  if (api?.RenameTag) return await api.RenameTag(currentName, newName);
+  const currentKey = canonicalTag(currentName);
+  const index = demoStore.tags.findIndex((tag) => canonicalTag(tag) === currentKey);
+  if (index < 0) throw new Error(`Tag ${currentName} not found`);
+  const duplicate = demoStore.tags.findIndex((tag) => canonicalTag(tag) === canonicalTag(newName));
+  if (duplicate >= 0 && duplicate !== index) throw new Error(`Tag ${newName} already exists`);
+  demoStore.tags[index] = newName;
+  visitDemoResources((resource) => {
+    resource.tags = (resource.tags ?? []).map((tag) => canonicalTag(tag) === currentKey ? newName : tag);
+  });
+}
+
+async function apiDeleteTag(name) {
+  const api = wailsAPI();
+  if (api?.DeleteTag) return await api.DeleteTag(name);
+  const key = canonicalTag(name);
+  demoStore.tags = demoStore.tags.filter((tag) => canonicalTag(tag) !== key);
+  visitDemoResources((resource) => {
+    resource.tags = (resource.tags ?? []).filter((tag) => canonicalTag(tag) !== key);
+  });
+}
+
 async function apiGetAppInfo() {
   const api = wailsAPI();
   if (api?.GetAppInfo) return await api.GetAppInfo();
@@ -3389,7 +4278,7 @@ async function apiSupportsLocalShell() {
 async function apiAddHost(input) {
   const api = wailsAPI();
   if (api?.AddHost) return await api.AddHost(input);
-  const host = { id: `host-${Date.now()}`, hostname: input.hostname, ip: input.ip, port: input.port, user: input.user, subsystems: [] };
+  const host = { id: `host-${Date.now()}`, hostname: input.hostname, ip: input.ip, port: input.port, user: input.user, tags: input.tags ?? [], subsystems: [] };
   demoStore.hosts.push(host);
   return clone(host);
 }
@@ -3400,7 +4289,7 @@ async function apiAddSubsystem(hostID, input) {
   const parent = findDemoResource(hostID);
   if (!parent) throw new Error(`Resource ${hostID} not found`);
   if (!parent.subsystems) parent.subsystems = [];
-  const subsystem = { id: `${input.type}-${Date.now()}`, type: input.type, hostname: input.hostname, ip: input.ip, port: input.port, user: input.user, subsystems: [] };
+  const subsystem = { id: `${input.type}-${Date.now()}`, type: input.type, hostname: input.hostname, ip: input.ip, port: input.port, user: input.user, tags: input.tags ?? [], subsystems: [] };
   parent.subsystems.push(subsystem);
   return clone(subsystem);
 }
@@ -3414,6 +4303,7 @@ async function apiUpdateResource(id, input) {
       host.ip = input.ip;
       host.port = input.port;
       host.user = input.user;
+      host.tags = input.tags ?? host.tags ?? [];
       return;
     }
     const resource = findDemoNestedResource(host.subsystems ?? [], id);
@@ -3423,6 +4313,7 @@ async function apiUpdateResource(id, input) {
       resource.ip = input.ip;
       resource.port = input.port;
       resource.user = input.user;
+      resource.tags = input.tags ?? resource.tags ?? [];
       return;
     }
   }
@@ -3486,6 +4377,14 @@ function deleteDemoNestedResource(subsystems, id) {
     }
   }
   return false;
+}
+
+function visitDemoResources(visitor) {
+  const visit = (resource) => {
+    visitor(resource);
+    for (const child of resource.subsystems ?? []) visit(child);
+  };
+  for (const host of demoStore.hosts) visit(host);
 }
 
 async function apiStartSSHSession(input) {

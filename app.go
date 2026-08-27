@@ -178,6 +178,22 @@ func (a *App) ListHosts() ([]domain.Host, error) {
 	return a.service.ListHosts()
 }
 
+func (a *App) ListTags() ([]string, error) {
+	return a.service.ListTags()
+}
+
+func (a *App) CreateTag(name string) (string, error) {
+	return a.service.CreateTag(name)
+}
+
+func (a *App) RenameTag(currentName, newName string) error {
+	return a.service.RenameTag(currentName, newName)
+}
+
+func (a *App) DeleteTag(name string) error {
+	return a.service.DeleteTag(name)
+}
+
 func (a *App) AddHost(input application.EndpointInput) (domain.Host, error) {
 	return a.service.AddHost(input)
 }
@@ -188,6 +204,10 @@ func (a *App) AddSubsystem(hostID string, input application.EndpointInput) (doma
 
 func (a *App) UpdateResource(id string, input application.EndpointInput) error {
 	return a.service.UpdateResource(id, input)
+}
+
+func (a *App) SetResourceTags(id string, tags []string) error {
+	return a.service.SetResourceTags(id, tags)
 }
 
 func (a *App) ReorderHosts(order []string) error {
@@ -1607,6 +1627,7 @@ func (a *App) resourceByID(id string) (domain.Endpoint, error) {
 				IP:                 host.IP,
 				Port:               host.Port,
 				User:               host.User,
+				Tags:               host.Tags,
 				HostKeyFingerprint: host.HostKeyFingerprint,
 				Auth:               host.Auth,
 			}, nil

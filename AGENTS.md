@@ -57,6 +57,21 @@ Queste istruzioni valgono per tutto il repository.
 - Scrivere messaggi di commit brevi, descrittivi e coerenti.
 - Pushare su `origin` il branch corrente, salvo diversa indicazione dell'utente.
 
+## Preview build e release GitHub
+
+- Usare `.github/workflows/build-desktop.yml` per le build desktop eseguite da GitHub Actions.
+- Durante lo sviluppo su un feature branch, creare una preview build solo quando richiesta dall'utente e senza creare tag o release.
+- Per avviare una preview build usando esclusivamente Git:
+  1. aggiungere temporaneamente il nome esatto del feature branch a `on.push.branches` in `build-desktop.yml`;
+  2. creare un commit dedicato, normalmente `Trigger feature preview build`, e pusharlo sul feature branch;
+  3. ripristinare immediatamente il workflow rimuovendo il feature branch;
+  4. creare un secondo commit, normalmente `Restore release branch trigger`, e pusharlo sullo stesso branch.
+- La preview viene costruita dal primo dei due commit; il secondo deve modificare esclusivamente il trigger del workflow, quindi il codice applicativo dell'artifact deve coincidere con quello presente all'HEAD del branch.
+- Non usare `gh workflow run` per le preview del feature branch: il flusso stabilito usa i trigger `push` temporanei e non richiede autenticazione GitHub CLI.
+- Dopo avere avviato la preview, non attendere il completamento del workflow: comunicare all'utente che puo' verificarne l'esito e scaricare gli artifact dalla pagina Actions.
+- Creare tag e release ufficiali solo dopo una richiesta esplicita dell'utente e solo dal commit concordato.
+- Scrivere le release note in inglese, in forma sintetica, elencando le funzionalita' e i fix realmente inclusi nella versione.
+
 ## Qualita' tecnica
 
 - Mantenere l'app veloce e leggera come requisito primario.
@@ -74,4 +89,3 @@ Queste istruzioni valgono per tutto il repository.
 - test o build disponibili per la parte modificata;
 - validazione JSON o test di migrazione quando vengono toccati i dati;
 - riepilogo chiaro di cio' che e' stato cambiato e di cio' che non e' stato possibile verificare.
-

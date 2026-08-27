@@ -10,10 +10,11 @@ The app is built with Wails, Go and a Vite frontend. The terminal surface uses `
 
 - Host management with name, address, port and user.
 - Subsystems attached to a host, with VM, LXC and Docker resource types.
-- Fast searchable sidebar for hosts and subsystems.
-- Drag-and-drop ordering of host blocks in the sidebar; subsystem drags move the parent host block with all children.
+- Fast searchable sidebar for hosts and subsystems, with a compact mode for maximizing terminal space.
+- Persistent tags assignable while adding or editing a connection, or by dragging a sidebar tag onto a connection card; tags can be removed by drag and combined with `ANY` or `ALL` filters.
+- Animated drag-and-drop ordering of host blocks in the sidebar; subsystem drags move the parent host block with all children.
 - Contextual actions for the selected resource: edit, add subsystem, key management, delete and connect.
-- Tabbed terminal area for multiple SSH sessions, including multiple sessions to the same resource.
+- Tabbed terminal area for multiple SSH sessions, including multiple sessions to the same resource and drag-and-drop tab ordering.
 - Local `localhost` shell tab on Linux and macOS, backed by a native PTY and not stored in `hosts.json`.
 - Temporary tabs when selecting a resource before connecting.
 - Double-click a host or subsystem card to start an SSH connection.
@@ -21,8 +22,10 @@ The app is built with Wails, Go and a Vite frontend. The terminal surface uses `
 - Right-click in the terminal pastes from the clipboard.
 - Automatic terminal focus after a connection starts.
 - SSH authentication with password, SSH agent, default keys, explicit key path, Bashes-generated keys, and keys discovered in the system or custom SSH key directories.
+- Optional secure password saving through macOS Keychain, Windows Credential Manager, or a Secret Service-compatible Linux keyring.
 - SSH tunnels from a selected host or subsystem, including SOCKS proxy (`-D`), local forwarding (`-L`) and remote forwarding (`-R`), without opening a terminal tab.
 - File transfer modal with a Svelte/SVAR dual-pane file manager: local home on the left, remote SFTP home on the right.
+- File transfers through drag and drop or copy and paste, with background progress, transfer speed, completed-transfer dismissal, and a per-window hidden-file toggle.
 - Native Tools menu actions for exporting and importing the JSON datastore.
 - Native Tools menu action for importing SSH host entries from the operating system hosts file.
 - Native Help menu actions for About, README and GitHub Releases.
@@ -168,7 +171,7 @@ The important portable file is:
 hosts.json
 ```
 
-It contains hosts, subsystems, saved connection metadata and authentication preferences that are safe to store in the JSON datastore. Passwords and key passphrases are never written to this file.
+It contains hosts, subsystems, the tag catalog and connection tag assignments, saved connection metadata, and authentication preferences that are safe to store in the JSON datastore. Passwords and key passphrases are never written to this file.
 
 When requested from the password login form, Bashes stores SSH passwords in the operating system credential store: macOS Keychain, Windows Credential Manager, or a Secret Service-compatible keyring on Linux. These credentials are local to that operating-system account and are not included in database exports or backups of `hosts.json`.
 
@@ -190,7 +193,7 @@ Use:
 Tools > Export Database...
 ```
 
-This writes a validated, normalized JSON copy of the current datastore to the file selected in the native save dialog. It does not export generated private keys.
+This writes a validated, normalized JSON copy of the current datastore to the file selected in the native save dialog. Connection tags are included; saved passwords, key passphrases and generated private keys are not.
 
 ### Import
 
