@@ -62,19 +62,7 @@ func startPlatformXServer(runtimeDir string) (*serverProcess, error) {
 
 	logPath := filepath.Join(runtimeDir, "vcxsrv.log")
 	_ = os.Remove(logPath)
-	command := exec.Command(executable,
-		fmt.Sprintf(":%d", display),
-		"-multiwindow",
-		"-clipboard",
-		"-wgl",
-		"-silent-dup-error",
-		"-notrayicon",
-		"-nohostintitle",
-		"-listen", "tcp",
-		"-auth", authorityPath,
-		"-logfile", logPath,
-		"-dpi", "auto",
-	)
+	command := exec.Command(executable, xServerArguments(display, authorityPath, logPath)...)
 	command.Dir = filepath.Dir(executable)
 	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if err := command.Start(); err != nil {
@@ -84,7 +72,7 @@ func startPlatformXServer(runtimeDir string) (*serverProcess, error) {
 
 	done := make(chan error, 1)
 	go func() { done <- command.Wait() }()
-	if err := waitForXServer(address, done); err != nil {
+	if err := waitForXServer(address, cookie, done); err != nil {
 		_ = command.Process.Kill()
 		select {
 		case <-done:
@@ -163,8 +151,9 @@ func availableDisplay() (int, string, error) {
 	return 0, "", errors.New("no free local X display is available")
 }
 
-func waitForXServer(address string, done <-chan error) error {
+func waitForXServer(address string, cookie []byte, done <-chan error) error {
 	deadline := time.Now().Add(xServerWait)
+	var lastProbeError error
 	for time.Now().Before(deadline) {
 		select {
 		case err := <-done:
@@ -177,10 +166,17 @@ func waitForXServer(address string, done <-chan error) error {
 
 		connection, err := net.DialTimeout("tcp", address, 100*time.Millisecond)
 		if err == nil {
+			err = probeXServer(connection, cookie)
 			_ = connection.Close()
-			return nil
+			if err == nil {
+				return nil
+			}
+			lastProbeError = err
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+	if lastProbeError != nil {
+		return fmt.Errorf("VcXsrv did not accept an authenticated connection: %w", lastProbeError)
 	}
 	return fmt.Errorf("VcXsrv did not start within %s", xServerWait)
 }

@@ -314,6 +314,9 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci --prefix frontend
 
+      - name: Run Windows X11 tests
+        run: go test ./internal/xserver ./internal/remotessh
+
       - name: Install Wails CLI
         shell: pwsh
         run: |
