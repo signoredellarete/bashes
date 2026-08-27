@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - feature/1.7
     tags:
       - v*
   workflow_dispatch:
