@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { collectResourceTags, filterResourceTree, mergeTagCatalog, resourceMatches, resourceTags, tagHue } from './resource-tags.js';
+import {
+  collectResourceTags,
+  filterResourceTree,
+  mergeTagCatalog,
+  resourceMatches,
+  resourceTags,
+  tagHue,
+  visibleResourceTags,
+} from './resource-tags.js';
 
 const resources = [
   {
@@ -15,6 +23,13 @@ const resources = [
 describe('resource tag filtering', () => {
   it('treats omitted resource tags as an empty selection', () => {
     expect(resourceTags({ id: 'untagged' })).toEqual([]);
+  });
+
+  it('uses the final visible slot for an overflow tag', () => {
+    const tags = resourceTags({ tags: ['one', 'two', 'three', 'four', 'five'] });
+    const visible = visibleResourceTags(tags);
+    expect(visible.shown.map((tag) => tag.name)).toEqual(['one', 'two']);
+    expect(visible.hidden.map((tag) => tag.name)).toEqual(['three', 'four', 'five']);
   });
 
   it('collects nested tag counts case-insensitively', () => {

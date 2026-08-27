@@ -79,3 +79,12 @@ export function tagHue(value) {
   }
   return hash;
 }
+
+export function visibleResourceTags(tags, limit = 3) {
+  const values = tags ?? [];
+  if (values.length <= limit) return { shown: values, hidden: [] };
+  return {
+    shown: values.slice(0, Math.max(0, limit - 1)),
+    hidden: values.slice(Math.max(0, limit - 1)),
+  };
+}

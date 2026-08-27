@@ -596,11 +596,13 @@ html.hosts-drag-outline-ready .host-block.drag-outline-source .host-select {
   right: 6px;
   bottom: 5px;
   display: flex;
+  width: 108px;
   max-width: 108px;
-  flex-direction: column;
+  flex-flow: row wrap;
+  align-content: center;
   align-items: flex-end;
-  justify-content: center;
-  gap: 1px;
+  justify-content: flex-end;
+  gap: 2px;
   overflow: hidden;
 }
 
@@ -614,12 +616,16 @@ html.hosts-drag-outline-ready .host-block.drag-outline-source .host-select {
   background: oklch(0.965 0.028 var(--tag-hue));
   color: oklch(0.45 0.11 var(--tag-hue));
   cursor: grab;
-  padding: 3px 5px;
+  padding: 1px 4px;
   font-size: 9.5px;
   font-weight: 600;
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.resource-tags[data-visible-count='3'] .resource-tag {
+  max-width: 52px;
 }
 
 .resource-tag.active {
@@ -714,6 +720,46 @@ html.sorting-assigned-tag .tag-remove-zone {
   border-color: #dce1e6;
   background: #eef1f4;
   color: #66717f;
+  cursor: pointer;
+}
+
+.resource-tag.overflow:focus-visible {
+  outline: 2px solid #495479;
+  outline-offset: 1px;
+}
+
+.tag-popover-root {
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+  pointer-events: none;
+}
+
+.bashes-tag-popover-shell {
+  --wx-popup-z-index: 121;
+  --wx-popup-background: #fff;
+  --wx-popup-shadow: 0 8px 22px rgba(31, 41, 51, 0.2);
+  --wx-popup-border: 1px solid #d3d9df;
+  --wx-popup-border-radius: 6px;
+  padding: 8px;
+  pointer-events: auto;
+}
+
+.tag-popover-tags {
+  position: static;
+  display: flex;
+  width: max-content;
+  max-width: min(260px, calc(100vw - 32px));
+  flex-flow: row wrap;
+  align-content: initial;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  overflow: visible;
+}
+
+.tag-popover-tags .resource-tag {
+  max-width: 112px;
 }
 
 .host-filter-empty {

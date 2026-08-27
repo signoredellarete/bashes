@@ -49,7 +49,14 @@ import {
   persistTerminalSettings,
 } from './terminal-settings.js';
 import { repeatedKeyData } from './terminal-keyboard.js';
-import { canonicalTag, filterResourceTree, mergeTagCatalog, resourceTags, tagHue } from './resource-tags.js';
+import {
+  canonicalTag,
+  filterResourceTree,
+  mergeTagCatalog,
+  resourceTags,
+  tagHue,
+  visibleResourceTags,
+} from './resource-tags.js';
 import './styles.css';
 
 const terminalSettings = loadTerminalSettings(localStorage);
@@ -113,6 +120,8 @@ let tagRemoveSortable = null;
 let activeTagDropTarget = null;
 let resourceTagSortables = [];
 let suppressTagFilterClickUntil = 0;
+let tagPopover = null;
+let tagPopoverRequest = 0;
 const dragOutlineTimers = { hosts: 0, tabs: 0 };
 const dragOutlineTargets = { hosts: null, tabs: null };
 
@@ -1460,6 +1469,7 @@ function scheduleHostRender() {
 
 function renderHosts(filter = '') {
   const container = document.querySelector('#hosts');
+  closeTagPopover();
   clearDragOutline('hosts');
   hostSortable?.destroy();
   hostSortable = null;
@@ -1634,7 +1644,8 @@ function renderResourceTagPills(container, tags, resourceID) {
   if (!container) return;
   container.dataset.resourceId = resourceID;
   if (tags.length === 0) return;
-  const shown = tags.length > 3 ? tags.slice(0, 2) : tags.slice(0, 3);
+  const { shown, hidden } = visibleResourceTags(tags);
+  container.dataset.visibleCount = String(shown.length + (hidden.length > 0 ? 1 : 0));
   const pills = shown.map((tag) => {
     const pill = document.createElement('span');
     pill.className = `resource-tag${state.activeTagFilters.includes(tag.key) ? ' active' : ''}`;
@@ -1645,14 +1656,82 @@ function renderResourceTagPills(container, tags, resourceID) {
     applyTagPalette(pill, tag.name);
     return pill;
   });
-  if (tags.length > shown.length) {
+  if (hidden.length > 0) {
     const overflow = document.createElement('span');
     overflow.className = 'resource-tag overflow';
-    overflow.textContent = `+${tags.length - shown.length}`;
-    overflow.title = tags.slice(shown.length).map((tag) => tag.name).join(', ');
+    overflow.dataset.resourceId = resourceID;
+    overflow.textContent = `+${hidden.length}`;
+    overflow.title = hidden.map((tag) => tag.name).join(', ');
+    overflow.setAttribute('role', 'button');
+    overflow.setAttribute('tabindex', '0');
+    overflow.setAttribute('aria-label', `Show all ${tags.length} tags`);
+    overflow.setAttribute('aria-expanded', 'false');
+    overflow.addEventListener('click', (event) => {
+      event.stopPropagation();
+      toggleTagPopover(overflow, resourceID);
+    });
+    overflow.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      event.stopPropagation();
+      toggleTagPopover(overflow, resourceID);
+    });
     pills.push(overflow);
   }
   container.replaceChildren(...pills);
+}
+
+function toggleTagPopover(anchor, resourceID) {
+  if (tagPopover?.resourceID === resourceID) {
+    closeTagPopover();
+    return;
+  }
+  void openTagPopover(anchor, resourceID);
+}
+
+async function openTagPopover(anchor, resourceID) {
+  const found = findResource(resourceID);
+  const tags = resourceTags(found?.resource);
+  if (!anchor?.isConnected || tags.length <= 3) return;
+
+  closeTagPopover();
+  const request = tagPopoverRequest;
+  const root = document.createElement('div');
+  root.className = 'tag-popover-root';
+  document.body.append(root);
+  const entry = { anchor, resourceID, root, unmount: null };
+  tagPopover = entry;
+  anchor.setAttribute('aria-expanded', 'true');
+
+  const { mountTagPopover } = await import('./tag-popover/mount.js');
+  if (request !== tagPopoverRequest || tagPopover !== entry || !anchor.isConnected) {
+    root.remove();
+    return;
+  }
+  entry.unmount = mountTagPopover(root, {
+    anchor,
+    resourceId: resourceID,
+    tags,
+    oncancel: () => closeTagPopover(),
+    onDragStart: () => beginTagSorting('assigned'),
+    onDragEnd: () => finishTagSorting(),
+  });
+}
+
+function closeTagPopover() {
+  tagPopoverRequest += 1;
+  if (!tagPopover) return;
+  const { anchor, root, unmount } = tagPopover;
+  tagPopover = null;
+  if (anchor?.isConnected) anchor.setAttribute('aria-expanded', 'false');
+  unmount?.();
+  root.remove();
+}
+
+function restoreTagPopover(resourceID) {
+  const anchor = [...document.querySelectorAll('.resource-tag.overflow')]
+    .find((element) => element.dataset.resourceId === resourceID);
+  if (anchor) void openTagPopover(anchor, resourceID);
 }
 
 function applyTagPalette(element, name) {
@@ -1788,6 +1867,7 @@ async function updateResourceTagAssignment(resourceID, tagName, assigned) {
   const key = canonicalTag(normalizedName);
   const alreadyAssigned = currentTags.some((tag) => canonicalTag(tag) === key);
   if (assigned === alreadyAssigned) return;
+  const restorePopover = tagPopover?.resourceID === resourceID;
 
   const nextTags = assigned
     ? [...currentTags, normalizedName]
@@ -1795,6 +1875,7 @@ async function updateResourceTagAssignment(resourceID, tagName, assigned) {
   await withBusy(async () => {
     await apiSetResourceTags(resourceID, nextTags);
     await refreshHosts();
+    if (restorePopover) restoreTagPopover(resourceID);
     writeNotice(`${assigned ? 'Added' : 'Removed'} tag ${normalizedName} ${assigned ? 'to' : 'from'} ${found.resource.hostname}.`);
   });
 }
