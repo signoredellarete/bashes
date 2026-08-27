@@ -721,6 +721,14 @@ html.sorting-assigned-tag .tag-remove-zone {
   background: #eef1f4;
   color: #66717f;
   cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+
+.resource-tag.overflow:hover {
+  border-color: #9da6bf;
+  background: #e2e6f0;
+  box-shadow: 0 1px 3px rgba(73, 84, 121, 0.2);
+  color: #495479;
 }
 
 .resource-tag.overflow:focus-visible {
