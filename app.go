@@ -29,6 +29,7 @@ import (
 	"github.com/signoredellarete/bashes/internal/localterm"
 	"github.com/signoredellarete/bashes/internal/remotessh"
 	"github.com/signoredellarete/bashes/internal/store"
+	"github.com/signoredellarete/bashes/internal/xserver"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
@@ -48,6 +49,7 @@ type App struct {
 	shutdownOnce sync.Once
 	service      *application.Service
 	passwords    credentials.Store
+	x11Server    *xserver.Manager
 	dataPath     string
 	mu           sync.Mutex
 	sessions     map[string]*sshSession
@@ -69,6 +71,7 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 		dataPath:     dataPath,
 		service:      application.NewService(store.NewRepository(dataPath)),
 		passwords:    passwords,
+		x11Server:    xserver.NewManager(filepath.Dir(dataPath)),
 		sessions:     make(map[string]*sshSession),
 		tunnels:      make(map[string]*sshTunnel),
 		transfers:    make(map[string]*fileTransferSession),
@@ -171,6 +174,7 @@ func (a *App) beginShutdown() {
 		a.ctx = nil
 		a.lifecycleMu.Unlock()
 		a.stopAllRuntimeConnections()
+		_ = a.x11Server.Close()
 	})
 }
 
@@ -988,6 +992,7 @@ type SSHSessionInput struct {
 	TrustHostKey         bool   `json:"trustHostKey"`
 	AcceptHostKey        bool   `json:"acceptHostKey,omitempty"`
 	ReplaceHostKey       bool   `json:"replaceHostKey,omitempty"`
+	X11Forwarding        bool   `json:"x11Forwarding,omitempty"`
 	Cols                 int    `json:"cols"`
 	Rows                 int    `json:"rows"`
 }
@@ -1047,6 +1052,7 @@ type sshSession struct {
 	client     *ssh.Client
 	shell      terminalShell
 	stdin      *io.PipeWriter
+	x11Display *xserver.Display
 	cancel     context.CancelFunc
 }
 
@@ -1079,6 +1085,21 @@ func (a *App) StartSSHSession(input SSHSessionInput) (string, error) {
 		return "", err
 	}
 
+	var x11Display *xserver.Display
+	var x11Options *remotessh.X11Options
+	if input.X11Forwarding {
+		x11Display, err = a.x11Server.Acquire()
+		if err != nil {
+			client.Close()
+			return "", err
+		}
+		x11Options = &remotessh.X11Options{
+			LocalAddress: x11Display.Address,
+			LocalCookie:  x11Display.Cookie,
+			Screen:       x11Display.Screen,
+		}
+	}
+
 	stdinReader, stdinWriter := io.Pipe()
 	sessionID := fmt.Sprintf("ssh-%d", time.Now().UnixNano())
 	shell, err := remotessh.StartShell(client, remotessh.ShellOptions{
@@ -1086,9 +1107,11 @@ func (a *App) StartSSHSession(input SSHSessionInput) (string, error) {
 		Stdin:  stdinReader,
 		Stdout: eventWriter{app: a, sessionID: sessionID},
 		Stderr: eventWriter{app: a, sessionID: sessionID},
+		X11:    x11Options,
 	})
 	if err != nil {
 		stdinWriter.Close()
+		_ = x11Display.Close()
 		client.Close()
 		return "", err
 	}
@@ -1100,6 +1123,7 @@ func (a *App) StartSSHSession(input SSHSessionInput) (string, error) {
 		client:     client,
 		shell:      shell,
 		stdin:      stdinWriter,
+		x11Display: x11Display,
 		cancel:     runtimeCancel,
 	}
 
@@ -1131,6 +1155,10 @@ func (a *App) StartSSHSession(input SSHSessionInput) (string, error) {
 
 func (a *App) SupportsLocalShell() bool {
 	return goruntime.GOOS != "windows"
+}
+
+func (a *App) SupportsX11Forwarding() bool {
+	return a.x11Server.Supported()
 }
 
 func (a *App) StartLocalSession(input LocalSessionInput) (string, error) {
@@ -1413,6 +1441,7 @@ func (a *App) StopSSHSession(sessionID string) error {
 	if session.client != nil {
 		session.client.Close()
 	}
+	_ = session.x11Display.Close()
 	a.emit("ssh:closed", SSHEvent{SessionID: sessionID, Message: sessionClosedMessage(session)})
 	return nil
 }
@@ -1550,6 +1579,7 @@ func (a *App) waitForShell(ctx context.Context, session *sshSession) {
 	if session.client != nil {
 		session.client.Close()
 	}
+	_ = session.x11Display.Close()
 
 	if wasStopped {
 		return

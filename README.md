@@ -22,6 +22,7 @@ The app is built with Wails, Go and a Vite frontend. The terminal surface uses `
 - Right-click in the terminal pastes from the clipboard.
 - Automatic terminal focus after a connection starts.
 - SSH authentication with password, SSH agent, default keys, explicit key path, Bashes-generated keys, and keys discovered in the system or custom SSH key directories.
+- Optional SSH X11 forwarding on Windows, backed by the VcXsrv executable bundled with the Windows archive.
 - Optional secure password saving through macOS Keychain, Windows Credential Manager, or a Secret Service-compatible Linux keyring.
 - SSH tunnels from a selected host or subsystem, including SOCKS proxy (`-D`), local forwarding (`-L`) and remote forwarding (`-R`), without opening a terminal tab.
 - File transfer modal with a Svelte/SVAR dual-pane file manager: local home on the left, remote SFTP home on the right.
@@ -162,6 +163,20 @@ Files and folders:
 - `keys\`
 - `keys\<name>`
 - `keys\<name>.pub`
+- `runtime\x11\Xauthority`: transient X11 authentication cookie file, present while the embedded X server is active.
+- `runtime\x11\vcxsrv.log`: VcXsrv diagnostic log.
+
+### Windows X11 Forwarding
+
+The Windows archive includes VcXsrv 21.1.16.1. Enable **X11 forwarding (-X)**
+in the SSH connection panel when a remote graphical X11 application is needed.
+VcXsrv starts on demand and stops when the last X11-enabled session closes.
+
+The remote SSH server must allow X11 forwarding and normally needs `xauth`
+installed. This feature is currently experimental. The bundled VcXsrv build is
+x64; on Windows ARM64 it relies on Windows x64 emulation.
+
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for its source and license.
 
 ## Backup And Restore
 

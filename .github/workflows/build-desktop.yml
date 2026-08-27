@@ -276,6 +276,9 @@ jobs:
   windows-desktop:
     name: Windows ${{ matrix.arch }} desktop build
     runs-on: windows-2022
+    env:
+      VCXSRV_VERSION: 21.1.16.1
+      VCXSRV_SHA256: dea6c7d67d3d15b4ed45c87b63a83c88f4aceaaef5425630f0e97a0bad70d620
     needs:
       - test
       - icons
@@ -320,6 +323,35 @@ jobs:
       - name: Build Wails app
         run: wails build -platform windows/${{ matrix.arch }} -tags desktop -clean -ldflags "-X main.version=${{ github.ref_name }}" -v 2
 
+      - name: Prepare bundled VcXsrv
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP "vcxsrv-installer.exe"
+          $extractDir = Join-Path $env:RUNNER_TEMP "vcxsrv-extracted"
+          $license = Join-Path $env:RUNNER_TEMP "vcxsrv-COPYING"
+          $url = "https://github.com/marchaesen/vcxsrv/releases/download/$env:VCXSRV_VERSION/vcxsrv-64.$env:VCXSRV_VERSION.installer.noadmin.exe"
+
+          Invoke-WebRequest -Uri $url -OutFile $installer
+          $actualHash = (Get-FileHash -Path $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -ne $env:VCXSRV_SHA256) {
+            throw "VcXsrv checksum mismatch: expected $env:VCXSRV_SHA256, got $actualHash"
+          }
+
+          Remove-Item -Path $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
+          & 7z x $installer "-o$extractDir" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not extract the VcXsrv installer"
+          }
+
+          $vcxsrv = Get-ChildItem -Path $extractDir -Recurse -Filter vcxsrv.exe | Select-Object -First 1
+          if (-not $vcxsrv) {
+            throw "vcxsrv.exe was not found in the extracted installer"
+          }
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/marchaesen/vcxsrv/$env:VCXSRV_VERSION/COPYING" -OutFile $license
+          "VCXSRV_DIR=$($vcxsrv.Directory.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "VCXSRV_LICENSE=$license" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Sign Windows app
         shell: pwsh
         env:
@@ -348,12 +380,18 @@ jobs:
       - name: Package Windows app
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
+          $staging = "dist/package-windows-${{ matrix.arch }}"
+          New-Item -ItemType Directory -Force $staging | Out-Null
+          New-Item -ItemType Directory -Force "$staging/xserver" | Out-Null
           $exe = Get-ChildItem -Path build/bin -Recurse -Filter bashes.exe | Select-Object -First 1
           if (-not $exe) {
             Write-Error "No Windows executable found under build/bin"
           }
-          Compress-Archive -Path $exe.FullName -DestinationPath "dist/bashes-windows-${{ matrix.arch }}.zip" -Force
+          Copy-Item -Path $exe.FullName -Destination "$staging/bashes.exe" -Force
+          Copy-Item -Path "$env:VCXSRV_DIR/*" -Destination "$staging/xserver" -Recurse -Force
+          Copy-Item -Path $env:VCXSRV_LICENSE -Destination "$staging/xserver/COPYING" -Force
+          Copy-Item -Path THIRD_PARTY_NOTICES.md -Destination "$staging/THIRD_PARTY_NOTICES.md" -Force
+          Compress-Archive -Path "$staging/*" -DestinationPath "dist/bashes-windows-${{ matrix.arch }}.zip" -Force
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v6
