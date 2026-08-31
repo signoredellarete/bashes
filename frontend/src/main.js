@@ -22,6 +22,7 @@ import iconPlayerPlay from '@tabler/icons/filled/player-play.svg?raw';
 import '@xterm/xterm/css/xterm.css';
 import bashesLogo from './assets/bashes.png';
 import { externalHttpURL } from './external-links.js';
+import { showSavedPassword } from './password-field.js';
 import {
   errorDetail,
   isAuthError,
@@ -49,6 +50,7 @@ import {
   persistTerminalSettings,
 } from './terminal-settings.js';
 import { repeatedKeyData } from './terminal-keyboard.js';
+import { loadTunnelPreference, saveTunnelPreference } from './tunnel-preferences.js';
 import {
   canonicalTag,
   filterResourceTree,
@@ -929,19 +931,22 @@ async function submitTunnel(event) {
   const form = event.currentTarget;
   await withBusy(async () => {
     const auth = authInputFromForm(form);
+    const tunnelInput = {
+      resourceId: selected.id,
+      type: form.elements.type.value,
+      localHost: form.elements.localHost.value.trim(),
+      localPort: Number.parseInt(form.elements.localPort.value, 10),
+      remoteHost: form.elements.remoteHost.value.trim(),
+      remotePort: Number.parseInt(form.elements.remotePort.value, 10),
+      ...auth,
+      trustHostKey: form.elements.trustHostKey.checked,
+    };
     try {
-      const tunnel = await startSSHTunnelWithHostKeyPrompt({
-        resourceId: selected.id,
-        type: form.elements.type.value,
-        localHost: form.elements.localHost.value.trim(),
-        localPort: Number.parseInt(form.elements.localPort.value, 10),
-        remoteHost: form.elements.remoteHost.value.trim(),
-        remotePort: Number.parseInt(form.elements.remotePort.value, 10),
-        ...auth,
-        trustHostKey: form.elements.trustHostKey.checked,
-      }, selected);
+      const tunnel = await startSSHTunnelWithHostKeyPrompt(tunnelInput, selected);
       state.tunnels.set(tunnel.tunnelId, tunnel);
+      saveTunnelPreference(localStorage, selected.id, tunnelInput);
       form.dataset.hadSavedPassword = String(auth.savePassword === true);
+      showSavedPassword(form.elements.password, auth.savePassword === true);
       await refreshHosts();
       renderHosts(searchInput.value);
       renderTunnelStatus();
@@ -2676,11 +2681,12 @@ async function openTunnelPanel() {
   const panel = document.querySelector('#tunnel-panel');
   const form = document.querySelector('#tunnel-form');
   form.reset();
-  form.elements.type.value = 'socks';
-  form.elements.localHost.value = '127.0.0.1';
-  form.elements.localPort.value = '1080';
-  form.elements.remoteHost.value = '127.0.0.1';
-  form.elements.remotePort.value = '80';
+  const preference = loadTunnelPreference(localStorage, selected.id);
+  form.elements.type.value = preference?.type || 'socks';
+  form.elements.localHost.value = preference?.localHost || '127.0.0.1';
+  form.elements.localPort.value = String(preference?.localPort || 1080);
+  form.elements.remoteHost.value = preference?.remoteHost || '127.0.0.1';
+  form.elements.remotePort.value = String(preference?.remotePort || 80);
   form.elements.trustHostKey.checked = trustHostKeyFromPreference(selected);
   renderKeyOptions(form.elements.keyName, true);
   applyConnectDefaults(form, selected);
@@ -3175,6 +3181,7 @@ function applyConnectDefaults(form, resource) {
   form.elements.keyName.value = '';
   form.elements.privateKeyPath.value = '';
   form.elements.password.value = '';
+  showSavedPassword(form.elements.password, false);
   form.elements.savePassword.checked = false;
   form.elements.privateKeyPassphrase.value = '';
   if (!auth) {
@@ -3214,11 +3221,13 @@ async function applySavedPasswordDefault(form, resource) {
   if (!form?.elements?.savePassword) return;
   form.elements.savePassword.checked = false;
   form.dataset.hadSavedPassword = 'false';
+  showSavedPassword(form.elements.password, false);
   if (resource?.auth?.method !== 'password') return;
   try {
     const hasSavedPassword = await apiHasSavedPassword(resource.id);
     form.elements.savePassword.checked = hasSavedPassword;
     form.dataset.hadSavedPassword = String(hasSavedPassword);
+    showSavedPassword(form.elements.password, hasSavedPassword);
   } catch {
     // The keyring error is reported if the user explicitly requests password storage.
   }
