@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - fix/saved-password-tunnel-defaults
     tags:
       - v*
   workflow_dispatch:
