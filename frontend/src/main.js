@@ -22,7 +22,7 @@ import iconPlayerPlay from '@tabler/icons/filled/player-play.svg?raw';
 import '@xterm/xterm/css/xterm.css';
 import bashesLogo from './assets/bashes.png';
 import { externalHttpURL } from './external-links.js';
-import { showSavedPassword } from './password-field.js';
+import { passwordFieldValue, placeCaretAfterSavedPassword, showSavedPassword } from './password-field.js';
 import {
   errorDetail,
   isAuthError,
@@ -2658,7 +2658,9 @@ function focusConnectPasswordInput(form) {
             ? form.elements.privateKeyPath
             : form.elements.authMethod;
       target?.focus();
-      target?.select?.();
+      if (!(method === 'password' && placeCaretAfterSavedPassword(target))) {
+        target?.select?.();
+      }
     });
   }, 0);
 }
@@ -3119,7 +3121,7 @@ function authInputFromForm(form) {
   if (method === 'password') {
     const savePassword = form.elements.savePassword.checked;
     return {
-      password: form.elements.password.value,
+      password: passwordFieldValue(form.elements.password, form.dataset.hadSavedPassword === 'true'),
       managePassword: savePassword || form.dataset.hadSavedPassword === 'true',
       savePassword,
       keyName: '',

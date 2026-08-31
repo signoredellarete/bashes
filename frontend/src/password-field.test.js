@@ -1,19 +1,41 @@
 import { describe, expect, it } from 'vitest';
-import { SAVED_PASSWORD_PLACEHOLDER, showSavedPassword } from './password-field.js';
+import {
+  passwordFieldValue,
+  placeCaretAfterSavedPassword,
+  SAVED_PASSWORD_MASK,
+  showSavedPassword,
+} from './password-field.js';
 
 describe('saved password field', () => {
-  it('shows a placeholder without changing the field value', () => {
+  it('shows a masked value while preserving the keyring password', () => {
     const input = { value: '', placeholder: '' };
     showSavedPassword(input, true);
 
-    expect(input.value).toBe('');
-    expect(input.placeholder).toBe(SAVED_PASSWORD_PLACEHOLDER);
+    expect(input.value).toBe(SAVED_PASSWORD_MASK);
+    expect(input.placeholder).toBe('');
+    expect(passwordFieldValue(input, true)).toBe('');
   });
 
-  it('clears the placeholder when no password is stored', () => {
-    const input = { value: '', placeholder: SAVED_PASSWORD_PLACEHOLDER };
+  it('uses changed field content as the replacement password', () => {
+    const input = { value: 'replacement', placeholder: '' };
+    expect(passwordFieldValue(input, true)).toBe('replacement');
+  });
+
+  it('clears only the saved-password mask', () => {
+    const input = { value: SAVED_PASSWORD_MASK, placeholder: '' };
     showSavedPassword(input, false);
 
-    expect(input.placeholder).toBe('');
+    expect(input.value).toBe('');
+  });
+
+  it('places the caret after the saved-password mask', () => {
+    const positions = [];
+    const input = {
+      value: SAVED_PASSWORD_MASK,
+      setSelectionRange: (start, end) => positions.push([start, end]),
+    };
+
+    expect(placeCaretAfterSavedPassword(input)).toBe(true);
+    expect(positions).toEqual([[SAVED_PASSWORD_MASK.length, SAVED_PASSWORD_MASK.length]]);
   });
 });
