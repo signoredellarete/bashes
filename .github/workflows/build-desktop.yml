@@ -462,7 +462,11 @@ jobs:
             exit 1
           fi
 
-          changes="$(git for-each-ref "refs/tags/$GITHUB_REF_NAME" --format='%(contents)')"
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          changes=""
+          if [ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME" 2>/dev/null || true)" = "tag" ]; then
+            changes="$(git for-each-ref "refs/tags/$GITHUB_REF_NAME" --format='%(contents)')"
+          fi
           if [ -z "$changes" ]; then
             previous_tag="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
             if [ -n "$previous_tag" ]; then
