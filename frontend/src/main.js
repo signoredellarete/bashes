@@ -50,6 +50,7 @@ import {
   persistTerminalSettings,
 } from './terminal-settings.js';
 import { repeatedKeyData } from './terminal-keyboard.js';
+import { createOrderedWriter } from './ordered-writer.js';
 import { loadTunnelPreference, saveTunnelPreference } from './tunnel-preferences.js';
 import {
   canonicalTag,
@@ -2296,10 +2297,11 @@ function createSession(sessionID, resource, kind = 'ssh') {
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(pane);
-  installTerminalKeyRepeatFallback(terminal, sessionID);
+  const writeInput = createOrderedWriter((data) => apiWriteSSHSession(sessionID, data));
+  installTerminalKeyRepeatFallback(terminal, sessionID, writeInput);
   terminal.onData((data) => {
     if (state.sessions.get(sessionID)?.closed) return;
-    apiWriteSSHSession(sessionID, data).catch((error) => {
+    writeInput(data).catch((error) => {
       writeNotice(`${terminalKindLabel(kind)} input error: ${error?.message ?? error}`);
     });
   });
@@ -2315,7 +2317,7 @@ function createSession(sessionID, resource, kind = 'ssh') {
     readClipboard()
       .then((text) => {
         if (state.sessions.get(sessionID)?.closed) return undefined;
-        if (text) return apiWriteSSHSession(sessionID, text);
+        if (text) return writeInput(text);
         return undefined;
       })
       .catch(() => {});
@@ -2367,7 +2369,7 @@ function terminalOptions(disableStdin = false) {
   };
 }
 
-function installTerminalKeyRepeatFallback(terminal, sessionID) {
+function installTerminalKeyRepeatFallback(terminal, sessionID, writeInput) {
   terminal.attachCustomKeyEventHandler((event) => {
     const session = state.sessions.get(sessionID);
     if (session?.closed && event.type === 'keydown') {
@@ -2390,7 +2392,7 @@ function installTerminalKeyRepeatFallback(terminal, sessionID) {
     if (!data) return true;
 
     event.preventDefault();
-    apiWriteSSHSession(sessionID, data).catch((error) => {
+    writeInput(data).catch((error) => {
       const session = state.sessions.get(sessionID);
       writeNotice(`${terminalKindLabel(session?.kind)} input error: ${error?.message ?? error}`);
     });
