@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - fix/terminal-response-order
     tags:
       - v*
   workflow_dispatch:
