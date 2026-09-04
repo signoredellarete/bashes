@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - feature/remote-file-open
     tags:
       - v*
   workflow_dispatch:
