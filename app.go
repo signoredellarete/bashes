@@ -43,17 +43,19 @@ const (
 )
 
 type App struct {
-	ctx          context.Context
-	lifecycleMu  sync.RWMutex
-	shutdownOnce sync.Once
-	service      *application.Service
-	passwords    credentials.Store
-	dataPath     string
-	mu           sync.Mutex
-	sessions     map[string]*sshSession
-	tunnels      map[string]*sshTunnel
-	transfers    map[string]*fileTransferSession
-	transferJobs map[string]*fileTransferJob
+	ctx              context.Context
+	lifecycleMu      sync.RWMutex
+	shutdownOnce     sync.Once
+	service          *application.Service
+	passwords        credentials.Store
+	dataPath         string
+	mu               sync.Mutex
+	sessions         map[string]*sshSession
+	tunnels          map[string]*sshTunnel
+	transfers        map[string]*fileTransferSession
+	transferJobs     map[string]*fileTransferJob
+	openFile         func(string) error
+	openFileCacheDir string
 }
 
 func NewApp(dataPath string) *App {
@@ -66,13 +68,15 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 	}
 
 	return &App{
-		dataPath:     dataPath,
-		service:      application.NewService(store.NewRepository(dataPath)),
-		passwords:    passwords,
-		sessions:     make(map[string]*sshSession),
-		tunnels:      make(map[string]*sshTunnel),
-		transfers:    make(map[string]*fileTransferSession),
-		transferJobs: make(map[string]*fileTransferJob),
+		dataPath:         dataPath,
+		service:          application.NewService(store.NewRepository(dataPath)),
+		passwords:        passwords,
+		sessions:         make(map[string]*sshSession),
+		tunnels:          make(map[string]*sshTunnel),
+		transfers:        make(map[string]*fileTransferSession),
+		transferJobs:     make(map[string]*fileTransferJob),
+		openFile:         openFileWithDefaultApplication,
+		openFileCacheDir: defaultOpenFileCacheDir(dataPath),
 	}
 }
 

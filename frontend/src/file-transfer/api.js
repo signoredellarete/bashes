@@ -60,6 +60,10 @@ export async function startUploadJob(sessionID, paths, targetId, move = false) {
   return await appAPI('StartFileTransferUploadJob')({ sessionId: sessionID, paths, targetId, move });
 }
 
+export async function startOpenJob(sessionID, id) {
+  return await appAPI('StartFileTransferOpenJob')({ sessionId: sessionID, id });
+}
+
 export async function listJobs(sessionID) {
   return await appAPI('ListFileTransferJobs')(sessionID);
 }

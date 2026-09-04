@@ -26,6 +26,7 @@ The app is built with Wails, Go and a Vite frontend. The terminal surface uses `
 - SSH tunnels from a selected host or subsystem, including SOCKS proxy (`-D`), local forwarding (`-L`) and remote forwarding (`-R`), without opening a terminal tab.
 - File transfer modal with a Svelte/SVAR dual-pane file manager: local home on the left, remote SFTP home on the right.
 - File transfers through drag and drop or copy and paste, with background progress, transfer speed, completed-transfer dismissal, and a per-window hidden-file toggle.
+- Open common local or remote documents and media with the operating system's default application; remote files are downloaded to a temporary cache with transfer progress first.
 - Native Tools menu actions for exporting and importing the JSON datastore.
 - Native Tools menu action for importing SSH host entries from the operating system hosts file.
 - Native Help menu actions for About, README and GitHub Releases.
@@ -113,6 +114,8 @@ Files and folders:
 - `keys/<name>`: generated private key.
 - `keys/<name>.pub`: generated public key.
 
+Remote files opened from the file manager are cached under `${XDG_CACHE_HOME:-$HOME/.cache}/Bashes/opened-files/`. Cached items older than seven days are removed when another remote file is opened.
+
 The Linux install/update script writes the application binary and launcher files for the current user:
 
 ```text
@@ -141,6 +144,8 @@ Files and folders:
 - `keys/<name>`
 - `keys/<name>.pub`
 
+Remote files opened from the file manager are cached under `~/Library/Caches/Bashes/opened-files/`. Cached items older than seven days are removed when another remote file is opened.
+
 ### Windows
 
 ```text
@@ -162,6 +167,8 @@ Files and folders:
 - `keys\`
 - `keys\<name>`
 - `keys\<name>.pub`
+
+Remote files opened from the file manager are cached under `%LOCALAPPDATA%\Bashes\opened-files\`. Cached items older than seven days are removed when another remote file is opened.
 
 ## Backup And Restore
 
