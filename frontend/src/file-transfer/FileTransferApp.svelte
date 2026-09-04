@@ -1,6 +1,6 @@
 <script>
   import { onDestroy, onMount } from 'svelte';
-	import { Filemanager, WillowDark } from '@svar-ui/svelte-filemanager';
+	import { Filemanager, WillowDark, getMenuOptions } from '@svar-ui/svelte-filemanager';
 	import { isAuthError, isCredentialStoreError, isHostKeyMismatchError, isUnknownHostKeyError } from '../ssh-errors.js';
 	import { visibleFileEntries } from './file-visibility.js';
   import {
@@ -16,6 +16,7 @@
     resolveDroppedFilePaths,
     startCopyJob,
     startFileTransfer,
+    startOpenJob,
     startUploadJob,
   } from './api.js';
 
@@ -246,9 +247,28 @@
     return false;
   }
 
-  function handleOpenFile() {
-    status = 'Preview is not enabled for this transfer view';
+  async function handleOpenFile(event) {
+    await runOperation(async () => {
+      const id = event?.id;
+      if (!isTransferItem(id)) throw new Error('Select a file to open.');
+      const job = await startOpenJob(session.sessionId, id);
+      if (job?.jobId) {
+        trackJob(job);
+        status = `Opening ${basename(id)}...`;
+      } else {
+        status = `Opened ${basename(id)}`;
+      }
+    });
     return false;
+  }
+
+  function fileManagerMenuOptions(mode) {
+    const options = getMenuOptions(mode) ?? [];
+    if (mode !== 'file') return options;
+    return [
+      { icon: 'wxi-eye', text: 'Open', id: 'open' },
+      ...options,
+    ];
   }
 
   async function provide(id) {
@@ -342,19 +362,24 @@
 
   function updateStatusFromJob(job) {
     if (job.status === 'completed') {
+      if (job.operation === 'open') {
+        status = `Opened ${displayName(job.current || job.sourceIds?.[0])}`;
+        return;
+      }
       status = `${job.move ? 'Moved' : 'Copied'} ${job.sourceIds?.length || job.sourcePaths?.length || 1} item${(job.sourceIds?.length || job.sourcePaths?.length || 1) === 1 ? '' : 's'}`;
       return;
     }
     if (job.status === 'failed') {
       error = job.error || 'File transfer failed.';
-      status = 'Transfer failed';
+      status = job.operation === 'open' ? 'Open failed' : 'Transfer failed';
       return;
     }
     if (job.status === 'canceled') {
       status = 'Transfer canceled';
       return;
     }
-    status = `${job.move ? 'Moving' : 'Copying'} ${formatBytes(job.transferredBytes)}${job.totalBytes ? ` / ${formatBytes(job.totalBytes)}` : ''}`;
+    const action = job.operation === 'open' ? 'Opening' : job.move ? 'Moving' : 'Copying';
+    status = `${action} ${formatBytes(job.transferredBytes)}${job.totalBytes ? ` / ${formatBytes(job.totalBytes)}` : ''}`;
   }
 
   async function cancelTransferJob(jobId) {
@@ -851,6 +876,7 @@
           mode="panels"
           preview={false}
           icons={localIcon}
+          menuOptions={fileManagerMenuOptions}
           panels={[
             { path: '/local', selected: [] },
             { path: '/remote', selected: [] },
