@@ -79,6 +79,11 @@ type FileTransferUploadInput struct {
 	Move      bool     `json:"move"`
 }
 
+type FileTransferOpenInput struct {
+	SessionID string `json:"sessionId"`
+	ID        string `json:"id"`
+}
+
 type FileTransferJobInfo struct {
 	JobID            string   `json:"jobId"`
 	SessionID        string   `json:"sessionId"`
@@ -92,6 +97,7 @@ type FileTransferJobInfo struct {
 	TransferredBytes int64    `json:"transferredBytes"`
 	Current          string   `json:"current,omitempty"`
 	Error            string   `json:"error,omitempty"`
+	Operation        string   `json:"operation,omitempty"`
 	StartedAt        string   `json:"startedAt,omitempty"`
 	FinishedAt       string   `json:"finishedAt,omitempty"`
 }
@@ -121,6 +127,7 @@ type fileTransferJob struct {
 	cancel   context.CancelFunc
 	done     chan struct{}
 	lastEmit time.Time
+	openPath string
 }
 
 func (a *App) StartFileTransfer(input SSHSessionInput) (FileTransferSessionInfo, error) {
@@ -357,6 +364,71 @@ func (a *App) StartFileTransferUploadJob(input FileTransferUploadInput) (FileTra
 	return job.snapshot(), nil
 }
 
+func (a *App) StartFileTransferOpenJob(input FileTransferOpenInput) (FileTransferJobInfo, error) {
+	session, err := a.fileTransfer(input.SessionID)
+	if err != nil {
+		return FileTransferJobInfo{}, err
+	}
+	scope, rel, err := parseTransferID(input.ID)
+	if err != nil {
+		return FileTransferJobInfo{}, err
+	}
+	if rel == "" {
+		return FileTransferJobInfo{}, errors.New("select a file to open")
+	}
+	if err := validateOpenableFile(rel); err != nil {
+		return FileTransferJobInfo{}, err
+	}
+
+	session.mu.Lock()
+	info, err := session.stat(scope, rel)
+	var localPath string
+	if err == nil && scope == "local" {
+		localPath, err = session.localPath(rel)
+	}
+	session.mu.Unlock()
+	if err != nil {
+		return FileTransferJobInfo{}, err
+	}
+	if info.IsDir() {
+		return FileTransferJobInfo{}, errors.New("folders cannot be opened with an external application")
+	}
+
+	if scope == "local" {
+		if err := a.openFile(localPath); err != nil {
+			return FileTransferJobInfo{}, fmt.Errorf("open file with default application: %w", err)
+		}
+		return FileTransferJobInfo{Operation: "open", Status: "completed", Current: input.ID}, nil
+	}
+
+	jobID := fmt.Sprintf("file-open-%d", time.Now().UnixNano())
+	openPath := filepath.Join(a.openFileCacheDir, jobID, cacheFileName(rel))
+	ctx, cancel := context.WithCancel(context.Background())
+	job := &fileTransferJob{
+		cancel:   cancel,
+		done:     make(chan struct{}),
+		openPath: openPath,
+		info: FileTransferJobInfo{
+			JobID:      jobID,
+			SessionID:  session.id,
+			ResourceID: session.resourceID,
+			SourceIDs:  []string{input.ID},
+			Status:     "queued",
+			Operation:  "open",
+			StartedAt:  time.Now().Format(time.RFC3339),
+		},
+	}
+	if err := a.reserveFileTransferJob(job); err != nil {
+		cancel()
+		return FileTransferJobInfo{}, err
+	}
+	_ = pruneOpenFileCache(a.openFileCacheDir, openFileCacheRetention)
+	a.emitFileTransferJob(job, true)
+
+	go a.runFileTransferOpenJob(ctx, session, job, rel)
+	return job.snapshot(), nil
+}
+
 func (a *App) ListFileTransferJobs(sessionID string) ([]FileTransferJobInfo, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	out := []FileTransferJobInfo{}
@@ -467,6 +539,29 @@ func (a *App) runFileTransferUploadJob(ctx context.Context, session *fileTransfe
 	err := session.uploadJob(ctx, job, sourcePaths, input, func(force bool) {
 		a.emitFileTransferJob(job, force)
 	})
+	a.finishFileTransferJob(job, err)
+}
+
+func (a *App) runFileTransferOpenJob(ctx context.Context, session *fileTransferSession, job *fileTransferJob, remoteRel string) {
+	job.update(func(info *FileTransferJobInfo) {
+		info.Status = "running"
+		info.Current = transferID("remote", remoteRel)
+	})
+	a.emitFileTransferJob(job, true)
+
+	err := session.downloadRemoteFileWithProgress(ctx, job, remoteRel, job.openPath, func(force bool) {
+		a.emitFileTransferJob(job, force)
+	})
+	if err == nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			err = ctxErr
+		} else if openErr := a.openFile(job.openPath); openErr != nil {
+			err = fmt.Errorf("open file with default application: %w", openErr)
+		}
+	}
+	if err != nil {
+		_ = os.RemoveAll(filepath.Dir(job.openPath))
+	}
 	a.finishFileTransferJob(job, err)
 }
 
@@ -1142,6 +1237,74 @@ func (s *fileTransferSession) copyAbsoluteLocalWithProgress(ctx context.Context,
 		})
 		emit(false)
 	})
+}
+
+func (s *fileTransferSession) downloadRemoteFileWithProgress(ctx context.Context, job *fileTransferJob, remoteRel, localPath string, emit func(bool)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	remotePath, err := s.remotePath(remoteRel)
+	if err != nil {
+		return err
+	}
+	info, err := s.sftp.Stat(remotePath)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return errors.New("folders cannot be opened with an external application")
+	}
+	job.update(func(jobInfo *FileTransferJobInfo) {
+		jobInfo.TotalBytes = info.Size()
+		jobInfo.Current = transferID("remote", remoteRel)
+	})
+	emit(true)
+
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o700); err != nil {
+		return fmt.Errorf("create file cache: %w", err)
+	}
+	tempPath := localPath + ".partial"
+	_ = os.Remove(tempPath)
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	reader, err := s.sftp.Open(remotePath)
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+	writer, err := os.OpenFile(tempPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	copyErr := copyWithProgress(ctx, writer, reader, func(written int64) {
+		job.update(func(jobInfo *FileTransferJobInfo) {
+			jobInfo.TransferredBytes += written
+		})
+		emit(false)
+	})
+	closeErr := writer.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := os.Rename(tempPath, localPath); err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }
 
 func (s *fileTransferSession) transferSizeUnlocked(scope, rel string) (int64, error) {

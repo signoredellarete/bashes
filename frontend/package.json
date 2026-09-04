@@ -6,6 +6,7 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite --host 127.0.0.1",
+    "postinstall": "node scripts/patch-svar-filemanager.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run"
   },
