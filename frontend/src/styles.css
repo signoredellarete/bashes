@@ -2722,6 +2722,10 @@ html.sorting-tags * {
   max-width: calc(50% - 5px);
 }
 
+.transfer-manager .wx-scroll {
+  overflow-y: auto !important;
+}
+
 .transfer-shell.dragging .transfer-manager {
   outline: 1px dashed #495479;
   outline-offset: -8px;
