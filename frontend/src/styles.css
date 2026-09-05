@@ -2690,6 +2690,7 @@ html.sorting-tags * {
 .transfer-manager {
   position: relative;
   flex: 1 1 auto;
+  height: 100%;
   width: 100%;
   min-width: 0;
   min-height: 0;
@@ -2720,10 +2721,6 @@ html.sorting-tags * {
   flex: 0 1 calc(50% - 5px);
   min-width: 0;
   max-width: calc(50% - 5px);
-}
-
-.transfer-manager .wx-scroll {
-  overflow-y: auto !important;
 }
 
 .transfer-shell.dragging .transfer-manager {
