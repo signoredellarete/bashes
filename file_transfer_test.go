@@ -35,6 +35,37 @@ func TestParseTransferID(t *testing.T) {
 	}
 }
 
+func TestRemoteTransferID(t *testing.T) {
+	tests := []struct {
+		name   string
+		root   string
+		target string
+		want   string
+	}{
+		{name: "unix home", root: "/", target: "/home/alice", want: "/remote/home/alice"},
+		{name: "filesystem root", root: "/", target: "/", want: "/remote"},
+		{name: "chroot home", root: "/srv/sftp", target: "/srv/sftp/home/alice", want: "/remote/home/alice"},
+		{name: "outside root", root: "/srv/sftp", target: "/home/alice", want: "/remote"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := remoteTransferID(tt.root, tt.target); got != tt.want {
+				t.Fatalf("remoteTransferID(%q, %q) = %q, want %q", tt.root, tt.target, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRemoteRelativePathUsesPathBoundaries(t *testing.T) {
+	if _, ok := remoteRelativePath("/srv/sftp", "/srv/sftp-other/file"); ok {
+		t.Fatal("remoteRelativePath() accepted a sibling with a shared prefix")
+	}
+	if got, ok := remoteRelativePath("/", "/work/team"); !ok || got != "work/team" {
+		t.Fatalf("remoteRelativePath() = (%q, %t), want (%q, true)", got, ok, "work/team")
+	}
+}
+
 func TestValidateCopyDestinationRejectsSelfAndDescendant(t *testing.T) {
 	tests := []struct {
 		name      string
