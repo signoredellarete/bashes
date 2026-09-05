@@ -3,6 +3,7 @@
 	import { Filemanager, WillowDark, getMenuOptions } from '@svar-ui/svelte-filemanager';
 	import { isAuthError, isCredentialStoreError, isHostKeyMismatchError, isUnknownHostKeyError } from '../ssh-errors.js';
 	import { visibleFileEntries } from './file-visibility.js';
+	import { normalizeRemoteStartId, remotePathChain } from './remote-path.js';
   import {
 		cancelJob,
 		closeFileTransfer,
@@ -29,6 +30,8 @@
 
   let api = null;
   let data = roots;
+  let remoteStartId = '/remote';
+  let initialLoad = null;
   let managerElement = null;
   let transferShell = null;
   let session = null;
@@ -80,15 +83,18 @@
     busy = true;
     error = '';
     try {
-      session = await startFileTransfer({
+      const nextSession = await startFileTransfer({
         resourceId: resource.id,
         trustHostKey: trustHostKeyFromResource(),
         ...authInput,
       });
+      remoteStartId = normalizeRemoteStartId(nextSession.remoteStartId);
+      initialLoad = null;
+      session = nextSession;
       if (authInput.managePassword) hadSavedPassword = authInput.savePassword === true;
       needsPassword = false;
       password = '';
-      status = `Local: ${session.localRoot} | Remote: ${session.remoteRoot}`;
+      status = `Local: ${session.localRoot} | Remote: ${session.remoteHome || session.remoteRoot}`;
       await loadJobs();
       await loadInitial();
     } catch (err) {
@@ -135,7 +141,9 @@
     cleanupDragEvents();
     cleanupDragEvents = setupDragAndDrop();
     setupDraggableItems();
-    loadInitial();
+    void loadInitial().catch((err) => {
+      error = String(err?.message ?? err);
+    });
   }
 
   async function submitPassword(event) {
@@ -165,8 +173,14 @@
 
   async function loadInitial() {
     if (!api || !session?.sessionId) return;
+    if (!initialLoad) initialLoad = loadInitialPaths();
+    await initialLoad;
+  }
+
+  async function loadInitialPaths() {
     await provide('/local');
-    await provide('/remote');
+    for (const id of remotePathChain(remoteStartId)) await provide(id);
+    await api.exec('set-path', { id: remoteStartId, panel: 1 });
   }
 
   async function handleRequestData(event) {

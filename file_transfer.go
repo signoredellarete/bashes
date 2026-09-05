@@ -26,11 +26,13 @@ const (
 )
 
 type FileTransferSessionInfo struct {
-	SessionID  string `json:"sessionId"`
-	ResourceID string `json:"resourceId"`
-	Target     string `json:"target"`
-	LocalRoot  string `json:"localRoot"`
-	RemoteRoot string `json:"remoteRoot"`
+	SessionID     string `json:"sessionId"`
+	ResourceID    string `json:"resourceId"`
+	Target        string `json:"target"`
+	LocalRoot     string `json:"localRoot"`
+	RemoteRoot    string `json:"remoteRoot"`
+	RemoteHome    string `json:"remoteHome"`
+	RemoteStartID string `json:"remoteStartId"`
 }
 
 type FileTransferEntry struct {
@@ -116,6 +118,7 @@ type fileTransferSession struct {
 	target     string
 	localRoot  string
 	remoteRoot string
+	remoteHome string
 	client     *ssh.Client
 	sftp       *sftp.Client
 	mu         sync.Mutex
@@ -164,13 +167,21 @@ func (a *App) StartFileTransfer(input SSHSessionInput) (FileTransferSessionInfo,
 	}
 	localRoot, _ = filepath.Abs(localRoot)
 
-	remoteRoot, err := sftpClient.Getwd()
-	if err != nil || strings.TrimSpace(remoteRoot) == "" {
-		remoteRoot = "."
+	remoteHome, err := sftpClient.Getwd()
+	if err != nil || strings.TrimSpace(remoteHome) == "" {
+		remoteHome = "."
 	}
-	remoteRoot = path.Clean(remoteRoot)
+	remoteHome = path.Clean(remoteHome)
+	if resolved, resolveErr := sftpClient.RealPath(remoteHome); resolveErr == nil {
+		remoteHome = path.Clean(resolved)
+	}
+
+	remoteRoot := "/"
 	if resolved, resolveErr := sftpClient.RealPath(remoteRoot); resolveErr == nil {
 		remoteRoot = path.Clean(resolved)
+	}
+	if _, ok := remoteRelativePath(remoteRoot, remoteHome); !ok {
+		remoteHome = remoteRoot
 	}
 
 	sessionID := fmt.Sprintf("files-%d", time.Now().UnixNano())
@@ -180,6 +191,7 @@ func (a *App) StartFileTransfer(input SSHSessionInput) (FileTransferSessionInfo,
 		target:     fmt.Sprintf("%s@%s:%d", resource.User, sshHost(resource), resource.Port),
 		localRoot:  localRoot,
 		remoteRoot: remoteRoot,
+		remoteHome: remoteHome,
 		client:     client,
 		sftp:       sftpClient,
 	}
@@ -651,11 +663,13 @@ func (j *fileTransferJob) shouldEmitProgress() bool {
 
 func (s *fileTransferSession) info() FileTransferSessionInfo {
 	return FileTransferSessionInfo{
-		SessionID:  s.id,
-		ResourceID: s.resourceID,
-		Target:     s.target,
-		LocalRoot:  s.localRoot,
-		RemoteRoot: s.remoteRoot,
+		SessionID:     s.id,
+		ResourceID:    s.resourceID,
+		Target:        s.target,
+		LocalRoot:     s.localRoot,
+		RemoteRoot:    s.remoteRoot,
+		RemoteHome:    s.remoteHome,
+		RemoteStartID: remoteTransferID(s.remoteRoot, s.remoteHome),
 	}
 }
 
@@ -1553,14 +1567,14 @@ func (s *fileTransferSession) localPath(rel string) (string, error) {
 func (s *fileTransferSession) remotePath(rel string) (string, error) {
 	cleaned := cleanRelative(rel)
 	target := path.Clean(path.Join(s.remoteRoot, cleaned))
-	if target != s.remoteRoot && !strings.HasPrefix(target, strings.TrimRight(s.remoteRoot, "/")+"/") {
+	if _, ok := remoteRelativePath(s.remoteRoot, target); !ok {
 		return "", errors.New("remote path escapes transfer root")
 	}
 	resolvedTarget, err := s.resolveRemotePath(target)
 	if err != nil {
 		return "", err
 	}
-	if resolvedTarget != s.remoteRoot && !strings.HasPrefix(resolvedTarget, strings.TrimRight(s.remoteRoot, "/")+"/") {
+	if _, ok := remoteRelativePath(s.remoteRoot, resolvedTarget); !ok {
 		return "", errors.New("remote path escapes transfer root through symlink")
 	}
 	return resolvedTarget, nil
@@ -1649,6 +1663,27 @@ func transferID(scope, rel string) string {
 		return transferRootID(scope)
 	}
 	return transferRootID(scope) + "/" + rel
+}
+
+func remoteTransferID(root, target string) string {
+	rel, ok := remoteRelativePath(root, target)
+	if !ok {
+		return transferRemoteRootID
+	}
+	return transferID("remote", rel)
+}
+
+func remoteRelativePath(root, target string) (string, bool) {
+	root = path.Clean(root)
+	target = path.Clean(target)
+	if target == root {
+		return "", true
+	}
+	prefix := strings.TrimRight(root, "/") + "/"
+	if !strings.HasPrefix(target, prefix) {
+		return "", false
+	}
+	return strings.TrimPrefix(target, prefix), true
 }
 
 func cleanRelative(rel string) string {
