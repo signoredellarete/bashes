@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - fix/reconnect-tab-position
     tags:
       - v*
   workflow_dispatch:
