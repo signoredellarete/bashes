@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { closedSessionShortcut, lastFocusedSessionId, orderSessions, preferredSessionForResource, rememberFocus } from './session-state.js';
+import {
+  closedSessionShortcut,
+  lastFocusedSessionId,
+  orderSessions,
+  preferredSessionForResource,
+  rememberFocus,
+  replaceSession,
+} from './session-state.js';
 
 describe('session state', () => {
   it('prefers the last live session for a resource', () => {
@@ -13,6 +20,15 @@ describe('session state', () => {
   it('orders tabs from their rendered order and keeps omitted sessions', () => {
     const sessions = new Map([['one', { id: 'one' }], ['two', { id: 'two' }], ['three', { id: 'three' }]]);
     expect([...orderSessions(sessions, ['three', 'one']).keys()]).toEqual(['three', 'one', 'two']);
+  });
+
+  it('replaces a reconnected session without changing its tab position', () => {
+    const sessions = new Map([['one', { id: 'one' }], ['closed', { id: 'closed' }], ['three', { id: 'three' }]]);
+    const replacement = { id: 'reconnected' };
+    const result = replaceSession(sessions, 'closed', replacement);
+
+    expect([...result.keys()]).toEqual(['one', 'reconnected', 'three']);
+    expect(result.get('reconnected')).toBe(replacement);
   });
 
   it('tracks focus history without duplicates', () => {

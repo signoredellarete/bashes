@@ -39,6 +39,7 @@ import {
   realSessionsForResource as realSessionsForResourceFromState,
   rememberFocus,
   orderSessions,
+  replaceSession,
   sessionsForResource as sessionsForResourceFromState,
 } from './session-state.js';
 import {
@@ -967,7 +968,7 @@ async function quickConnect(resource, { failureSessionID = '' } = {}) {
           cols: 120,
           rows: 32,
         });
-        await attachStartedSession(sessionID, resource, 'local');
+        await attachStartedSession(sessionID, resource, 'local', failureSessionID);
         resizeActiveSession();
         return sessionID;
       }
@@ -980,7 +981,7 @@ async function quickConnect(resource, { failureSessionID = '' } = {}) {
         cols: 120,
         rows: 32,
       }, resource, 'Trust and connect');
-      await attachStartedSession(sessionID, resource);
+      await attachStartedSession(sessionID, resource, 'ssh', failureSessionID);
       await refreshHosts();
       resizeActiveSession();
       return sessionID;
@@ -2267,9 +2268,9 @@ function selectResource(resource) {
   }
 }
 
-async function attachStartedSession(sessionID, resource, kind = 'ssh') {
+async function attachStartedSession(sessionID, resource, kind = 'ssh', replaceSessionID = '') {
   try {
-    createSession(sessionID, resource, kind);
+    createSession(sessionID, resource, kind, replaceSessionID);
   } catch (error) {
     await apiStopSSHSession(sessionID).catch(() => {});
     const attachError = new Error(`Terminal UI initialization failed: ${error?.message ?? error}`);
@@ -2278,13 +2279,14 @@ async function attachStartedSession(sessionID, resource, kind = 'ssh') {
   }
 }
 
-function createSession(sessionID, resource, kind = 'ssh') {
+function createSession(sessionID, resource, kind = 'ssh', replaceSessionID = '') {
   const pending = pendingSessionForResource(resource.id);
   if (pending?.pending) {
     pending.element.remove();
     state.sessions.delete(pending.id);
   }
-  const ordinal = realSessionsForResource(resource.id).length + 1;
+  const replacedSession = replaceSessionID ? state.sessions.get(replaceSessionID) : null;
+  const ordinal = replacedSession?.ordinal ?? realSessionsForResource(resource.id).length + 1;
 
   const pane = document.createElement('section');
   pane.className = 'terminal-pane';
@@ -2323,18 +2325,30 @@ function createSession(sessionID, resource, kind = 'ssh') {
       .catch(() => {});
   });
 
-    state.sessions.set(sessionID, {
-    id: sessionID,
-    resourceId: resource.id,
-    title: sessionTitle(resource.hostname, ordinal),
-    ordinal,
-    target: resourceTarget(resource),
-    kind,
-    terminal,
-    fitAddon,
-    element: pane,
-    closed: false,
-    });
+    const nextSession = {
+      id: sessionID,
+      resourceId: resource.id,
+      title: sessionTitle(resource.hostname, ordinal),
+      ordinal,
+      target: resourceTarget(resource),
+      kind,
+      terminal,
+      fitAddon,
+      element: pane,
+      closed: false,
+    };
+    if (replacedSession) {
+      state.sessions = replaceSession(state.sessions, replaceSessionID, nextSession);
+      state.pendingSSHOutput.delete(replaceSessionID);
+      forgetSessionFocus(replaceSessionID);
+      if (state.lastSessionByResource.get(replacedSession.resourceId) === replaceSessionID) {
+        state.lastSessionByResource.delete(replacedSession.resourceId);
+      }
+      replacedSession.terminal?.dispose();
+      replacedSession.element?.remove();
+    } else {
+      state.sessions.set(sessionID, nextSession);
+    }
     flushPendingSSHOutput(sessionID);
     setActiveSession(sessionID);
     renderTabs();
