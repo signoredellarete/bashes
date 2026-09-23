@@ -94,6 +94,7 @@ const state = {
   ...terminalSettings,
   sidebarCollapsed: localStorage.getItem('bashes.sidebarCollapsed') === 'true',
   busy: false,
+  connectingResourceIds: new Set(),
   drawerMode: null,
   drawerHostId: null,
   editResourceId: null,
@@ -960,7 +961,7 @@ async function submitTunnel(event) {
 }
 
 async function quickConnect(resource, { failureSessionID = '' } = {}) {
-  return await withBusy(async () => {
+  return await withConnectionBusy(resource.id, async () => {
     try {
       if (isLocalResource(resource)) {
         writeNotice('Starting local shell ...');
@@ -3030,6 +3031,7 @@ function renderSelection() {
   }
 
   const localSelected = isLocalResource(selected.resource);
+  const connectionPending = state.connectingResourceIds.has(selected.resource.id);
   addSubsystem.hidden = false;
   edit.disabled = state.busy || !selected || localSelected;
   addSubsystem.disabled = state.busy || !selected || localSelected;
@@ -3041,7 +3043,7 @@ function renderSelection() {
   connect.querySelector('.connect-action-label').textContent = connectLabel;
   connect.title = connectLabel;
   connect.setAttribute('aria-label', connectLabel);
-  connect.disabled = state.busy || !selected;
+  connect.disabled = state.busy || !selected || connectionPending;
   disconnect.disabled = state.busy || !activeSession || activeSession.closed;
   remove.disabled = state.busy || !selected || localSelected;
   renderKeyInstallSummary();
@@ -3668,6 +3670,22 @@ async function withBusy(task) {
     state.busy = false;
     renderSelection();
     updateTagCreateButton();
+  }
+}
+
+async function withConnectionBusy(resourceID, task) {
+  if (state.connectingResourceIds.has(resourceID)) {
+    writeNotice('A connection attempt is already in progress for this node.', 'warning');
+    return null;
+  }
+
+  state.connectingResourceIds.add(resourceID);
+  renderSelection();
+  try {
+    return await task();
+  } finally {
+    state.connectingResourceIds.delete(resourceID);
+    renderSelection();
   }
 }
 

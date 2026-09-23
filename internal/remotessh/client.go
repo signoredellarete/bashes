@@ -55,19 +55,59 @@ func Dial(ctx context.Context, options ClientOptions) (*ssh.Client, error) {
 		return nil, err
 	}
 
-	dialer := net.Dialer{Timeout: config.Timeout}
+	deadline := connectionDeadline(ctx, config.Timeout)
+	dialer := net.Dialer{Timeout: config.Timeout, Deadline: deadline}
 	conn, err := dialer.DialContext(ctx, "tcp", Address(options.Target))
 	if err != nil {
 		return nil, fmt.Errorf("dial ssh target: %w", err)
 	}
+	if !deadline.IsZero() {
+		if err := conn.SetDeadline(deadline); err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("set ssh handshake deadline: %w", err)
+		}
+	}
+
+	handshakeDone := make(chan struct{})
+	contextWatchDone := make(chan struct{})
+	go func() {
+		defer close(contextWatchDone)
+		select {
+		case <-ctx.Done():
+			_ = conn.SetDeadline(time.Now())
+		case <-handshakeDone:
+		}
+	}()
 
 	sshConn, chans, reqs, err := ssh.NewClientConn(conn, Address(options.Target), config)
+	close(handshakeDone)
+	<-contextWatchDone
 	if err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("create ssh client: %w", err)
 	}
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("clear ssh handshake deadline: %w", err)
+	}
 
 	return ssh.NewClient(sshConn, chans, reqs), nil
+}
+
+func connectionDeadline(ctx context.Context, timeout time.Duration) time.Time {
+	deadline, hasDeadline := ctx.Deadline()
+	if timeout <= 0 {
+		if hasDeadline {
+			return deadline
+		}
+		return time.Time{}
+	}
+
+	timeoutDeadline := time.Now().Add(timeout)
+	if !hasDeadline || timeoutDeadline.Before(deadline) {
+		return timeoutDeadline
+	}
+	return deadline
 }
 
 func NewClientConfig(options ClientOptions) (*ssh.ClientConfig, error) {
