@@ -1,6 +1,8 @@
 export const DEFAULT_TERMINAL_FONT_SIZE = 13;
 export const DEFAULT_TERMINAL_FONT_FAMILY = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
 export const DEFAULT_TERMINAL_SCROLLBACK = 100000;
+export const MIN_TERMINAL_FONT_SIZE = 10;
+export const MAX_TERMINAL_FONT_SIZE = 30;
 
 export function clampNumber(value, min, max, fallback) {
   const number = Number.parseInt(value, 10);
@@ -10,7 +12,12 @@ export function clampNumber(value, min, max, fallback) {
 
 export function loadTerminalSettings(storage) {
   return {
-    terminalFontSize: clampNumber(storage.getItem('bashes.terminalFontSize'), 10, 22, DEFAULT_TERMINAL_FONT_SIZE),
+    terminalFontSize: clampNumber(
+      storage.getItem('bashes.terminalFontSize'),
+      MIN_TERMINAL_FONT_SIZE,
+      MAX_TERMINAL_FONT_SIZE,
+      DEFAULT_TERMINAL_FONT_SIZE,
+    ),
     terminalFontFamily: storage.getItem('bashes.terminalFontFamily')?.trim() || DEFAULT_TERMINAL_FONT_FAMILY,
     terminalScrollback: clampNumber(storage.getItem('bashes.terminalScrollback'), 1000, 500000, DEFAULT_TERMINAL_SCROLLBACK),
     terminalCopyOnSelect: readBoolean(storage.getItem('bashes.terminalCopyOnSelect'), true),

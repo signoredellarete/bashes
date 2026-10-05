@@ -47,6 +47,8 @@ import {
   DEFAULT_TERMINAL_FONT_FAMILY,
   DEFAULT_TERMINAL_FONT_SIZE,
   DEFAULT_TERMINAL_SCROLLBACK,
+  MAX_TERMINAL_FONT_SIZE,
+  MIN_TERMINAL_FONT_SIZE,
   loadTerminalSettings,
   persistTerminalSettings,
 } from './terminal-settings.js';
@@ -476,7 +478,7 @@ app.innerHTML = `
       <div class="form-grid">
         <label>
           <span>Terminal Font Size</span>
-          <input name="terminalFontSize" type="number" min="10" max="22" step="1" />
+          <input name="terminalFontSize" type="number" min="${MIN_TERMINAL_FONT_SIZE}" max="${MAX_TERMINAL_FONT_SIZE}" step="1" />
         </label>
         <label>
           <span>Scrollback Lines</span>
@@ -3872,7 +3874,12 @@ function renderSettingsForm() {
 function submitSettings(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  state.terminalFontSize = clampNumber(form.elements.terminalFontSize.value, 10, 22, DEFAULT_TERMINAL_FONT_SIZE);
+  state.terminalFontSize = clampNumber(
+    form.elements.terminalFontSize.value,
+    MIN_TERMINAL_FONT_SIZE,
+    MAX_TERMINAL_FONT_SIZE,
+    DEFAULT_TERMINAL_FONT_SIZE,
+  );
   state.terminalScrollback = clampNumber(form.elements.terminalScrollback.value, 1000, 500000, DEFAULT_TERMINAL_SCROLLBACK);
   state.terminalFontFamily = form.elements.terminalFontFamily.value.trim() || DEFAULT_TERMINAL_FONT_FAMILY;
   state.terminalCopyOnSelect = form.elements.terminalCopyOnSelect.checked;
@@ -3898,7 +3905,12 @@ function saveTerminalSettings() {
 }
 
 function adjustTerminalFontSize(delta) {
-  state.terminalFontSize = clampNumber(state.terminalFontSize + delta, 10, 22, DEFAULT_TERMINAL_FONT_SIZE);
+  state.terminalFontSize = clampNumber(
+    state.terminalFontSize + delta,
+    MIN_TERMINAL_FONT_SIZE,
+    MAX_TERMINAL_FONT_SIZE,
+    DEFAULT_TERMINAL_FONT_SIZE,
+  );
   saveTerminalSettings();
   applyTerminalSettings();
   if (!document.querySelector('#settings-panel').hidden) renderSettingsForm();
