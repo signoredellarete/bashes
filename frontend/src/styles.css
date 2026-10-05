@@ -2921,6 +2921,70 @@ html.sorting-tags * {
   padding: 10px;
 }
 
+#keys-panel .panel-card {
+  height: 100vh;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.compact-form-heading {
+  display: grid;
+  gap: 2px;
+}
+
+.compact-form-heading strong {
+  color: #2f3945;
+  font-size: 13px;
+}
+
+.compact-form-heading span {
+  color: #66717f;
+  font-size: 12px;
+}
+
+.key-material-input,
+#public-key,
+#private-key {
+  resize: vertical;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.private-key-view {
+  display: grid;
+  gap: 5px;
+}
+
+.private-key-view > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.private-key-view > header > span {
+  color: #66717f;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#keys-panel .text-action {
+  min-height: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-accent);
+  padding: 2px 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#keys-panel .text-action:hover {
+  background: transparent;
+  color: var(--color-accent-hover);
+  text-decoration: underline;
+}
+
 .workspace-footer {
   display: flex;
   min-height: 30px;
