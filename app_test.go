@@ -343,6 +343,74 @@ func TestGenerateSSHKeyUsesNextDefaultName(t *testing.T) {
 	}
 }
 
+func TestImportSSHKeyPairUsesNextDefaultName(t *testing.T) {
+	app := NewApp(filepath.Join(t.TempDir(), "data", "hosts.json"))
+	privateKey, publicKey := testSSHKeyPairText(t)
+
+	first, err := app.ImportSSHKeyPair(ImportSSHKeyPairInput{
+		PrivateKey: privateKey,
+		PublicKey:  publicKey,
+	})
+	if err != nil {
+		t.Fatalf("ImportSSHKeyPair(first) error = %v", err)
+	}
+	second, err := app.ImportSSHKeyPair(ImportSSHKeyPairInput{
+		PrivateKey: privateKey,
+		PublicKey:  publicKey,
+	})
+	if err != nil {
+		t.Fatalf("ImportSSHKeyPair(second) error = %v", err)
+	}
+
+	if first.Name != "imported-key" {
+		t.Fatalf("first key name = %q, want imported-key", first.Name)
+	}
+	if second.Name != "imported-key-2" {
+		t.Fatalf("second key name = %q, want imported-key-2", second.Name)
+	}
+	storedPrivateKey, err := app.ReadSSHPrivateKey(first.Name)
+	if err != nil {
+		t.Fatalf("ReadSSHPrivateKey() error = %v", err)
+	}
+	if strings.TrimSpace(storedPrivateKey) != strings.TrimSpace(privateKey) {
+		t.Fatal("stored private key differs from imported private key")
+	}
+}
+
+func TestImportSSHKeyPairRejectsMismatchedPair(t *testing.T) {
+	app := NewApp(filepath.Join(t.TempDir(), "data", "hosts.json"))
+	privateKey, _ := testSSHKeyPairText(t)
+	_, otherPublicKey := testSSHKeyPairText(t)
+
+	_, err := app.ImportSSHKeyPair(ImportSSHKeyPairInput{
+		PrivateKey: privateKey,
+		PublicKey:  otherPublicKey,
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("ImportSSHKeyPair() error = %v, want key mismatch", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(app.keysDir(), "imported-key")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("mismatched private key was written: %v", statErr)
+	}
+}
+
+func testSSHKeyPairText(t *testing.T) (string, string) {
+	t.Helper()
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey() error = %v", err)
+	}
+	privateBlock, err := ssh.MarshalPrivateKey(privateKey, "bashes-test")
+	if err != nil {
+		t.Fatalf("MarshalPrivateKey() error = %v", err)
+	}
+	sshPublicKey, err := ssh.NewPublicKey(publicKey)
+	if err != nil {
+		t.Fatalf("NewPublicKey() error = %v", err)
+	}
+	return string(pem.EncodeToMemory(privateBlock)), string(ssh.MarshalAuthorizedKey(sshPublicKey))
+}
+
 func TestWriteSSHKeyPairAtomicDoesNotOverwriteExistingKey(t *testing.T) {
 	dir := t.TempDir()
 	privatePath := filepath.Join(dir, "existing")

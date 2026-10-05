@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_TERMINAL_SCROLLBACK, loadTerminalSettings, persistTerminalSettings } from './terminal-settings.js';
+import {
+  DEFAULT_TERMINAL_SCROLLBACK,
+  MAX_TERMINAL_FONT_SIZE,
+  loadTerminalSettings,
+  persistTerminalSettings,
+} from './terminal-settings.js';
 
 function memoryStorage(initial = {}) {
   const values = new Map(Object.entries(initial));
@@ -12,7 +17,7 @@ function memoryStorage(initial = {}) {
 describe('terminal settings', () => {
   it('uses the high scrollback default and clamps invalid values', () => {
     const settings = loadTerminalSettings(memoryStorage({ 'bashes.terminalFontSize': '999' }));
-    expect(settings.terminalFontSize).toBe(22);
+    expect(settings.terminalFontSize).toBe(MAX_TERMINAL_FONT_SIZE);
     expect(settings.terminalScrollback).toBe(DEFAULT_TERMINAL_SCROLLBACK);
   });
 
