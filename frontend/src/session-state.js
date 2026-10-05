@@ -31,6 +31,21 @@ export function orderSessions(sessions, orderedSessionIds) {
   return ordered;
 }
 
+export function replaceSession(sessions, replacedSessionId, replacement) {
+  const ordered = new Map();
+  let inserted = false;
+  for (const [id, session] of sessions) {
+    if (id === replacedSessionId) {
+      ordered.set(replacement.id, replacement);
+      inserted = true;
+    } else if (id !== replacement.id) {
+      ordered.set(id, session);
+    }
+  }
+  if (!inserted) ordered.set(replacement.id, replacement);
+  return ordered;
+}
+
 export function rememberFocus(history, sessionId) {
   return [...history.filter((id) => id !== sessionId), sessionId];
 }

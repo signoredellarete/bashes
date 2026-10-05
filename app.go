@@ -242,10 +242,11 @@ func (a *App) DeleteResource(id string) error {
 }
 
 type SSHKeyInfo struct {
-	Name       string `json:"name"`
-	PrivateKey string `json:"privateKey"`
-	PublicKey  string `json:"publicKey"`
-	Source     string `json:"source"`
+	Name         string `json:"name"`
+	PrivateKey   string `json:"privateKey"`
+	PublicKey    string `json:"publicKey"`
+	Source       string `json:"source"`
+	Distribution string `json:"distribution,omitempty"`
 }
 
 type SSHKeySettings struct {
@@ -254,6 +255,12 @@ type SSHKeySettings struct {
 
 type GenerateSSHKeyInput struct {
 	Name string `json:"name"`
+}
+
+type ImportSSHKeyPairInput struct {
+	Name       string `json:"name"`
+	PrivateKey string `json:"privateKey"`
+	PublicKey  string `json:"publicKey"`
 }
 
 type InstallSSHKeyInput struct {
@@ -647,6 +654,11 @@ func (a *App) ListSSHKeys() ([]SSHKeyInfo, error) {
 		return nil, err
 	}
 	keys = append(keys, systemKeys...)
+	wslKeys, err := listWSLSSHKeys()
+	if err != nil {
+		return nil, err
+	}
+	keys = append(keys, wslKeys...)
 	settings, err := a.GetSSHKeySettings()
 	if err != nil {
 		return nil, err
@@ -863,6 +875,95 @@ func (a *App) GenerateSSHKey(input GenerateSSHKeyInput) (SSHKeyInfo, error) {
 	return SSHKeyInfo{Name: name, PrivateKey: privatePath, PublicKey: publicPath, Source: "bashes"}, nil
 }
 
+func (a *App) ImportSSHKeyPair(input ImportSSHKeyPairInput) (SSHKeyInfo, error) {
+	privateData := appendTrailingNewline([]byte(strings.TrimSpace(input.PrivateKey)))
+	publicData := appendTrailingNewline([]byte(strings.TrimSpace(input.PublicKey)))
+	if len(bytes.TrimSpace(privateData)) == 0 {
+		return SSHKeyInfo{}, errors.New("private key is required")
+	}
+	if len(bytes.TrimSpace(publicData)) == 0 {
+		return SSHKeyInfo{}, errors.New("public key is required")
+	}
+	if err := validateSSHKeyPair(privateData, publicData); err != nil {
+		return SSHKeyInfo{}, err
+	}
+
+	dir := a.keysDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return SSHKeyInfo{}, err
+	}
+	name := sanitizeKeyName(input.Name)
+	if name == "" {
+		name = nextAvailableSSHKeyName(dir, "imported-key")
+	}
+	privatePath := filepath.Join(dir, name)
+	publicPath := privatePath + ".pub"
+	if fileExists(privatePath) || fileExists(publicPath) {
+		return SSHKeyInfo{}, fmt.Errorf("ssh key %q already exists", name)
+	}
+	if err := writeSSHKeyPairAtomic(privatePath, privateData, publicPath, publicData); err != nil {
+		return SSHKeyInfo{}, err
+	}
+	return SSHKeyInfo{Name: name, PrivateKey: privatePath, PublicKey: publicPath, Source: "bashes"}, nil
+}
+
+func validateSSHKeyPair(privateData, publicData []byte) error {
+	publicKey, _, _, rest, err := ssh.ParseAuthorizedKey(publicData)
+	if err != nil {
+		return fmt.Errorf("parse public key: %w", err)
+	}
+	if len(bytes.TrimSpace(rest)) != 0 {
+		return errors.New("public key contains more than one key")
+	}
+	privatePublicKey, comparable, err := publicKeyFromPrivateData(privateData)
+	if err != nil {
+		return err
+	}
+	if comparable && !bytes.Equal(privatePublicKey.Marshal(), publicKey.Marshal()) {
+		return errors.New("public key does not match the private key")
+	}
+	return nil
+}
+
+func publicKeyFromPrivateData(privateData []byte) (ssh.PublicKey, bool, error) {
+	if isPuttyPrivateKey(privateData) {
+		key, err := putty.New(privateData)
+		if err != nil {
+			return nil, false, fmt.Errorf("parse PuTTY PPK private key: %w", err)
+		}
+		rawPublicKey, err := key.ParseRawPublicKey()
+		if err != nil {
+			return nil, false, fmt.Errorf("parse PuTTY PPK public key: %w", err)
+		}
+		publicKey, err := ssh.NewPublicKey(rawPublicKey)
+		if err != nil {
+			return nil, false, fmt.Errorf("create public key from PuTTY PPK: %w", err)
+		}
+		return publicKey, true, nil
+	}
+
+	signer, err := ssh.ParsePrivateKey(privateData)
+	if err == nil {
+		return signer.PublicKey(), true, nil
+	}
+	var passphraseMissing *ssh.PassphraseMissingError
+	if errors.As(err, &passphraseMissing) {
+		if passphraseMissing.PublicKey != nil {
+			return passphraseMissing.PublicKey, true, nil
+		}
+		return nil, false, nil
+	}
+	return nil, false, fmt.Errorf("parse private key: %w", err)
+}
+
+func appendTrailingNewline(data []byte) []byte {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 {
+		return nil
+	}
+	return append(data, '\n')
+}
+
 func (a *App) ReadSSHPublicKey(name string) (string, error) {
 	key, err := os.ReadFile(a.publicKeyPath(name))
 	if err != nil {
@@ -873,6 +974,29 @@ func (a *App) ReadSSHPublicKey(name string) (string, error) {
 
 func (a *App) ReadSSHPublicKeyPath(path string) (string, error) {
 	return readPublicKeyPath(path)
+}
+
+func (a *App) ReadSSHPrivateKey(name string) (string, error) {
+	return readPrivateKeyPath(filepath.Join(a.keysDir(), sanitizeKeyName(name)))
+}
+
+func (a *App) ReadSSHPrivateKeyPath(path string) (string, error) {
+	return readPrivateKeyPath(path)
+}
+
+func readPrivateKeyPath(path string) (string, error) {
+	path = expandHome(path)
+	if strings.TrimSpace(path) == "" {
+		return "", errors.New("ssh private key path is empty")
+	}
+	if strings.HasSuffix(strings.ToLower(path), ".pub") {
+		return "", errors.New("the selected path points to a public key")
+	}
+	key, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(key), nil
 }
 
 func readPublicKeyPath(path string) (string, error) {
@@ -2325,12 +2449,12 @@ func nextAvailableSSHKeyName(dir string, base string) string {
 	if name == "" {
 		name = "bashes"
 	}
-	if _, err := os.Stat(filepath.Join(dir, name)); errors.Is(err, os.ErrNotExist) {
+	if !fileExists(filepath.Join(dir, name)) && !fileExists(filepath.Join(dir, name)+".pub") {
 		return name
 	}
 	for index := 2; ; index++ {
 		candidate := fmt.Sprintf("%s-%d", name, index)
-		if _, err := os.Stat(filepath.Join(dir, candidate)); errors.Is(err, os.ErrNotExist) {
+		if !fileExists(filepath.Join(dir, candidate)) && !fileExists(filepath.Join(dir, candidate)+".pub") {
 			return candidate
 		}
 	}

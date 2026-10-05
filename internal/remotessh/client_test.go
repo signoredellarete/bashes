@@ -236,3 +236,45 @@ func TestDialHonorsCanceledContext(t *testing.T) {
 		t.Fatal("Dial() error = nil, want context/dial error")
 	}
 }
+
+func TestDialTimesOutDuringSSHHandshake(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	defer listener.Close()
+
+	releaseServer := make(chan struct{})
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		conn, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer conn.Close()
+		<-releaseServer
+	}()
+
+	address := listener.Addr().(*net.TCPAddr)
+	started := time.Now()
+	_, err = Dial(context.Background(), ClientOptions{
+		Target: Target{Host: address.IP.String(), Port: address.Port, User: "admin"},
+		Credentials: Credentials{
+			Password: "secret",
+		},
+		HostKeyPolicy: HostKeyPolicy{
+			InsecureIgnoreHostKey: true,
+		},
+		Timeout: 80 * time.Millisecond,
+	})
+	close(releaseServer)
+	<-serverDone
+
+	if err == nil {
+		t.Fatal("Dial() error = nil, want SSH handshake timeout")
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("Dial() took %s, want handshake timeout within 1s", elapsed)
+	}
+}
