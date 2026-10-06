@@ -60,15 +60,17 @@ bash install-bashes-linux.sh
 
 The same command updates an existing installation to the latest GitHub release. It installs the app without `sudo`, creates a desktop launcher, and registers the Bashes icon for the current user.
 
+The Linux amd64 archive contains builds for both WebKitGTK 4.0 and 4.1. The installer automatically checks their runtime dependencies and installs the compatible build, preferring WebKitGTK 4.1 when both are available. The commands above do not change and the user does not need to select a WebKitGTK variant.
+
 To install a specific release:
 
 ```bash
 BASHES_VERSION=v0.1.48 bash install-bashes-linux.sh
 ```
 
-The script currently supports Linux `amd64` and `arm64`, matching the release assets.
+The script currently supports Linux `amd64` and `arm64`, matching the release assets. A compatible WebKitGTK runtime must already be available on the system; if neither supported ABI is found, the installer reports the unresolved dependency instead of installing an unusable binary.
 
-You can still use the release archive manually: extract `bashes-linux-<arch>.tar.gz` into a folder you want to keep and run `./bashes`.
+You can still use the release archive manually: extract `bashes-linux-<arch>.tar.gz` into a folder you want to keep and run `./bashes`. On amd64, this launcher performs the same automatic WebKitGTK selection without requiring the binaries to be renamed.
 
 ### macOS
 

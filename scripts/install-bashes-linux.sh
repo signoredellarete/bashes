@@ -168,10 +168,10 @@ main() {
   require find
   require install
   require mv
-	require chmod
-	require ln
-	require awk
-	require sha256sum
+  require chmod
+  require ln
+  require awk
+  require sha256sum
 
   arch="$(detect_arch)"
   release_version="$(latest_version)"
@@ -196,8 +196,21 @@ main() {
   mkdir -p "$tmp_dir/extract"
   tar -xzf "$tmp_dir/$asset_name" -C "$tmp_dir/extract"
 
-  package_binary="$(find "$tmp_dir/extract" -type f -name bashes -print -quit)"
-  [ -n "$package_binary" ] || die "release archive does not contain the bashes binary"
+  package_dir="$tmp_dir/extract/bashes-linux-$arch"
+  [ -d "$package_dir" ] || die "release archive does not contain the expected package directory"
+  selector="$package_dir/select-bashes-linux-binary.sh"
+  if [ -x "$selector" ]; then
+    if ! package_binary="$("$selector" "$package_dir")"; then
+      die "release archive does not contain a binary compatible with this Linux system"
+    fi
+    case "${package_binary##*/}" in
+      bashes-webkit41) printf 'Selected WebKitGTK 4.1 build.\n' ;;
+      bashes-webkit40) printf 'Selected WebKitGTK 4.0 build.\n' ;;
+    esac
+  else
+    package_binary="$(find "$package_dir" -type f -name bashes -print -quit)"
+    [ -n "$package_binary" ] || die "release archive does not contain the bashes binary"
+  fi
 
   safe_mkdirs
   install -m 0755 "$package_binary" "$binary_path.new"

@@ -47,6 +47,9 @@ jobs:
       - name: Run frontend tests
         run: npm test --prefix frontend
 
+      - name: Run Linux packaging tests
+        run: scripts/test-linux-package.sh
+
       - name: Verify version metadata
         run: node scripts/version.mjs check
 
@@ -80,12 +83,24 @@ jobs:
             icons/hicolor
           if-no-files-found: error
 
-  linux-desktop:
-    name: Linux desktop build
-    runs-on: ubuntu-22.04
+  linux-amd64-binaries:
+    name: Linux amd64 WebKitGTK ${{ matrix.webkit }} build
+    runs-on: ${{ matrix.runner }}
     needs:
       - test
       - icons
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: webkit40
+            webkit: "4.0"
+            runner: ubuntu-22.04
+            tags: desktop
+          - variant: webkit41
+            webkit: "4.1"
+            runner: ubuntu-24.04
+            tags: desktop,webkit2_41
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -99,11 +114,20 @@ jobs:
       - name: Install Wails Linux dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential \
-            libgtk-3-dev \
-            libwebkit2gtk-4.0-dev \
-            pkg-config
+          if [ "${{ matrix.variant }}" = "webkit40" ]; then
+            sudo apt-get install -y --no-install-recommends \
+              build-essential \
+              libgtk-3-dev \
+              libwebkit2gtk-4.0-dev \
+              pkg-config
+          else
+            sudo apt-get install -y --no-install-recommends \
+              build-essential \
+              libgtk-3-dev \
+              libwebkit2gtk-4.1-dev \
+              libsoup-3.0-dev \
+              pkg-config
+          fi
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -127,13 +151,51 @@ jobs:
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Build Wails app
-        run: wails build -tags desktop -clean -nopackage -ldflags "-X main.version=${{ github.ref_name }}" -v 2
+        run: wails build -tags "${{ matrix.tags }}" -clean -nopackage -ldflags "-X main.version=${{ github.ref_name }}" -v 2
 
-      - name: Package Linux binary
+      - name: Upload Linux binary
+        uses: actions/upload-artifact@v6
+        with:
+          name: linux-amd64-${{ matrix.variant }}-binary
+          path: build/bin/bashes
+          if-no-files-found: error
+
+  linux-desktop:
+    name: Linux amd64 package
+    runs-on: ubuntu-22.04
+    needs:
+      - linux-amd64-binaries
+      - icons
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Download generated icons
+        uses: actions/download-artifact@v7
+        with:
+          name: bashes-generated-icons
+          path: .
+
+      - name: Download WebKitGTK 4.0 binary
+        uses: actions/download-artifact@v7
+        with:
+          name: linux-amd64-webkit40-binary
+          path: build/linux-amd64/webkit40
+
+      - name: Download WebKitGTK 4.1 binary
+        uses: actions/download-artifact@v7
+        with:
+          name: linux-amd64-webkit41-binary
+          path: build/linux-amd64/webkit41
+
+      - name: Package Linux binaries
         run: |
-          scripts/package-linux-release.sh amd64
+          scripts/package-linux-release.sh \
+            amd64 \
+            build/linux-amd64/webkit40/bashes \
+            build/linux-amd64/webkit41/bashes
 
-      - name: Upload Linux artifact
+      - name: Upload Linux package
         uses: actions/upload-artifact@v6
         with:
           name: bashes-linux-amd64
@@ -486,6 +548,7 @@ jobs:
       - name: Download release artifacts
         uses: actions/download-artifact@v7
         with:
+          pattern: bashes-*
           path: release-assets
           merge-multiple: true
 
