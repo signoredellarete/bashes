@@ -1,21 +1,43 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-arch="${1:?usage: package-linux-release.sh <arch> [binary]}"
-binary_source="${2:-build/bin/bashes}"
+arch="${1:?usage: package-linux-release.sh <arch> [webkit40-binary] [webkit41-binary]}"
+webkit40_binary="${2:-build/bin/bashes}"
+webkit41_binary="${3:-}"
 package_name="bashes-linux-${arch}"
 package_dir="dist/${package_name}"
 archive="dist/${package_name}.tar.gz"
 
-if [ ! -f "$binary_source" ]; then
-  echo "Bashes binary not found: $binary_source" >&2
+if [ ! -f "$webkit40_binary" ]; then
+  echo "Bashes binary not found: $webkit40_binary" >&2
+  exit 1
+fi
+if [ -n "$webkit41_binary" ] && [ ! -f "$webkit41_binary" ]; then
+  echo "Bashes binary not found: $webkit41_binary" >&2
   exit 1
 fi
 
 rm -rf "$package_dir" "$archive"
 mkdir -p "$package_dir/icons"
 
-cp "$binary_source" "$package_dir/bashes"
+if [ -n "$webkit41_binary" ]; then
+  mkdir -p "$package_dir/bin"
+  cp "$webkit40_binary" "$package_dir/bin/bashes-webkit40"
+  cp "$webkit41_binary" "$package_dir/bin/bashes-webkit41"
+  chmod 755 "$package_dir/bin/bashes-webkit40" "$package_dir/bin/bashes-webkit41"
+  cp scripts/select-bashes-linux-binary.sh "$package_dir/select-bashes-linux-binary.sh"
+  chmod 755 "$package_dir/select-bashes-linux-binary.sh"
+  cat > "$package_dir/bashes" <<'LAUNCHER'
+#!/usr/bin/env bash
+set -euo pipefail
+
+app_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+binary="$("$app_dir/select-bashes-linux-binary.sh" "$app_dir")"
+exec "$binary" "$@"
+LAUNCHER
+else
+  cp "$webkit40_binary" "$package_dir/bashes"
+fi
 chmod 755 "$package_dir/bashes"
 cp icons/bashes.png "$package_dir/icons/bashes.png"
 if [ -d icons/hicolor ]; then
