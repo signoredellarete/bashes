@@ -435,6 +435,39 @@ func TestWriteSSHKeyPairAtomicDoesNotOverwriteExistingKey(t *testing.T) {
 	}
 }
 
+func TestPublishSSHKeyFileFallsBackWithoutHardLinks(t *testing.T) {
+	dir := t.TempDir()
+	tempPath := filepath.Join(dir, "temporary")
+	path := filepath.Join(dir, "private-key")
+	data := []byte("private key data")
+	linkUnsupported := func(string, string) error {
+		return errors.New("request is not supported")
+	}
+
+	if err := publishSSHKeyFileWithLink(tempPath, path, data, 0o600, linkUnsupported); err != nil {
+		t.Fatalf("publishSSHKeyFileWithLink() error = %v", err)
+	}
+	stored, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if !bytes.Equal(stored, data) {
+		t.Fatalf("stored data = %q, want %q", stored, data)
+	}
+
+	err = publishSSHKeyFileWithLink(tempPath, path, []byte("replacement"), 0o600, linkUnsupported)
+	if err == nil {
+		t.Fatal("second publish error = nil, want existing file error")
+	}
+	stored, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(existing) error = %v", err)
+	}
+	if !bytes.Equal(stored, data) {
+		t.Fatalf("existing data = %q, want unchanged %q", stored, data)
+	}
+}
+
 func TestListSystemSSHKeysIncludesDefaultSSHDirectory(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
