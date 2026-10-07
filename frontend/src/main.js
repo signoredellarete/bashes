@@ -2941,7 +2941,6 @@ function updateTunnelMode() {
 
 async function openKeysPanel() {
   const selected = findResource(state.selectedId)?.resource;
-  if (isLocalResource(selected)) return;
 
   await loadKeySettings();
   await loadKeys();
@@ -3181,12 +3180,13 @@ function renderSelection() {
   } else {
     title.textContent = 'No session selected';
   }
+  renderKeyInstallSummary();
 
   if (!selected) {
     edit.disabled = true;
     addSubsystem.disabled = true;
     addSubsystem.hidden = false;
-    keys.disabled = true;
+    keys.disabled = state.busy;
     fileTransfer.disabled = true;
     fileTransfer.hidden = !FILE_TRANSFER_ENABLED;
     tunnel.disabled = true;
@@ -3201,7 +3201,7 @@ function renderSelection() {
   addSubsystem.hidden = false;
   edit.disabled = state.busy || !selected || localSelected;
   addSubsystem.disabled = state.busy || !selected || localSelected;
-  keys.disabled = state.busy || !selected || localSelected;
+  keys.disabled = state.busy;
   fileTransfer.hidden = !FILE_TRANSFER_ENABLED;
   fileTransfer.disabled = state.busy || !selected || localSelected || !FILE_TRANSFER_ENABLED;
   tunnel.disabled = state.busy || !selected || localSelected;
@@ -3212,7 +3212,6 @@ function renderSelection() {
   connect.disabled = state.busy || !selected || connectionPending;
   disconnect.disabled = state.busy || !activeSession || activeSession.closed;
   remove.disabled = state.busy || !selected || localSelected;
-  renderKeyInstallSummary();
   renderTunnelStatus();
 }
 
@@ -3783,12 +3782,18 @@ function highlightKeyRow(value) {
 }
 
 function renderKeyInstallSummary() {
+  const form = document.querySelector('#key-install-form');
   const summary = document.querySelector('#key-install-summary');
-  if (!summary) return;
+  if (!form || !summary) return;
   const selected = findResource(state.selectedId)?.resource;
-  summary.textContent = selected && !isLocalResource(selected)
-    ? `Install selected key on ${selected.user}@${selected.ip || selected.hostname}:${selected.port}`
-    : 'Select a host or subsystem to install the key.';
+  const remoteSelected = selected && !isLocalResource(selected);
+  form.hidden = !remoteSelected;
+  if (!remoteSelected) {
+    form.reset();
+    setKeyInstallStatus('', '');
+    return;
+  }
+  summary.textContent = `Install selected key on ${selected.user}@${selected.ip || selected.hostname}:${selected.port}`;
 }
 
 function renderKeySettings() {

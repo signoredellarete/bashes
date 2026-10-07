@@ -3217,6 +3217,10 @@ html.sorting-tags * {
   padding-top: 11px;
 }
 
+.key-install-form[hidden] {
+  display: none;
+}
+
 .key-install-summary {
   margin: 0;
   color: #53606f;
