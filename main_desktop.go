@@ -65,6 +65,10 @@ func applicationMenu(app *App) *menu.Menu {
 		app.importHostsFileFromMenu()
 	})
 	tools.AddSeparator()
+	tools.AddText("SSH Keys...", nil, func(_ *menu.CallbackData) {
+		app.openSSHKeysFromMenu()
+	})
+	tools.AddSeparator()
 	tools.AddText("Check for Updates", nil, func(_ *menu.CallbackData) {
 		app.checkForUpdatesFromMenu()
 	})
