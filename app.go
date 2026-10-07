@@ -1978,6 +1978,10 @@ func (a *App) openSettingsFromMenu() {
 	a.emitData("app:settings", map[string]bool{"open": true})
 }
 
+func (a *App) openSSHKeysFromMenu() {
+	a.emitData("app:ssh-keys", map[string]bool{"allowInstall": false})
+}
+
 func (a *App) showAboutFromMenu() {
 	a.emitData("app:about", a.GetAppInfo())
 }

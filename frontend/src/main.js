@@ -95,6 +95,7 @@ const state = {
   tags: [],
   keys: [],
   keySources: [],
+  keyInstallEnabled: true,
   keySettings: { customDirectory: '' },
   tunnels: new Map(),
   localShellSupported: false,
@@ -773,7 +774,7 @@ document.querySelector('#open-host-panel').addEventListener('click', () => openR
 document.querySelector('#open-tag-manager').addEventListener('click', () => openTagPanel());
 document.querySelector('#tag-mode-any').addEventListener('click', () => setTagFilterMode('any'));
 document.querySelector('#tag-mode-all').addEventListener('click', () => setTagFilterMode('all'));
-document.querySelector('#open-keys-panel').addEventListener('click', () => openKeysPanel());
+document.querySelector('#open-keys-panel').addEventListener('click', () => openKeysPanel({ allowInstall: true }));
 document.querySelector('#open-tunnel-panel').addEventListener('click', () => openTunnelPanel());
 document.querySelector('#open-file-transfer').addEventListener('click', () => openFileTransferModal());
 document.querySelector('#edit-resource').addEventListener('click', () => openEditPanel());
@@ -2939,8 +2940,9 @@ function updateTunnelMode() {
   updateTunnelSummary();
 }
 
-async function openKeysPanel() {
+async function openKeysPanel({ allowInstall = true } = {}) {
   const selected = findResource(state.selectedId)?.resource;
+  state.keyInstallEnabled = allowInstall;
 
   await loadKeySettings();
   await loadKeys();
@@ -2970,6 +2972,7 @@ function closeKeysPanel() {
   showKeyActionStatus('', '');
   hideSelectedPrivateKey();
   showKeyPanelView('main');
+  state.keyInstallEnabled = true;
   restoreTerminalFocusAfterOverlay();
 }
 
@@ -3786,7 +3789,7 @@ function renderKeyInstallSummary() {
   const summary = document.querySelector('#key-install-summary');
   if (!form || !summary) return;
   const selected = findResource(state.selectedId)?.resource;
-  const remoteSelected = selected && !isLocalResource(selected);
+  const remoteSelected = state.keyInstallEnabled && selected && !isLocalResource(selected);
   form.hidden = !remoteSelected;
   if (!remoteSelected) {
     form.reset();
@@ -4533,6 +4536,9 @@ function registerAppEvents() {
   });
   eventsOn('app:settings', () => {
     openSettingsPanel();
+  });
+  eventsOn('app:ssh-keys', () => {
+    openKeysPanel({ allowInstall: false });
   });
   eventsOn('app:about', (info) => showAboutModal(info));
   eventsOn('app:update-check', (event) => {
