@@ -2330,12 +2330,54 @@ func writeSSHKeyPairAtomic(privatePath string, privateData []byte, publicPath st
 	}
 	defer os.Remove(publicTemp)
 
-	if err := os.Link(privateTemp, privatePath); err != nil {
+	if err := publishSSHKeyFile(privateTemp, privatePath, privateData, 0o600); err != nil {
 		return fmt.Errorf("publish private key: %w", err)
 	}
-	if err := os.Link(publicTemp, publicPath); err != nil {
+	if err := publishSSHKeyFile(publicTemp, publicPath, publicData, 0o644); err != nil {
 		_ = os.Remove(privatePath)
 		return fmt.Errorf("publish public key: %w", err)
+	}
+	return nil
+}
+
+func publishSSHKeyFile(tempPath string, path string, data []byte, perm os.FileMode) error {
+	return publishSSHKeyFileWithLink(tempPath, path, data, perm, os.Link)
+}
+
+func publishSSHKeyFileWithLink(
+	tempPath string,
+	path string,
+	data []byte,
+	perm os.FileMode,
+	link func(string, string) error,
+) error {
+	if err := link(tempPath, path); err == nil {
+		return nil
+	}
+
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	if err != nil {
+		return err
+	}
+	cleanup := func() {
+		_ = file.Close()
+		_ = os.Remove(path)
+	}
+	if _, err := file.Write(data); err != nil {
+		cleanup()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := file.Chmod(perm); err != nil {
+		cleanup()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		return err
 	}
 	return nil
 }
