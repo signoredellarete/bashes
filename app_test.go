@@ -343,6 +343,39 @@ func TestGenerateSSHKeyUsesNextDefaultName(t *testing.T) {
 	}
 }
 
+func TestDeleteSSHKeyRemovesManagedPair(t *testing.T) {
+	app := NewApp(filepath.Join(t.TempDir(), "data", "hosts.json"))
+	key, err := app.GenerateSSHKey(GenerateSSHKeyInput{Name: "temporary"})
+	if err != nil {
+		t.Fatalf("GenerateSSHKey() error = %v", err)
+	}
+
+	if err := app.DeleteSSHKey(key.Name); err != nil {
+		t.Fatalf("DeleteSSHKey() error = %v", err)
+	}
+	for _, path := range []string{key.PrivateKey, key.PublicKey} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("managed key file %q still exists: %v", path, err)
+		}
+	}
+}
+
+func TestDeleteSSHKeyRejectsNamesOutsideManagedDirectory(t *testing.T) {
+	root := t.TempDir()
+	app := NewApp(filepath.Join(root, "data", "hosts.json"))
+	externalPath := filepath.Join(root, "external-key")
+	if err := os.WriteFile(externalPath, []byte("keep"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	if err := app.DeleteSSHKey("../external-key"); err == nil {
+		t.Fatal("DeleteSSHKey() error = nil, want invalid name error")
+	}
+	if data, err := os.ReadFile(externalPath); err != nil || string(data) != "keep" {
+		t.Fatalf("external key changed: data=%q error=%v", data, err)
+	}
+}
+
 func TestImportSSHKeyPairUsesNextDefaultName(t *testing.T) {
 	app := NewApp(filepath.Join(t.TempDir(), "data", "hosts.json"))
 	privateKey, publicKey := testSSHKeyPairText(t)
@@ -533,6 +566,69 @@ func TestListSSHKeysIncludesCustomDirectorySetting(t *testing.T) {
 	}
 	if found.Source != "custom" || found.Name != "moba.ppk" || found.PublicKey != publicPath {
 		t.Fatalf("custom key = %+v, want custom source and paths", *found)
+	}
+}
+
+func TestGetSSHKeyInventoryDescribesManagedAndCustomSources(t *testing.T) {
+	app := NewApp(filepath.Join(t.TempDir(), "data", "hosts.json"))
+	if _, err := app.GenerateSSHKey(GenerateSSHKeyInput{Name: "managed"}); err != nil {
+		t.Fatalf("GenerateSSHKey() error = %v", err)
+	}
+	customDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(customDir, "id_custom"), []byte("private"), 0o600); err != nil {
+		t.Fatalf("WriteFile(private) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(customDir, "id_custom.pub"), []byte("ssh-ed25519 test"), 0o644); err != nil {
+		t.Fatalf("WriteFile(public) error = %v", err)
+	}
+	if _, err := app.SaveSSHKeySettings(SSHKeySettings{CustomDirectory: customDir}); err != nil {
+		t.Fatalf("SaveSSHKeySettings() error = %v", err)
+	}
+
+	inventory, err := app.GetSSHKeyInventory()
+	if err != nil {
+		t.Fatalf("GetSSHKeyInventory() error = %v", err)
+	}
+	sources := make(map[string]SSHKeySourceInfo, len(inventory.Sources))
+	for _, source := range inventory.Sources {
+		sources[source.Source] = source
+	}
+	if sources["bashes"].Count != 1 || sources["bashes"].Path != app.keysDir() {
+		t.Fatalf("managed source = %+v", sources["bashes"])
+	}
+	if sources["custom"].Count != 1 || sources["custom"].Path != customDir {
+		t.Fatalf("custom source = %+v", sources["custom"])
+	}
+}
+
+func TestGetSSHKeyInventoryKeepsOtherSourcesWhenCustomSourceFails(t *testing.T) {
+	app := NewApp(filepath.Join(t.TempDir(), "data", "hosts.json"))
+	if _, err := app.GenerateSSHKey(GenerateSSHKeyInput{Name: "managed"}); err != nil {
+		t.Fatalf("GenerateSSHKey() error = %v", err)
+	}
+	invalidDirectory := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(invalidDirectory, []byte("file"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(app.settingsPath()), 0o700); err != nil {
+		t.Fatalf("MkdirAll(settings) error = %v", err)
+	}
+	settings := fmt.Sprintf("{\"customDirectory\":%q}\n", invalidDirectory)
+	if err := os.WriteFile(app.settingsPath(), []byte(settings), 0o600); err != nil {
+		t.Fatalf("WriteFile(settings) error = %v", err)
+	}
+
+	inventory, err := app.GetSSHKeyInventory()
+	if err != nil {
+		t.Fatalf("GetSSHKeyInventory() error = %v", err)
+	}
+	if len(inventory.Keys) == 0 || inventory.Keys[0].Name != "managed" {
+		t.Fatalf("managed keys missing after custom source failure: %+v", inventory.Keys)
+	}
+	for _, source := range inventory.Sources {
+		if source.Source == "custom" && source.Error == "" {
+			t.Fatalf("custom source error not reported: %+v", source)
+		}
 	}
 }
 
