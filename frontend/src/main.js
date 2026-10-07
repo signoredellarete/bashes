@@ -2,15 +2,21 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import Sortable from 'sortablejs';
 import iconArrowsTransferUp from '@tabler/icons/outline/arrows-transfer-up.svg?raw';
+import iconArrowLeft from '@tabler/icons/outline/arrow-left.svg?raw';
 import iconCheck from '@tabler/icons/outline/check.svg?raw';
+import iconCopy from '@tabler/icons/outline/copy.svg?raw';
 import iconChevronLeft from '@tabler/icons/outline/chevron-left.svg?raw';
+import iconEye from '@tabler/icons/outline/eye.svg?raw';
+import iconEyeOff from '@tabler/icons/outline/eye-off.svg?raw';
 import iconFileText from '@tabler/icons/outline/file-text.svg?raw';
 import iconFolder from '@tabler/icons/outline/folder.svg?raw';
+import iconFolderOpen from '@tabler/icons/outline/folder-open.svg?raw';
 import iconKey from '@tabler/icons/outline/key.svg?raw';
 import iconMinus from '@tabler/icons/outline/minus.svg?raw';
 import iconPencil from '@tabler/icons/outline/pencil.svg?raw';
 import iconPlugConnectedX from '@tabler/icons/outline/plug-connected-x.svg?raw';
 import iconPlus from '@tabler/icons/outline/plus.svg?raw';
+import iconRefresh from '@tabler/icons/outline/refresh.svg?raw';
 import iconSearch from '@tabler/icons/outline/search.svg?raw';
 import iconServer from '@tabler/icons/outline/server-2.svg?raw';
 import iconSubtask from '@tabler/icons/outline/subtask.svg?raw';
@@ -88,6 +94,7 @@ const state = {
   hosts: [],
   tags: [],
   keys: [],
+  keySources: [],
   keySettings: { customDirectory: '' },
   tunnels: new Map(),
   localShellSupported: false,
@@ -144,16 +151,22 @@ const customKeyPathHelp = [
 ].join('\n\n');
 const TABLER_ICONS = Object.freeze({
   'arrows-transfer-up': iconArrowsTransferUp,
+  'arrow-left': iconArrowLeft,
   check: iconCheck,
+  copy: iconCopy,
   'chevron-left': iconChevronLeft,
+  eye: iconEye,
+  'eye-off': iconEyeOff,
   'file-text': iconFileText,
   folder: iconFolder,
+  'folder-open': iconFolderOpen,
   key: iconKey,
   minus: iconMinus,
   pencil: iconPencil,
   'player-play-filled': iconPlayerPlay,
   'plug-connected-x': iconPlugConnectedX,
   plus: iconPlus,
+  refresh: iconRefresh,
   search: iconSearch,
   'server-2': iconServer,
   subtask: iconSubtask,
@@ -521,83 +534,137 @@ app.innerHTML = `
 
   <section id="keys-panel" class="slide-panel" hidden>
     <div class="panel-scrim" data-close-keys></div>
-    <section class="panel-card">
-      <header class="panel-header">
-        <div>
-          <p class="eyebrow">SSH Keys</p>
-          <h3>Manage Keys</h3>
+    <section class="panel-card keys-panel-card" role="dialog" aria-modal="true" aria-labelledby="keys-panel-title">
+      <header class="panel-header keys-panel-header">
+        <div class="keys-panel-heading">
+          <span class="keys-panel-heading-icon">${iconMarkup('key')}</span>
+          <div>
+            <h3 id="keys-panel-title">SSH Keys</h3>
+            <p>Keys available to Bashes</p>
+          </div>
         </div>
-        <button class="close-panel" type="button" data-close-keys title="Close">${ICON_CLOSE}</button>
+        <button class="close-panel" type="button" data-close-keys title="Close" aria-label="Close SSH keys">${ICON_CLOSE}</button>
       </header>
 
-      <form id="key-generate-form" class="compact-form">
-        <label>
-          <span>New Key Name</span>
-          <input name="name" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="bashes-main" />
-        </label>
-        <button type="submit">Generate</button>
-      </form>
+      <section id="key-main-view" class="keys-panel-view">
+        <div class="keys-toolbar">
+          <label class="keys-search-control">
+            ${iconMarkup('search')}
+            <input id="key-search" type="search" autocomplete="off" placeholder="Search keys" aria-label="Search SSH keys" />
+          </label>
+          <button id="open-key-add" class="secondary keys-toolbar-action" type="button">${iconMarkup('plus')}<span>Add key</span></button>
+          <button id="open-key-sources" class="secondary keys-toolbar-action" type="button">${iconMarkup('folder-open')}<span>Sources</span></button>
+        </div>
+        <p class="inline-status key-action-status" id="key-action-status" hidden></p>
+        <select id="key-select" class="key-native-select" aria-hidden="true" tabindex="-1"></select>
+        <div id="key-list" class="key-list" aria-label="Available SSH keys"></div>
 
-      <form id="key-import-form" class="compact-form key-import-form">
-        <header class="compact-form-heading">
-          <strong>Import Key Pair</strong>
-          <span>Paste an existing SSH key pair</span>
-        </header>
-        <label>
-          <span>Key Name <small>(optional)</small></span>
-          <input name="name" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="imported-key" />
-        </label>
-        <label>
-          <span>Private Key</span>
-          <textarea class="key-material-input" name="privateKey" rows="6" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required></textarea>
-        </label>
-        <label>
-          <span>Public Key</span>
-          <textarea class="key-material-input" name="publicKey" rows="4" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required></textarea>
-        </label>
-        <p class="inline-status" id="key-import-status" hidden></p>
-        <button type="submit">Import Key Pair</button>
-      </form>
+        <section id="key-details" class="key-details" hidden>
+          <header class="key-details-header">
+            <div>
+              <strong id="key-details-name"></strong>
+              <span id="key-details-source"></span>
+            </div>
+            <div class="key-detail-actions">
+              <button id="copy-public-key" class="secondary icon-action" type="button" title="Copy public key" aria-label="Copy public key">${iconMarkup('copy')}</button>
+              <button id="toggle-private-key" class="secondary icon-action" type="button" title="Show private key" aria-label="Show private key" aria-expanded="false">${iconMarkup('eye')}</button>
+              <button id="delete-managed-key" class="secondary icon-action danger-icon" type="button" title="Delete managed key" aria-label="Delete managed key">${iconMarkup('trash')}</button>
+            </div>
+          </header>
+          <p id="key-details-path" class="key-details-path"></p>
+          <label>
+            <span>Public Key</span>
+            <textarea id="public-key" rows="5" readonly></textarea>
+          </label>
+          <textarea id="private-key" rows="7" readonly hidden aria-label="Private key"></textarea>
+          <p class="inline-status" id="key-view-status" hidden></p>
 
-      <form id="key-directory-form" class="compact-form">
-        <label>
-          <span>Custom Keys Directory</span>
-          <input name="directory" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="optional folder to scan" />
-        </label>
-        <button type="submit">Save</button>
-      </form>
-      <p class="inline-status" id="key-directory-status" hidden></p>
-
-      <label>
-        <span>Available Key</span>
-        <select id="key-select"></select>
-      </label>
-      <label>
-        <span>Public Key</span>
-        <textarea id="public-key" rows="5" readonly></textarea>
-      </label>
-      <section class="private-key-view">
-        <header>
-          <span>Private Key</span>
-          <button id="toggle-private-key" class="text-action" type="button">Show private key</button>
-        </header>
-        <textarea id="private-key" rows="7" readonly hidden></textarea>
-        <p class="inline-status" id="key-view-status" hidden></p>
+          <form id="key-install-form" class="key-install-form">
+            <p class="key-install-summary" id="key-install-summary">Select a host or subsystem to install the key.</p>
+            <p class="inline-status" id="key-install-status" hidden></p>
+            <label>
+              <span>Remote Password</span>
+              <input name="password" type="password" autocomplete="current-password" />
+            </label>
+            <label class="checkbox-row">
+              <input name="trustHostKey" type="checkbox" />
+              <span>Skip host key verification for this install (insecure)</span>
+            </label>
+            <button type="submit">Install on selected host</button>
+          </form>
+        </section>
+        <p id="key-empty-state" class="keys-empty-state" hidden>No SSH keys found.</p>
       </section>
 
-      <form id="key-install-form" class="compact-form">
-        <p class="parent-summary" id="key-install-summary">Select a host or subsystem to install the key.</p>
-        <p class="inline-status" id="key-install-status" hidden></p>
-        <label>
-          <span>Remote Password</span>
-          <input name="password" type="password" autocomplete="current-password" />
-        </label>
-        <label class="checkbox-row">
-          <input name="trustHostKey" type="checkbox" />
-          <span>Skip host key verification for this install (insecure)</span>
-        </label>
-        <button type="submit">Install On Selected</button>
-      </form>
+      <section id="key-add-view" class="keys-panel-view keys-subview" hidden>
+        <header class="keys-subview-header">
+          <button class="secondary keys-back-action" type="button" data-key-back>${iconMarkup('arrow-left')}<span>Keys</span></button>
+          <div>
+            <h4>Add key</h4>
+            <p>Create a key or import an existing pair.</p>
+          </div>
+        </header>
+        <div class="keys-mode-switch" role="tablist" aria-label="Add key method">
+          <button id="show-key-generate" type="button" role="tab" aria-selected="true">Generate</button>
+          <button id="show-key-import" class="secondary" type="button" role="tab" aria-selected="false">Import</button>
+        </div>
+        <form id="key-generate-form" class="key-add-form">
+          <header>
+            <strong>Generate an Ed25519 key</strong>
+            <span>The key pair is stored in Bashes' private data directory.</span>
+          </header>
+          <label>
+            <span>Key Name <small>(optional)</small></span>
+            <input name="name" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Generated automatically" />
+          </label>
+          <button type="submit">Generate key</button>
+        </form>
+
+        <form id="key-import-form" class="key-add-form" hidden>
+          <header>
+            <strong>Import a key pair</strong>
+            <span>Paste matching public and private SSH keys.</span>
+          </header>
+          <label>
+            <span>Key Name <small>(optional)</small></span>
+            <input name="name" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Generated automatically" />
+          </label>
+          <label>
+            <span>Private Key</span>
+            <textarea class="key-material-input" name="privateKey" rows="7" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required></textarea>
+          </label>
+          <label>
+            <span>Public Key</span>
+            <textarea class="key-material-input" name="publicKey" rows="4" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required></textarea>
+          </label>
+          <p class="inline-status" id="key-import-status" hidden></p>
+          <button type="submit">Import key pair</button>
+        </form>
+      </section>
+
+      <section id="key-sources-view" class="keys-panel-view keys-subview" hidden>
+        <header class="keys-subview-header">
+          <button class="secondary keys-back-action" type="button" data-key-back>${iconMarkup('arrow-left')}<span>Keys</span></button>
+          <div>
+            <h4>Key sources</h4>
+            <p>Directories scanned for SSH private keys.</p>
+          </div>
+        </header>
+        <div id="key-source-list" class="key-source-list"></div>
+        <form id="key-directory-form" class="key-source-form">
+          <label>
+            <span>Custom Keys Directory</span>
+            <input name="directory" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Optional folder to scan" />
+          </label>
+          <div class="key-source-actions">
+            <button id="browse-key-directory" class="secondary" type="button">Browse</button>
+            <button id="clear-key-directory" class="secondary" type="button">Clear</button>
+            <button type="submit">Save</button>
+          </div>
+        </form>
+        <p class="inline-status" id="key-directory-status" hidden></p>
+        <button id="rescan-key-sources" class="secondary keys-rescan-action" type="button">${iconMarkup('refresh')}<span>Rescan sources</span></button>
+      </section>
     </section>
   </section>
 
@@ -743,6 +810,21 @@ document.querySelector('#key-directory-form').addEventListener('submit', (event)
 document.querySelector('#key-install-form').addEventListener('submit', (event) => submitInstallKey(event));
 document.querySelector('#key-select').addEventListener('change', () => renderSelectedKey());
 document.querySelector('#toggle-private-key').addEventListener('click', () => toggleSelectedPrivateKey());
+document.querySelector('#copy-public-key').addEventListener('click', () => copySelectedPublicKey());
+document.querySelector('#delete-managed-key').addEventListener('click', () => deleteSelectedManagedKey());
+document.querySelector('#key-search').addEventListener('input', () => renderKeyBrowser());
+document.querySelector('#open-key-add').addEventListener('click', () => showKeyPanelView('add'));
+document.querySelector('#open-key-sources').addEventListener('click', () => showKeyPanelView('sources'));
+document.querySelectorAll('[data-key-back]').forEach((element) => {
+  element.addEventListener('click', () => showKeyPanelView('main'));
+});
+document.querySelector('#show-key-generate').addEventListener('click', () => showKeyAddMode('generate'));
+document.querySelector('#show-key-import').addEventListener('click', () => showKeyAddMode('import'));
+document.querySelector('#browse-key-directory').addEventListener('click', () => browseKeyDirectory());
+document.querySelector('#clear-key-directory').addEventListener('click', () => {
+  document.querySelector('#key-directory-form').elements.directory.value = '';
+});
+document.querySelector('#rescan-key-sources').addEventListener('click', () => rescanKeySources());
 document.querySelectorAll('[data-close-panel]').forEach((element) => {
   element.addEventListener('click', () => closeResourcePanel());
 });
@@ -870,8 +952,17 @@ async function refreshHosts() {
 }
 
 async function loadKeys() {
-  state.keys = await apiListSSHKeys();
+  const selectedValue = document.querySelector('#key-select')?.value || '';
+  const inventory = await apiGetSSHKeyInventory();
+  state.keys = inventory.keys ?? [];
+  state.keySources = inventory.sources ?? [];
   renderKeyOptions();
+  const select = document.querySelector('#key-select');
+  if (select && selectedValue && [...select.options].some((option) => option.value === selectedValue)) {
+    select.value = selectedValue;
+  }
+  await renderSelectedKey();
+  renderKeySources();
 }
 
 async function loadKeySettings() {
@@ -1049,7 +1140,9 @@ async function submitGenerateKey(event) {
     await loadKeys();
     document.querySelector('#key-select').value = keyChoiceValue({ ...key, source: 'bashes' });
     await renderSelectedKey();
-    writeNotice(`Generated SSH key ${key.name}.`);
+    showKeyPanelView('main');
+    showKeyActionStatus(`Generated ${key.name}. The new key is selected.`, 'success');
+    highlightKeyRow(keyChoiceValue(key));
   });
 }
 
@@ -1068,8 +1161,9 @@ async function submitImportKeyPair(event) {
       await loadKeys();
       document.querySelector('#key-select').value = keyChoiceValue(key);
       await renderSelectedKey();
-      setKeyImportStatus(`Imported key pair ${key.name}.`, 'success');
-      writeNotice(`Imported SSH key pair ${key.name}.`);
+      showKeyPanelView('main');
+      showKeyActionStatus(`Imported ${key.name}. The new key is selected.`, 'success');
+      highlightKeyRow(keyChoiceValue(key));
     } catch (error) {
       const message = `Could not import SSH key pair: ${error?.message ?? error}`;
       setKeyImportStatus(message, 'error');
@@ -1096,6 +1190,7 @@ async function submitKeyDirectory(event) {
       } else {
         setKeyDirectoryStatus('Custom keys directory cleared.', 'success');
       }
+      renderKeySources();
     } catch (error) {
       const message = `Could not save custom keys directory: ${error?.message ?? error}`;
       setKeyDirectoryStatus(message, 'error');
@@ -2854,7 +2949,11 @@ async function openKeysPanel() {
   setKeyImportStatus('', '');
   setKeyViewStatus('', '');
   setKeyInstallStatus('', '');
+  showKeyActionStatus('', '');
   hideSelectedPrivateKey();
+  showKeyPanelView('main');
+  document.querySelector('#key-search').value = '';
+  renderKeyBrowser();
   renderKeyInstallSummary();
   document.querySelector('#key-install-form').elements.trustHostKey.checked = trustHostKeyFromPreference(selected);
   const panel = document.querySelector('#keys-panel');
@@ -2869,7 +2968,9 @@ function closeKeysPanel() {
   document.querySelector('#key-import-form').reset();
   setKeyImportStatus('', '');
   setKeyViewStatus('', '');
+  showKeyActionStatus('', '');
   hideSelectedPrivateKey();
+  showKeyPanelView('main');
   restoreTerminalFocusAfterOverlay();
 }
 
@@ -3143,7 +3244,160 @@ function renderKeyOptions(select = document.querySelector('#key-select'), includ
   if (customGroup) options.push(customGroup);
 
   select.replaceChildren(...options);
-  renderSelectedKey();
+}
+
+function showKeyPanelView(view) {
+  const views = {
+    main: document.querySelector('#key-main-view'),
+    add: document.querySelector('#key-add-view'),
+    sources: document.querySelector('#key-sources-view'),
+  };
+  for (const [name, element] of Object.entries(views)) {
+    element.hidden = name !== view;
+  }
+  hideSelectedPrivateKey();
+  if (view === 'add') {
+    showKeyAddMode('generate');
+    window.setTimeout(() => document.querySelector('#key-generate-form').elements.name.focus(), 0);
+  } else if (view === 'sources') {
+    renderKeySources();
+  } else {
+    renderKeyBrowser();
+  }
+}
+
+function showKeyAddMode(mode) {
+  const generate = mode === 'generate';
+  const generateButton = document.querySelector('#show-key-generate');
+  const importButton = document.querySelector('#show-key-import');
+  document.querySelector('#key-generate-form').hidden = !generate;
+  document.querySelector('#key-import-form').hidden = generate;
+  generateButton.classList.toggle('secondary', !generate);
+  importButton.classList.toggle('secondary', generate);
+  generateButton.setAttribute('aria-selected', String(generate));
+  importButton.setAttribute('aria-selected', String(!generate));
+  setKeyImportStatus('', '');
+  const form = document.querySelector(generate ? '#key-generate-form' : '#key-import-form');
+  window.setTimeout(() => form.elements.name.focus(), 0);
+}
+
+function keySourceLabel(key) {
+  const source = keySource(key);
+  if (source === 'bashes') return 'Managed by Bashes';
+  if (source === 'system') return 'System';
+  if (source === 'wsl') return key.distribution ? `WSL: ${key.distribution}` : 'WSL';
+  if (source === 'custom') return 'Custom directory';
+  return 'External';
+}
+
+function renderKeyBrowser() {
+  const container = document.querySelector('#key-list');
+  const empty = document.querySelector('#key-empty-state');
+  const query = document.querySelector('#key-search')?.value.trim().toLocaleLowerCase() ?? '';
+  const selectedValue = document.querySelector('#key-select')?.value ?? '';
+  const keys = state.keys.filter((key) => {
+    if (!query) return true;
+    return [key.name, key.privateKey, keySourceLabel(key)]
+      .some((value) => String(value ?? '').toLocaleLowerCase().includes(query));
+  });
+  const groupOrder = ['bashes', 'system', 'wsl', 'custom'];
+  const groups = new Map();
+  for (const key of keys) {
+    const group = keySource(key) === 'wsl' ? `wsl:${key.distribution || 'WSL'}` : keySource(key);
+    if (!groups.has(group)) groups.set(group, []);
+    groups.get(group).push(key);
+  }
+
+  const fragments = [];
+  for (const source of groupOrder) {
+    for (const [group, groupKeys] of groups) {
+      if (group !== source && !group.startsWith(`${source}:`)) continue;
+      const section = document.createElement('section');
+      section.className = 'key-list-group';
+      const heading = document.createElement('h4');
+      heading.textContent = keySourceLabel(groupKeys[0]);
+      section.append(heading);
+      for (const key of groupKeys) {
+        const value = keyChoiceValue(key);
+        const row = document.createElement('button');
+        row.className = 'key-list-row';
+        row.type = 'button';
+        row.dataset.keyValue = value;
+        row.classList.toggle('selected', value === selectedValue);
+        row.setAttribute('aria-pressed', String(value === selectedValue));
+        row.append(iconElement('key'));
+        const text = document.createElement('span');
+        text.className = 'key-list-row-text';
+        const name = document.createElement('strong');
+        name.textContent = key.name;
+        const path = document.createElement('span');
+        path.textContent = key.privateKey || 'Managed key';
+        text.append(name, path);
+        row.append(text);
+        row.addEventListener('click', async () => {
+          const select = document.querySelector('#key-select');
+          select.value = value;
+          await renderSelectedKey();
+        });
+        section.append(row);
+      }
+      fragments.push(section);
+    }
+  }
+  container.replaceChildren(...fragments);
+  empty.hidden = keys.length !== 0;
+  empty.textContent = state.keys.length === 0 ? 'No SSH keys found.' : 'No keys match this search.';
+}
+
+function renderKeySources() {
+  const container = document.querySelector('#key-source-list');
+  if (!container) return;
+  const rows = state.keySources.map((source) => {
+    const row = document.createElement('section');
+    row.className = 'key-source-row';
+    const heading = document.createElement('div');
+    const label = document.createElement('strong');
+    label.textContent = source.label || keySourceLabel({ source: source.source, distribution: source.distribution });
+    const count = document.createElement('span');
+    count.textContent = `${source.count ?? 0} key${source.count === 1 ? '' : 's'}`;
+    heading.append(label, count);
+    const path = document.createElement('p');
+    path.textContent = source.path || (source.source === 'custom' ? 'Not configured' : 'Not available');
+    path.title = path.textContent;
+    row.append(heading, path);
+    if (source.error) {
+      const error = document.createElement('p');
+      error.className = 'key-source-error';
+      error.textContent = source.error;
+      row.append(error);
+    }
+    return row;
+  });
+  container.replaceChildren(...rows);
+}
+
+async function browseKeyDirectory() {
+  try {
+    const directory = await apiChooseSSHKeyDirectory();
+    if (directory) document.querySelector('#key-directory-form').elements.directory.value = directory;
+  } catch (error) {
+    const message = `Could not choose SSH keys directory: ${error?.message ?? error}`;
+    setKeyDirectoryStatus(message, 'error');
+    writeNotice(message);
+  }
+}
+
+async function rescanKeySources() {
+  setKeyDirectoryStatus('Scanning key sources ...', 'pending');
+  try {
+    await loadKeys();
+    renderKeySources();
+    setKeyDirectoryStatus('Key sources rescanned.', 'success');
+  } catch (error) {
+    const message = `Could not rescan key sources: ${error?.message ?? error}`;
+    setKeyDirectoryStatus(message, 'error');
+    writeNotice(message);
+  }
 }
 
 function keyOptionGroup(label, keys) {
@@ -3375,10 +3629,20 @@ async function renderSelectedKey() {
   hideSelectedPrivateKey();
   setKeyViewStatus('', '');
   const keyChoice = selectedKeyChoice(select);
+  const details = document.querySelector('#key-details');
+  details.hidden = !keyChoice;
+  renderKeyBrowser();
   if (!keyChoice) {
     output.value = '';
     return;
   }
+  document.querySelector('#key-details-name').textContent = keyChoice.name;
+  document.querySelector('#key-details-source').textContent = keySourceLabel(keyChoice);
+  const path = keyChoice.privateKey || keyChoice.publicKey || '';
+  const pathElement = document.querySelector('#key-details-path');
+  pathElement.textContent = path;
+  pathElement.title = path;
+  document.querySelector('#delete-managed-key').hidden = keyChoice.source !== 'bashes';
   try {
     output.value = keyChoice.source !== 'bashes'
       ? await apiReadSSHPublicKeyPath(keyChoice.publicKey || keyChoice.privateKey)
@@ -3399,7 +3663,9 @@ function hideSelectedPrivateKey() {
     output.hidden = true;
   }
   if (toggle) {
-    toggle.textContent = 'Show private key';
+    toggle.replaceChildren(iconElement('eye'));
+    toggle.title = 'Show private key';
+    toggle.setAttribute('aria-label', 'Show private key');
     toggle.setAttribute('aria-expanded', 'false');
   }
 }
@@ -3427,7 +3693,9 @@ async function toggleSelectedPrivateKey() {
       ? await apiReadSSHPrivateKey(keyChoice.name)
       : await apiReadSSHPrivateKeyPath(keyChoice.privateKey);
     output.hidden = false;
-    toggle.textContent = 'Hide private key';
+    toggle.replaceChildren(iconElement('eye-off'));
+    toggle.title = 'Hide private key';
+    toggle.setAttribute('aria-label', 'Hide private key');
     toggle.setAttribute('aria-expanded', 'true');
     setKeyViewStatus('', '');
   } catch (error) {
@@ -3436,6 +3704,82 @@ async function toggleSelectedPrivateKey() {
     setKeyViewStatus(message, 'error');
     writeNotice(message);
   }
+}
+
+async function copySelectedPublicKey() {
+  const value = document.querySelector('#public-key').value.trim();
+  if (!value) {
+    setKeyViewStatus('No public key is available to copy.', 'error');
+    return;
+  }
+  try {
+    await writeClipboard(value);
+    setKeyViewStatus('Public key copied.', 'success');
+  } catch (error) {
+    const message = `Could not copy public key: ${error?.message ?? error}`;
+    setKeyViewStatus(message, 'error');
+    writeNotice(message);
+  }
+}
+
+function resourcesUsingManagedKey(name) {
+  const resources = [];
+  const visit = (resource) => {
+    if (resource?.auth?.method === 'key' && resource.auth.keyName === name) {
+      resources.push(resource.hostname);
+    }
+    for (const child of resource?.subsystems ?? []) visit(child);
+  };
+  for (const host of state.hosts) visit(host);
+  return resources;
+}
+
+async function deleteSelectedManagedKey() {
+  const select = document.querySelector('#key-select');
+  const keyChoice = selectedKeyChoice(select);
+  if (!keyChoice || keyChoice.source !== 'bashes') return;
+  const usages = resourcesUsingManagedKey(keyChoice.name);
+  const usageMessage = usages.length > 0
+    ? `\n\nUsed by: ${usages.join(', ')}. Update those connections after deletion.`
+    : '';
+  const confirmed = await openConfirmModal({
+    kicker: 'SSH Keys',
+    title: `Delete ${keyChoice.name}?`,
+    message: `The local public and private key files will be removed. Keys already installed on remote systems are not removed.${usageMessage}`,
+    confirmLabel: 'Delete key',
+  });
+  if (!confirmed) return;
+
+  await withBusy(async () => {
+    try {
+      await apiDeleteSSHKey(keyChoice.name);
+      await loadKeys();
+      showKeyActionStatus(`Deleted ${keyChoice.name}.`, 'success');
+    } catch (error) {
+      const message = `Could not delete SSH key: ${error?.message ?? error}`;
+      setKeyViewStatus(message, 'error');
+      writeNotice(message);
+    }
+  });
+}
+
+function showKeyActionStatus(message, kind) {
+  const status = document.querySelector('#key-action-status');
+  if (!status) return;
+  status.textContent = message;
+  status.hidden = !message;
+  status.dataset.kind = kind;
+}
+
+function highlightKeyRow(value) {
+  requestAnimationFrame(() => {
+    const row = [...document.querySelectorAll('.key-list-row')]
+      .find((item) => item.dataset.keyValue === value);
+    if (!row) return;
+    row.classList.add('key-list-row-new');
+    row.scrollIntoView({ block: 'nearest' });
+    window.setTimeout(() => row.classList.remove('key-list-row-new'), 1600);
+  });
 }
 
 function renderKeyInstallSummary() {
@@ -4642,6 +4986,23 @@ async function apiListSSHKeys() {
   return clone(demoStore.keys);
 }
 
+async function apiGetSSHKeyInventory() {
+  const api = wailsAPI();
+  if (api?.GetSSHKeyInventory) {
+    return await api.GetSSHKeyInventory();
+  }
+  const keys = await apiListSSHKeys();
+  return {
+    keys,
+    sources: ['bashes', 'system', 'custom'].map((source) => ({
+      source,
+      label: source === 'bashes' ? 'Managed by Bashes' : source === 'system' ? 'System SSH directory' : 'Custom directory',
+      path: source === 'custom' ? localStorage.getItem('bashes.keys.customDirectory') || '' : '',
+      count: keys.filter((key) => keySource(key) === source).length,
+    })),
+  };
+}
+
 async function apiGetSSHKeySettings() {
   const api = wailsAPI();
   if (api?.GetSSHKeySettings) return await api.GetSSHKeySettings();
@@ -4653,6 +5014,12 @@ async function apiSaveSSHKeySettings(input) {
   if (api?.SaveSSHKeySettings) return await api.SaveSSHKeySettings(input);
   localStorage.setItem('bashes.keys.customDirectory', input.customDirectory || '');
   return { customDirectory: input.customDirectory || '' };
+}
+
+async function apiChooseSSHKeyDirectory() {
+  const api = wailsAPI();
+  if (api?.ChooseSSHKeyDirectory) return await api.ChooseSSHKeyDirectory();
+  return '';
 }
 
 async function apiImportFromHostsFile() {
@@ -4680,6 +5047,13 @@ async function apiImportSSHKeyPair(input) {
   };
   demoStore.keys.push(key);
   return clone(key);
+}
+
+async function apiDeleteSSHKey(name) {
+  const api = wailsAPI();
+  if (api?.DeleteSSHKey) return await api.DeleteSSHKey(name);
+  const index = demoStore.keys.findIndex((key) => keySource(key) === 'bashes' && key.name === name);
+  if (index >= 0) demoStore.keys.splice(index, 1);
 }
 
 async function apiReadSSHPublicKey(name) {

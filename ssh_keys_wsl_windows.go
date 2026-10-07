@@ -15,41 +15,65 @@ import (
 const wslCommandTimeout = 5 * time.Second
 
 func listWSLSSHKeys() ([]SSHKeyInfo, error) {
+	keys, _ := listWSLSSHKeyInventory()
+	return keys, nil
+}
+
+func listWSLSSHKeyInventory() ([]SSHKeyInfo, []SSHKeySourceInfo) {
 	if _, err := exec.LookPath("wsl.exe"); err != nil {
-		return []SSHKeyInfo{}, nil
+		return []SSHKeyInfo{}, []SSHKeySourceInfo{}
 	}
 
 	distributions, err := runWSLCommand("--list", "--quiet")
 	if err != nil {
-		return []SSHKeyInfo{}, nil
+		return []SSHKeyInfo{}, []SSHKeySourceInfo{{
+			Source: "wsl",
+			Label:  "WSL distributions",
+			Error:  err.Error(),
+		}}
 	}
 
 	keys := []SSHKeyInfo{}
+	sources := []SSHKeySourceInfo{}
 	for _, distribution := range nonEmptyLines(distributions) {
 		if strings.ContainsAny(distribution, "\\/") {
 			continue
+		}
+		source := SSHKeySourceInfo{
+			Source:       "wsl",
+			Label:        "WSL: " + distribution,
+			Distribution: distribution,
 		}
 		sshDirectory, err := runWSLCommand(
 			"--distribution", distribution,
 			"--exec", "sh", "-lc", `wslpath -w "$HOME/.ssh"`,
 		)
 		if err != nil {
+			source.Error = err.Error()
+			sources = append(sources, source)
 			continue
 		}
 		sshDirectory = strings.TrimSpace(sshDirectory)
+		source.Path = sshDirectory
 		if sshDirectory == "" {
+			source.Error = "could not resolve the SSH directory"
+			sources = append(sources, source)
 			continue
 		}
 		distributionKeys, err := listSSHKeysInDirectory(sshDirectory, "wsl", true)
 		if err != nil {
+			source.Error = err.Error()
+			sources = append(sources, source)
 			continue
 		}
 		for index := range distributionKeys {
 			distributionKeys[index].Distribution = distribution
 		}
+		source.Count = len(distributionKeys)
+		sources = append(sources, source)
 		keys = append(keys, distributionKeys...)
 	}
-	return keys, nil
+	return keys, sources
 }
 
 func runWSLCommand(arguments ...string) (string, error) {

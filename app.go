@@ -249,6 +249,20 @@ type SSHKeySettings struct {
 	CustomDirectory string `json:"customDirectory"`
 }
 
+type SSHKeySourceInfo struct {
+	Source       string `json:"source"`
+	Label        string `json:"label"`
+	Path         string `json:"path"`
+	Count        int    `json:"count"`
+	Distribution string `json:"distribution,omitempty"`
+	Error        string `json:"error,omitempty"`
+}
+
+type SSHKeyInventory struct {
+	Keys    []SSHKeyInfo       `json:"keys"`
+	Sources []SSHKeySourceInfo `json:"sources"`
+}
+
 type GenerateSSHKeyInput struct {
 	Name string `json:"name"`
 }
@@ -641,37 +655,63 @@ func (a *App) ImportDatabase(path string) error {
 }
 
 func (a *App) ListSSHKeys() ([]SSHKeyInfo, error) {
-	keys, err := a.listManagedSSHKeys()
+	inventory, err := a.GetSSHKeyInventory()
 	if err != nil {
 		return nil, err
 	}
-	systemKeys, err := listSystemSSHKeys()
-	if err != nil {
-		return nil, err
-	}
-	keys = append(keys, systemKeys...)
-	wslKeys, err := listWSLSSHKeys()
-	if err != nil {
-		return nil, err
-	}
-	keys = append(keys, wslKeys...)
+	return inventory.Keys, nil
+}
+
+func (a *App) GetSSHKeyInventory() (SSHKeyInventory, error) {
 	settings, err := a.GetSSHKeySettings()
 	if err != nil {
-		return nil, err
+		return SSHKeyInventory{}, err
 	}
-	customKeys, err := listCustomSSHKeys(settings.CustomDirectory)
-	if err != nil {
-		return nil, err
+
+	inventory := SSHKeyInventory{Keys: []SSHKeyInfo{}, Sources: []SSHKeySourceInfo{}}
+	managedKeys, managedSource := scanSSHKeySource(a.keysDir(), "bashes", "Managed by Bashes", true)
+	inventory.Keys = append(inventory.Keys, managedKeys...)
+	inventory.Sources = append(inventory.Sources, managedSource)
+
+	systemPath := ""
+	if home := userHomeDir(); home != "" {
+		systemPath = filepath.Join(home, ".ssh")
 	}
-	keys = append(keys, customKeys...)
-	keys = dedupeSSHKeys(keys)
-	sort.SliceStable(keys, func(i, j int) bool {
-		if keys[i].Source != keys[j].Source {
-			return keys[i].Source < keys[j].Source
+	systemKeys, systemSource := scanSSHKeySource(systemPath, "system", "System SSH directory", true)
+	inventory.Keys = append(inventory.Keys, systemKeys...)
+	inventory.Sources = append(inventory.Sources, systemSource)
+
+	wslKeys, wslSources := listWSLSSHKeyInventory()
+	inventory.Keys = append(inventory.Keys, wslKeys...)
+	inventory.Sources = append(inventory.Sources, wslSources...)
+
+	customKeys, customSource := scanSSHKeySource(settings.CustomDirectory, "custom", "Custom directory", false)
+	inventory.Keys = append(inventory.Keys, customKeys...)
+	inventory.Sources = append(inventory.Sources, customSource)
+
+	inventory.Keys = dedupeSSHKeys(inventory.Keys)
+	sort.SliceStable(inventory.Keys, func(i, j int) bool {
+		if inventory.Keys[i].Source != inventory.Keys[j].Source {
+			return inventory.Keys[i].Source < inventory.Keys[j].Source
 		}
-		return strings.ToLower(keys[i].Name) < strings.ToLower(keys[j].Name)
+		return strings.ToLower(inventory.Keys[i].Name) < strings.ToLower(inventory.Keys[j].Name)
 	})
-	return keys, nil
+	return inventory, nil
+}
+
+func scanSSHKeySource(dir string, source string, label string, ignoreMissing bool) ([]SSHKeyInfo, SSHKeySourceInfo) {
+	dir = expandHome(strings.TrimSpace(dir))
+	info := SSHKeySourceInfo{Source: source, Label: label, Path: dir}
+	if dir == "" {
+		return []SSHKeyInfo{}, info
+	}
+	keys, err := listSSHKeysInDirectory(dir, source, ignoreMissing)
+	if err != nil {
+		info.Error = err.Error()
+		return []SSHKeyInfo{}, info
+	}
+	info.Count = len(keys)
+	return keys, info
 }
 
 func (a *App) GetSSHKeySettings() (SSHKeySettings, error) {
@@ -717,6 +757,16 @@ func (a *App) SaveSSHKeySettings(input SSHKeySettings) (SSHKeySettings, error) {
 		return SSHKeySettings{}, err
 	}
 	return settings, nil
+}
+
+func (a *App) ChooseSSHKeyDirectory() (string, error) {
+	ctx := a.runtimeContext()
+	if ctx == nil {
+		return "", errors.New("application window is not ready")
+	}
+	return wailsruntime.OpenDirectoryDialog(ctx, wailsruntime.OpenDialogOptions{
+		Title: "Choose SSH Keys Directory",
+	})
 }
 
 func (a *App) listManagedSSHKeys() ([]SSHKeyInfo, error) {
@@ -901,6 +951,48 @@ func (a *App) ImportSSHKeyPair(input ImportSSHKeyPairInput) (SSHKeyInfo, error) 
 		return SSHKeyInfo{}, err
 	}
 	return SSHKeyInfo{Name: name, PrivateKey: privatePath, PublicKey: publicPath, Source: "bashes"}, nil
+}
+
+func (a *App) DeleteSSHKey(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" || sanitizeKeyName(name) != name {
+		return errors.New("invalid managed SSH key name")
+	}
+
+	paths := []string{
+		filepath.Join(a.keysDir(), name),
+		filepath.Join(a.keysDir(), name+".pub"),
+	}
+	existing := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if _, err := os.Lstat(path); err == nil {
+			existing = append(existing, path)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect managed SSH key: %w", err)
+		}
+	}
+	if len(existing) == 0 {
+		return fmt.Errorf("managed SSH key %q does not exist", name)
+	}
+
+	suffix := fmt.Sprintf(".deleting-%d", time.Now().UnixNano())
+	renamed := make([][2]string, 0, len(existing))
+	for _, path := range existing {
+		temporaryPath := path + suffix
+		if err := os.Rename(path, temporaryPath); err != nil {
+			for index := len(renamed) - 1; index >= 0; index-- {
+				_ = os.Rename(renamed[index][1], renamed[index][0])
+			}
+			return fmt.Errorf("prepare managed SSH key deletion: %w", err)
+		}
+		renamed = append(renamed, [2]string{path, temporaryPath})
+	}
+	for _, pair := range renamed {
+		if err := os.Remove(pair[1]); err != nil {
+			return fmt.Errorf("delete managed SSH key: %w", err)
+		}
+	}
+	return nil
 }
 
 func validateSSHKeyPair(privateData, publicData []byte) error {
