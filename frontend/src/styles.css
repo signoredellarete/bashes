@@ -1287,6 +1287,18 @@ html.sorting-tags * {
   font-size: 12px;
 }
 
+.webapp-workspace .webapp-workspace-status {
+  color: #495479;
+  font-weight: 600;
+}
+
+.webapp-workspace-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 7px;
+}
+
 .webapp-workspace button {
   display: inline-flex;
   align-items: center;
@@ -1298,6 +1310,12 @@ html.sorting-tags * {
   color: #fff;
   cursor: pointer;
   padding: 8px 12px;
+}
+
+.webapp-workspace button.secondary {
+  border-color: #c9d0dc;
+  background: #fff;
+  color: #495479;
 }
 
 .conditional-fields {
