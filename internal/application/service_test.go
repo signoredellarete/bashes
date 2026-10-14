@@ -515,6 +515,46 @@ func TestServiceRejectsInvalidHostOrder(t *testing.T) {
 	}
 }
 
+func TestServiceManagesWebAppsAndMixedOrder(t *testing.T) {
+	service := NewService(newMemoryStore())
+	host, err := service.AddHost(EndpointInput{Hostname: "gateway", IP: "10.0.0.1", Port: 22, User: "root"})
+	if err != nil {
+		t.Fatalf("AddHost() error = %v", err)
+	}
+	app, err := service.AddWebApp(WebAppInput{
+		Name: "Dashboard", URL: "https://dashboard.internal", Tags: []string{"prod"},
+		ConnectionMode: domain.WebAppConnectionTunnel, GatewayResourceID: host.ID,
+		PortMode: domain.WebAppPortAutomatic, BrowserMode: domain.WebAppBrowserStandard,
+		KeepCookies: true, KeepLocalStorage: true, RestoreSession: true, ClearCacheOnClose: true,
+	})
+	if err != nil {
+		t.Fatalf("AddWebApp() error = %v", err)
+	}
+	workspace, err := service.ListWorkspace()
+	if err != nil {
+		t.Fatalf("ListWorkspace() error = %v", err)
+	}
+	if len(workspace.WebApps) != 1 || workspace.WebApps[0].ID != app.ID {
+		t.Fatalf("WebApps = %+v", workspace.WebApps)
+	}
+	if err := service.ReorderTopLevel([]string{app.ID, host.ID}); err != nil {
+		t.Fatalf("ReorderTopLevel() error = %v", err)
+	}
+	workspace, _ = service.ListWorkspace()
+	if got := strings.Join(workspace.TopLevelOrder, ","); got != app.ID+","+host.ID {
+		t.Fatalf("TopLevelOrder = %q", got)
+	}
+	if err := service.DeleteResource(host.ID); err == nil || !strings.Contains(err.Error(), "gateway") {
+		t.Fatalf("DeleteResource() error = %v, want gateway dependency error", err)
+	}
+	if err := service.DeleteWebApp(app.ID); err != nil {
+		t.Fatalf("DeleteWebApp() error = %v", err)
+	}
+	if err := service.DeleteResource(host.ID); err != nil {
+		t.Fatalf("DeleteResource() after app deletion error = %v", err)
+	}
+}
+
 func TestServiceSetsResourceAuth(t *testing.T) {
 	store := newMemoryStore()
 	service := NewService(store)

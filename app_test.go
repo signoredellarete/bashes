@@ -569,6 +569,38 @@ func TestListSSHKeysIncludesCustomDirectorySetting(t *testing.T) {
 	}
 }
 
+func TestSettingsUpdatesPreserveSSHAndBrowserPreferences(t *testing.T) {
+	app := NewApp(filepath.Join(t.TempDir(), "data", "hosts.json"))
+	keysDir := t.TempDir()
+	browserPath := filepath.Join(t.TempDir(), "browser")
+	if err := os.WriteFile(browserPath, []byte("binary"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.SaveWebAppBrowserSettings(WebAppBrowserSettings{
+		PreferredBrowserID: "firefox",
+		CustomBrowserPath:  browserPath,
+	}); err != nil {
+		t.Fatalf("SaveWebAppBrowserSettings() error = %v", err)
+	}
+	if _, err := app.SaveSSHKeySettings(SSHKeySettings{CustomDirectory: keysDir}); err != nil {
+		t.Fatalf("SaveSSHKeySettings() error = %v", err)
+	}
+	browser, err := app.GetWebAppBrowserSettings()
+	if err != nil {
+		t.Fatalf("GetWebAppBrowserSettings() error = %v", err)
+	}
+	if browser.PreferredBrowserID != "firefox" || browser.CustomBrowserPath != browserPath {
+		t.Fatalf("Browser settings were overwritten: %+v", browser)
+	}
+	keys, err := app.GetSSHKeySettings()
+	if err != nil {
+		t.Fatalf("GetSSHKeySettings() error = %v", err)
+	}
+	if keys.CustomDirectory != keysDir {
+		t.Fatalf("SSH settings = %+v, want %q", keys, keysDir)
+	}
+}
+
 func TestGetSSHKeyInventoryDescribesManagedAndCustomSources(t *testing.T) {
 	app := NewApp(filepath.Join(t.TempDir(), "data", "hosts.json"))
 	if _, err := app.GenerateSSHKey(GenerateSSHKeyInput{Name: "managed"}); err != nil {

@@ -29,6 +29,7 @@ import (
 	"github.com/signoredellarete/bashes/internal/localterm"
 	"github.com/signoredellarete/bashes/internal/remotessh"
 	"github.com/signoredellarete/bashes/internal/store"
+	"github.com/signoredellarete/bashes/internal/webappbrowser"
 	"github.com/signoredellarete/bashes/internal/xserver"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"golang.org/x/crypto/ssh"
@@ -52,10 +53,13 @@ type App struct {
 	x11Server        *xserver.Manager
 	dataPath         string
 	mu               sync.Mutex
+	settingsMu       sync.Mutex
 	sessions         map[string]*sshSession
 	tunnels          map[string]*sshTunnel
 	transfers        map[string]*fileTransferSession
 	transferJobs     map[string]*fileTransferJob
+	webAppRuntimes   map[string]*webAppRuntime
+	webAppRuntimeIDs map[string]string
 	openFile         func(string) error
 	openFileCacheDir string
 }
@@ -78,6 +82,8 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 		tunnels:          make(map[string]*sshTunnel),
 		transfers:        make(map[string]*fileTransferSession),
 		transferJobs:     make(map[string]*fileTransferJob),
+		webAppRuntimes:   make(map[string]*webAppRuntime),
+		webAppRuntimeIDs: make(map[string]string),
 		openFile:         openFileWithDefaultApplication,
 		openFileCacheDir: defaultOpenFileCacheDir(dataPath),
 	}
@@ -186,6 +192,10 @@ func (a *App) ListHosts() ([]domain.Host, error) {
 	return a.service.ListHosts()
 }
 
+func (a *App) ListWorkspace() (application.Workspace, error) {
+	return a.service.ListWorkspace()
+}
+
 func (a *App) ListTags() ([]string, error) {
 	return a.service.ListTags()
 }
@@ -206,6 +216,26 @@ func (a *App) AddHost(input application.EndpointInput) (domain.Host, error) {
 	return a.service.AddHost(input)
 }
 
+func (a *App) AddWebApp(input application.WebAppInput) (domain.WebApp, error) {
+	return a.service.AddWebApp(input)
+}
+
+func (a *App) UpdateWebApp(id string, input application.WebAppInput) error {
+	if err := a.service.UpdateWebApp(id, input); err != nil {
+		return err
+	}
+	a.stopWebAppForID(id)
+	return nil
+}
+
+func (a *App) DeleteWebApp(id string) error {
+	if err := a.service.DeleteWebApp(id); err != nil {
+		return err
+	}
+	a.stopWebAppForID(id)
+	return nil
+}
+
 func (a *App) AddSubsystem(hostID string, input application.EndpointInput) (domain.Endpoint, error) {
 	return a.service.AddSubsystem(hostID, input)
 }
@@ -222,10 +252,27 @@ func (a *App) ReorderHosts(order []string) error {
 	return a.service.ReorderHosts(order)
 }
 
+func (a *App) ReorderTopLevel(order []string) error {
+	return a.service.ReorderTopLevel(order)
+}
+
 func (a *App) DeleteResource(id string) error {
 	resourceIDs, err := a.resourceIDsForDelete(id)
 	if err != nil {
 		return err
+	}
+	workspace, err := a.service.ListWorkspace()
+	if err != nil {
+		return err
+	}
+	resourceSet := make(map[string]struct{}, len(resourceIDs))
+	for _, resourceID := range resourceIDs {
+		resourceSet[resourceID] = struct{}{}
+	}
+	for _, webApp := range workspace.WebApps {
+		if _, referenced := resourceSet[webApp.GatewayResourceID]; referenced {
+			return fmt.Errorf("resource is used as gateway by web app %q", webApp.Name)
+		}
 	}
 	for _, resourceID := range resourceIDs {
 		a.stopSessionsForResource(resourceID)
@@ -251,6 +298,17 @@ type SSHKeyInfo struct {
 
 type SSHKeySettings struct {
 	CustomDirectory string `json:"customDirectory"`
+}
+
+type WebAppBrowserSettings struct {
+	PreferredBrowserID string `json:"preferredBrowserId,omitempty"`
+	CustomBrowserPath  string `json:"customBrowserPath,omitempty"`
+}
+
+type appSettings struct {
+	CustomDirectory    string `json:"customDirectory,omitempty"`
+	PreferredBrowserID string `json:"preferredBrowserId,omitempty"`
+	CustomBrowserPath  string `json:"customBrowserPath,omitempty"`
 }
 
 type SSHKeySourceInfo struct {
@@ -719,48 +777,133 @@ func scanSSHKeySource(dir string, source string, label string, ignoreMissing boo
 }
 
 func (a *App) GetSSHKeySettings() (SSHKeySettings, error) {
-	data, err := os.ReadFile(a.settingsPath())
+	a.settingsMu.Lock()
+	defer a.settingsMu.Unlock()
+
+	settings, err := a.loadSettings()
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return SSHKeySettings{}, nil
-		}
 		return SSHKeySettings{}, err
 	}
-	var settings SSHKeySettings
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return SSHKeySettings{}, fmt.Errorf("decode settings: %w", err)
-	}
-	settings.CustomDirectory = strings.TrimSpace(settings.CustomDirectory)
-	return settings, nil
+	return SSHKeySettings{CustomDirectory: settings.CustomDirectory}, nil
 }
 
 func (a *App) SaveSSHKeySettings(input SSHKeySettings) (SSHKeySettings, error) {
-	settings := SSHKeySettings{
-		CustomDirectory: strings.TrimSpace(input.CustomDirectory),
+	a.settingsMu.Lock()
+	defer a.settingsMu.Unlock()
+
+	settings, err := a.loadSettings()
+	if err != nil {
+		return SSHKeySettings{}, err
 	}
-	if settings.CustomDirectory != "" {
-		dir := expandHome(settings.CustomDirectory)
+	customDirectory := strings.TrimSpace(input.CustomDirectory)
+	if customDirectory != "" {
+		dir := expandHome(customDirectory)
 		info, err := os.Stat(dir)
 		if err != nil {
 			return SSHKeySettings{}, fmt.Errorf("read custom keys directory: %w", err)
 		}
 		if !info.IsDir() {
-			return SSHKeySettings{}, fmt.Errorf("custom keys path is not a directory: %s", settings.CustomDirectory)
+			return SSHKeySettings{}, fmt.Errorf("custom keys path is not a directory: %s", customDirectory)
 		}
-		settings.CustomDirectory = dir
+		customDirectory = dir
 	}
-
-	if err := os.MkdirAll(filepath.Dir(a.settingsPath()), 0o700); err != nil {
+	settings.CustomDirectory = customDirectory
+	if err := a.writeSettings(settings); err != nil {
 		return SSHKeySettings{}, err
+	}
+	return SSHKeySettings{CustomDirectory: customDirectory}, nil
+}
+
+func (a *App) ListWebAppBrowsers() []webappbrowser.Browser {
+	return webappbrowser.NewDetector(goruntime.GOOS, getenv).Detect()
+}
+
+func (a *App) GetWebAppBrowserSettings() (WebAppBrowserSettings, error) {
+	a.settingsMu.Lock()
+	defer a.settingsMu.Unlock()
+
+	settings, err := a.loadSettings()
+	if err != nil {
+		return WebAppBrowserSettings{}, err
+	}
+	return WebAppBrowserSettings{
+		PreferredBrowserID: settings.PreferredBrowserID,
+		CustomBrowserPath:  settings.CustomBrowserPath,
+	}, nil
+}
+
+func (a *App) SaveWebAppBrowserSettings(input WebAppBrowserSettings) (WebAppBrowserSettings, error) {
+	a.settingsMu.Lock()
+	defer a.settingsMu.Unlock()
+
+	preferredID := strings.TrimSpace(input.PreferredBrowserID)
+	customPath := expandHome(strings.TrimSpace(input.CustomBrowserPath))
+	if preferredID != "" && !validWebAppBrowserID(preferredID) {
+		return WebAppBrowserSettings{}, fmt.Errorf("unsupported browser %q", preferredID)
+	}
+	if customPath != "" {
+		info, err := os.Stat(customPath)
+		if err != nil {
+			return WebAppBrowserSettings{}, fmt.Errorf("read browser executable: %w", err)
+		}
+		if info.IsDir() {
+			return WebAppBrowserSettings{}, errors.New("browser executable path points to a directory")
+		}
+		if goruntime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
+			return WebAppBrowserSettings{}, errors.New("browser executable is not executable")
+		}
+		if preferredID == "" {
+			return WebAppBrowserSettings{}, errors.New("select the browser type for the custom executable")
+		}
+	}
+	settings, err := a.loadSettings()
+	if err != nil {
+		return WebAppBrowserSettings{}, err
+	}
+	settings.PreferredBrowserID = preferredID
+	settings.CustomBrowserPath = customPath
+	if err := a.writeSettings(settings); err != nil {
+		return WebAppBrowserSettings{}, err
+	}
+	return WebAppBrowserSettings{PreferredBrowserID: preferredID, CustomBrowserPath: customPath}, nil
+}
+
+func validWebAppBrowserID(id string) bool {
+	switch webappbrowser.ID(id) {
+	case webappbrowser.Firefox, webappbrowser.Chrome, webappbrowser.Chromium, webappbrowser.Edge:
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *App) loadSettings() (appSettings, error) {
+	data, err := os.ReadFile(a.settingsPath())
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return appSettings{}, nil
+		}
+		return appSettings{}, fmt.Errorf("read settings: %w", err)
+	}
+	var settings appSettings
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return appSettings{}, fmt.Errorf("decode settings: %w", err)
+	}
+	settings.CustomDirectory = strings.TrimSpace(settings.CustomDirectory)
+	settings.PreferredBrowserID = strings.TrimSpace(settings.PreferredBrowserID)
+	settings.CustomBrowserPath = strings.TrimSpace(settings.CustomBrowserPath)
+	return settings, nil
+}
+
+func (a *App) writeSettings(settings appSettings) error {
+	if err := os.MkdirAll(filepath.Dir(a.settingsPath()), 0o700); err != nil {
+		return err
 	}
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
-		return SSHKeySettings{}, err
+		return err
 	}
-	if err := writeFileAtomic(a.settingsPath(), append(data, '\n'), 0o600); err != nil {
-		return SSHKeySettings{}, err
-	}
-	return settings, nil
+	return writeFileAtomic(a.settingsPath(), append(data, '\n'), 0o600)
 }
 
 func (a *App) ChooseSSHKeyDirectory() (string, error) {
@@ -1855,6 +1998,7 @@ func (a *App) stopAllRuntimeConnections() {
 	for _, id := range transferIDs {
 		_ = a.CloseFileTransfer(id)
 	}
+	a.stopAllWebAppRuntimes()
 }
 
 func (a *App) resourceByID(id string) (domain.Endpoint, error) {

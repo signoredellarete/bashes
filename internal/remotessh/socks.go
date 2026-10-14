@@ -22,6 +22,16 @@ func ServeSOCKS5(ctx context.Context, listener net.Listener, client *ssh.Client)
 	if client == nil {
 		return errors.New("ssh client is required")
 	}
+	return ServeSOCKS5WithDialer(ctx, listener, client.Dial)
+}
+
+func ServeSOCKS5WithDialer(ctx context.Context, listener net.Listener, dial DialFunc) error {
+	if listener == nil {
+		return errors.New("socks listener is required")
+	}
+	if dial == nil {
+		return errors.New("socks dialer is required")
+	}
 
 	connections := newConnectionSet()
 	go func() {
@@ -44,7 +54,7 @@ func ServeSOCKS5(ctx context.Context, listener net.Listener, client *ssh.Client)
 		connections.add(conn)
 		go func() {
 			defer connections.remove(conn)
-			_ = HandleSOCKS5(conn, client.Dial)
+			_ = HandleSOCKS5(conn, dial)
 		}()
 	}
 }

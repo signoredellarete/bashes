@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -12,7 +13,7 @@ import (
 	"unicode/utf8"
 )
 
-const CurrentSchemaVersion = 1
+const CurrentSchemaVersion = 2
 
 const (
 	MaxTagsPerResource = 32
@@ -27,12 +28,52 @@ const (
 	ResourceLXC    ResourceType = "lxc"
 	ResourceVM     ResourceType = "vm"
 	ResourceDocker ResourceType = "docker"
+	ResourceWebApp ResourceType = "webapp"
 )
 
 type Store struct {
-	Version int      `json:"version"`
-	Tags    []string `json:"tags,omitempty"`
-	Hosts   []Host   `json:"hosts"`
+	Version       int      `json:"version"`
+	Tags          []string `json:"tags,omitempty"`
+	Hosts         []Host   `json:"hosts"`
+	WebApps       []WebApp `json:"webApps,omitempty"`
+	TopLevelOrder []string `json:"topLevelOrder,omitempty"`
+}
+
+type WebAppConnectionMode string
+
+const (
+	WebAppConnectionDirect WebAppConnectionMode = "direct"
+	WebAppConnectionTunnel WebAppConnectionMode = "tunnel"
+)
+
+type WebAppPortMode string
+
+const (
+	WebAppPortAutomatic WebAppPortMode = "automatic"
+	WebAppPortManual    WebAppPortMode = "manual"
+)
+
+type WebAppBrowserMode string
+
+const (
+	WebAppBrowserStandard WebAppBrowserMode = "standard"
+	WebAppBrowserPrivate  WebAppBrowserMode = "private"
+)
+
+type WebApp struct {
+	ID                string               `json:"id"`
+	Name              string               `json:"name"`
+	URL               string               `json:"url"`
+	Tags              []string             `json:"tags,omitempty"`
+	ConnectionMode    WebAppConnectionMode `json:"connectionMode"`
+	GatewayResourceID string               `json:"gatewayResourceId,omitempty"`
+	PortMode          WebAppPortMode       `json:"portMode,omitempty"`
+	LocalSOCKSPort    int                  `json:"localSocksPort,omitempty"`
+	BrowserMode       WebAppBrowserMode    `json:"browserMode"`
+	KeepCookies       bool                 `json:"keepCookies"`
+	KeepLocalStorage  bool                 `json:"keepLocalStorage"`
+	RestoreSession    bool                 `json:"restoreSession"`
+	ClearCacheOnClose bool                 `json:"clearCacheOnClose"`
 }
 
 type Host struct {
@@ -76,7 +117,12 @@ type Auth struct {
 }
 
 func NewStore() Store {
-	return Store{Version: CurrentSchemaVersion, Hosts: []Host{}}
+	return Store{
+		Version:       CurrentSchemaVersion,
+		Hosts:         []Host{},
+		WebApps:       []WebApp{},
+		TopLevelOrder: []string{},
+	}
 }
 
 func (s Store) Validate() error {
@@ -88,6 +134,7 @@ func (s Store) Validate() error {
 	}
 
 	seen := map[string]struct{}{}
+	resourceIDs := map[string]struct{}{}
 	for i, host := range s.Hosts {
 		if err := validateEndpointFields("host", host.ID, host.Hostname, host.IP, host.Port, host.User); err != nil {
 			return fmt.Errorf("hosts[%d]: %w", i, err)
@@ -105,14 +152,102 @@ func (s Store) Validate() error {
 			return fmt.Errorf("hosts[%d]: duplicate id %q", i, host.ID)
 		}
 		seen[host.ID] = struct{}{}
+		resourceIDs[host.ID] = struct{}{}
 
 		for j := range host.Subsystems {
 			if err := validateSubsystem(host.Subsystems[j], fmt.Sprintf("hosts[%d].subsystems[%d]", i, j), seen); err != nil {
 				return err
 			}
+			collectSubsystemIDs(host.Subsystems[j], resourceIDs)
 		}
 	}
 
+	topLevelIDs := make(map[string]struct{}, len(s.Hosts)+len(s.WebApps))
+	for _, host := range s.Hosts {
+		topLevelIDs[host.ID] = struct{}{}
+	}
+	for i, app := range s.WebApps {
+		if err := validateWebApp(app, resourceIDs); err != nil {
+			return fmt.Errorf("webApps[%d]: %w", i, err)
+		}
+		if _, exists := seen[app.ID]; exists {
+			return fmt.Errorf("webApps[%d]: duplicate id %q", i, app.ID)
+		}
+		seen[app.ID] = struct{}{}
+		topLevelIDs[app.ID] = struct{}{}
+	}
+	if len(s.TopLevelOrder) != len(topLevelIDs) {
+		return fmt.Errorf("topLevelOrder has %d entries, want %d", len(s.TopLevelOrder), len(topLevelIDs))
+	}
+	ordered := make(map[string]struct{}, len(s.TopLevelOrder))
+	for i, id := range s.TopLevelOrder {
+		if _, exists := topLevelIDs[id]; !exists {
+			return fmt.Errorf("topLevelOrder[%d]: unknown id %q", i, id)
+		}
+		if _, exists := ordered[id]; exists {
+			return fmt.Errorf("topLevelOrder[%d]: duplicate id %q", i, id)
+		}
+		ordered[id] = struct{}{}
+	}
+
+	return nil
+}
+
+func collectSubsystemIDs(sub Endpoint, ids map[string]struct{}) {
+	ids[sub.ID] = struct{}{}
+	for _, child := range sub.Subsystems {
+		collectSubsystemIDs(child, ids)
+	}
+}
+
+func validateWebApp(app WebApp, resourceIDs map[string]struct{}) error {
+	if strings.TrimSpace(app.ID) == "" {
+		return errors.New("id is required")
+	}
+	if strings.TrimSpace(app.Name) == "" {
+		return errors.New("name is required")
+	}
+	if hasControl(app.Name) {
+		return errors.New("name contains control characters")
+	}
+	parsed, err := url.ParseRequestURI(strings.TrimSpace(app.URL))
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return errors.New("url must be an absolute HTTP or HTTPS URL")
+	}
+	if parsed.User != nil {
+		return errors.New("url must not contain credentials")
+	}
+	if hasControl(app.URL) {
+		return errors.New("url contains control characters")
+	}
+	if err := ValidateTags(app.Tags); err != nil {
+		return fmt.Errorf("tags: %w", err)
+	}
+	if app.BrowserMode != WebAppBrowserStandard && app.BrowserMode != WebAppBrowserPrivate {
+		return fmt.Errorf("invalid browser mode %q", app.BrowserMode)
+	}
+	switch app.ConnectionMode {
+	case WebAppConnectionDirect:
+		if app.GatewayResourceID != "" || app.LocalSOCKSPort != 0 {
+			return errors.New("direct connection must not define a gateway or SOCKS port")
+		}
+	case WebAppConnectionTunnel:
+		if _, exists := resourceIDs[app.GatewayResourceID]; !exists {
+			return fmt.Errorf("gateway resource %q not found", app.GatewayResourceID)
+		}
+		if app.PortMode != WebAppPortAutomatic && app.PortMode != WebAppPortManual {
+			return fmt.Errorf("invalid port mode %q", app.PortMode)
+		}
+		if app.PortMode == WebAppPortManual {
+			if app.LocalSOCKSPort < 1 || app.LocalSOCKSPort > 65535 {
+				return errors.New("local SOCKS port must be between 1 and 65535")
+			}
+		} else if app.LocalSOCKSPort != 0 {
+			return errors.New("automatic port mode must not define a SOCKS port")
+		}
+	default:
+		return fmt.Errorf("invalid connection mode %q", app.ConnectionMode)
+	}
 	return nil
 }
 
@@ -156,7 +291,7 @@ func ValidAuthMethod(method AuthMethod) bool {
 
 func NormalizeStore(store Store) Store {
 	if store.Version == 0 {
-		store.Version = CurrentSchemaVersion
+		store.Version = 1
 	}
 	if store.Hosts == nil {
 		store.Hosts = []Host{}
@@ -178,8 +313,61 @@ func NormalizeStore(store Store) Store {
 			store.Tags = mergeSubsystemTags(store.Tags, host.Subsystems[j])
 		}
 	}
+	if store.Version == 1 {
+		store.Version = CurrentSchemaVersion
+	}
+	if store.WebApps == nil {
+		store.WebApps = []WebApp{}
+	}
+	for i := range store.WebApps {
+		app := &store.WebApps[i]
+		app.Name = strings.TrimSpace(app.Name)
+		app.URL = strings.TrimSpace(app.URL)
+		app.Tags = NormalizeTags(app.Tags)
+		store.Tags = MergeTags(store.Tags, app.Tags)
+		if app.ID == "" {
+			app.ID = StableID(ResourceWebApp, app.Name, app.URL, 0, "", i)
+		}
+	}
+	store.TopLevelOrder = normalizeTopLevelOrder(store.TopLevelOrder, store.Hosts, store.WebApps)
 
 	return store
+}
+
+func normalizeTopLevelOrder(order []string, hosts []Host, apps []WebApp) []string {
+	valid := make(map[string]struct{}, len(hosts)+len(apps))
+	for _, host := range hosts {
+		valid[host.ID] = struct{}{}
+	}
+	for _, app := range apps {
+		valid[app.ID] = struct{}{}
+	}
+
+	normalized := make([]string, 0, len(valid))
+	seen := make(map[string]struct{}, len(valid))
+	for _, id := range order {
+		if _, exists := valid[id]; !exists {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		normalized = append(normalized, id)
+	}
+	for _, host := range hosts {
+		if _, exists := seen[host.ID]; !exists {
+			seen[host.ID] = struct{}{}
+			normalized = append(normalized, host.ID)
+		}
+	}
+	for _, app := range apps {
+		if _, exists := seen[app.ID]; !exists {
+			seen[app.ID] = struct{}{}
+			normalized = append(normalized, app.ID)
+		}
+	}
+	return normalized
 }
 
 func mergeSubsystemTags(catalog []string, subsystem Endpoint) []string {
