@@ -57,7 +57,6 @@ type webAppRuntime struct {
 	clientMu    sync.RWMutex
 	client      *ssh.Client
 	listener    net.Listener
-	ctx         context.Context
 	cancel      context.CancelFunc
 	gateway     domain.Endpoint
 	sshInput    SSHSessionInput
@@ -125,51 +124,6 @@ func (a *App) StopWebAppRuntime(runtimeID string) error {
 	}
 	a.closeWebAppRuntime(runtime, true, "Web App browser closed")
 	return nil
-}
-
-func (a *App) RestartWebAppTunnel(webAppID string) (WebAppRuntimeInfo, error) {
-	webAppID = strings.TrimSpace(webAppID)
-	a.mu.Lock()
-	runtimeID := a.webAppRuntimeIDs[webAppID]
-	runtime := a.webAppRuntimes[runtimeID]
-	a.mu.Unlock()
-	if runtime == nil || runtime.listener == nil {
-		return WebAppRuntimeInfo{}, errors.New("Web App SSH tunnel is not active")
-	}
-
-	runtime.reconnectMu.Lock()
-	runtime.clientMu.Lock()
-	previousClient := runtime.client
-	runtime.client = nil
-	runtime.clientMu.Unlock()
-	if previousClient != nil {
-		_ = previousClient.Close()
-	}
-
-	client, err := a.dialResource(runtime.gateway, a.resolveSessionKeyPath(runtime.sshInput), remotessh.DefaultTimeout)
-	if err != nil {
-		runtime.reconnectMu.Unlock()
-		a.closeWebAppRuntime(runtime, true, fmt.Sprintf("Web App tunnel restart failed: %v", err))
-		return WebAppRuntimeInfo{}, fmt.Errorf("restart Web App SSH tunnel: %w", err)
-	}
-	if runtime.ctx.Err() != nil {
-		client.Close()
-		runtime.reconnectMu.Unlock()
-		return WebAppRuntimeInfo{}, errors.New("Web App runtime is closing")
-	}
-	runtime.clientMu.Lock()
-	runtime.client = client
-	runtime.clientMu.Unlock()
-	runtime.reconnectMu.Unlock()
-
-	a.monitorWebAppTunnel(runtime.ctx, runtime, client)
-	info := runtime.info
-	info.WebAppID = webAppID
-	a.emitData("webapp:status", map[string]interface{}{
-		"runtimeId": runtime.id, "webAppId": webAppID,
-		"message": "Web App SSH tunnel restarted", "socksPort": info.SOCKSPort, "tunnel": true,
-	})
-	return info, nil
 }
 
 func (a *App) startWebAppRuntime(app domain.WebApp, browser webappbrowser.Browser, input WebAppLaunchInput, groupKey string) (*webAppRuntime, error) {
@@ -256,7 +210,7 @@ func (a *App) startWebAppRuntime(app domain.WebApp, browser webappbrowser.Browse
 	runtime := &webAppRuntime{
 		id: runtimeID, groupKey: groupKey, browser: browser, profileDir: profileDir,
 		private: privateProfile, policy: policy, process: command, client: client,
-		listener: listener, ctx: ctx, cancel: cancel, apps: map[string]struct{}{app.ID: {}},
+		listener: listener, cancel: cancel, apps: map[string]struct{}{app.ID: {}},
 		gateway: gateway, sshInput: sessionInput,
 		info: WebAppRuntimeInfo{
 			RuntimeID: runtimeID, WebAppID: app.ID, BrowserID: string(browser.ID), Browser: browser.Name,

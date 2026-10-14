@@ -14,7 +14,7 @@ The app is built with Wails, Go and a Vite frontend. The terminal surface uses `
 - Persistent tags assignable while adding or editing a connection, or by dragging a sidebar tag onto a connection card; tags can be removed by drag and combined with `ANY` or `ALL` filters.
 - Animated drag-and-drop ordering of host blocks in the sidebar; subsystem drags move the parent host block with all children.
 - Top-level Web App entries for internal HTTP/HTTPS applications, opened directly or through a Bashes-managed SSH SOCKS tunnel with remote DNS resolution.
-- Active Web App tunnels show a `tun` chip and their loopback SOCKS port in the Web App workspace, where the SSH connection can be restarted without changing the assigned port.
+- Active Web App tunnels show a `tun` chip and their loopback SOCKS port in the Web App workspace, where the managed tunnel can be stopped explicitly.
 - Isolated standard or private browser profiles for Web Apps, optional cookie/local-storage/session retention, and cache cleanup on browser close. Firefox, Chrome, Chromium and Microsoft Edge are supported; Safari is not used for proxied Web Apps.
 - Contextual actions for the selected resource: edit, add subsystem, key management, delete and connect.
 - Tabbed terminal area for multiple SSH sessions, including multiple sessions to the same resource and drag-and-drop tab ordering.

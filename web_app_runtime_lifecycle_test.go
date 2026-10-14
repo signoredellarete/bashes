@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -24,12 +23,5 @@ func TestBrowserLauncherDetachedOnlyForQuickSuccessfulExit(t *testing.T) {
 				t.Fatalf("browserLauncherDetached() = %v, want %v", got, test.want)
 			}
 		})
-	}
-}
-
-func TestRestartWebAppTunnelRequiresActiveTunnel(t *testing.T) {
-	app := NewApp(filepath.Join(t.TempDir(), "hosts.json"))
-	if _, err := app.RestartWebAppTunnel("missing"); err == nil {
-		t.Fatal("RestartWebAppTunnel() error = nil, want inactive tunnel error")
 	}
 }

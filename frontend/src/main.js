@@ -346,7 +346,7 @@ app.innerHTML = `
         <p id="webapp-workspace-status" class="webapp-workspace-status"></p>
         <div class="webapp-workspace-actions">
           <button id="webapp-workspace-open" type="button">${iconMarkup('external-link')}<span>Open Web App</span></button>
-          <button id="webapp-workspace-restart" class="secondary" type="button" hidden>${iconMarkup('refresh')}<span>Restart Tunnel</span></button>
+          <button id="webapp-workspace-stop" class="secondary" type="button" hidden>${iconMarkup('plug-connected-x')}<span>Stop Tunnel</span></button>
         </div>
       </section>
     </section>
@@ -940,7 +940,7 @@ document.querySelector('#webapp-form').elements.browserMode.addEventListener('ch
 document.querySelector('#webapp-auth-form').addEventListener('submit', (event) => submitWebAppAuth(event));
 registerAuthChoiceSync(document.querySelector('#webapp-auth-form'));
 document.querySelector('#webapp-workspace-open').addEventListener('click', () => openSelectedWebApp());
-document.querySelector('#webapp-workspace-restart').addEventListener('click', () => restartSelectedWebAppTunnel());
+document.querySelector('#webapp-workspace-stop').addEventListener('click', () => stopSelectedWebAppTunnel());
 document.querySelector('#resource-tag-query').addEventListener('input', (event) => {
   state.resourceTagQuery = event.currentTarget.value;
   renderResourceTagOptions();
@@ -1468,16 +1468,16 @@ async function openSelectedWebApp() {
   await launchWebApp(selected.resource);
 }
 
-async function restartSelectedWebAppTunnel() {
+async function stopSelectedWebAppTunnel() {
   const selected = findResource(state.selectedId);
   if (selected?.type !== 'webapp') return;
   const runtime = state.webAppRuntimes.get(selected.resource.id);
   if (!runtime?.tunnel) return;
 
   await withBusy(async () => {
-    const restarted = await apiRestartWebAppTunnel(selected.resource.id);
-    state.webAppRuntimes.set(selected.resource.id, restarted);
-    writeNotice(`Restarted Web App tunnel on 127.0.0.1:${restarted.socksPort}.`);
+    await apiStopWebAppRuntime(runtime.runtimeId);
+    state.webAppRuntimes.delete(selected.resource.id);
+    writeNotice(`Stopped Web App tunnel on 127.0.0.1:${runtime.socksPort}.`);
     renderHosts(searchInput.value);
     renderSelection();
   });
@@ -3767,7 +3767,7 @@ function renderWorkbench(selected) {
     : 'Direct connection';
   const runtime = state.webAppRuntimes.get(webApp.id);
   const status = document.querySelector('#webapp-workspace-status');
-  const restart = document.querySelector('#webapp-workspace-restart');
+  const stop = document.querySelector('#webapp-workspace-stop');
   if (runtime?.tunnel) {
     status.textContent = `Tunnel active on 127.0.0.1:${runtime.socksPort}`;
   } else if (runtime) {
@@ -3775,8 +3775,8 @@ function renderWorkbench(selected) {
   } else {
     status.textContent = webApp.connectionMode === 'tunnel' ? 'Tunnel inactive' : 'Ready to open';
   }
-  restart.hidden = !runtime?.tunnel;
-  restart.disabled = state.busy || !runtime?.tunnel;
+  stop.hidden = !runtime?.tunnel;
+  stop.disabled = state.busy || !runtime?.tunnel;
 }
 
 function renderKeyOptions(select = document.querySelector('#key-select'), includeEmpty = false) {
@@ -5678,12 +5678,9 @@ async function apiLaunchWebApp(input) {
   };
 }
 
-async function apiRestartWebAppTunnel(webAppID) {
+async function apiStopWebAppRuntime(runtimeID) {
   const api = wailsAPI();
-  if (api?.RestartWebAppTunnel) return await api.RestartWebAppTunnel(webAppID);
-  const runtime = state.webAppRuntimes.get(webAppID);
-  if (!runtime?.tunnel) throw new Error('Web App SSH tunnel is not active');
-  return clone(runtime);
+  if (api?.StopWebAppRuntime) return await api.StopWebAppRuntime(runtimeID);
 }
 
 async function apiListWebAppRuntimes() {
