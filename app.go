@@ -29,6 +29,7 @@ import (
 	"github.com/signoredellarete/bashes/internal/localterm"
 	"github.com/signoredellarete/bashes/internal/remotessh"
 	"github.com/signoredellarete/bashes/internal/store"
+	"github.com/signoredellarete/bashes/internal/webappbrowser"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
@@ -50,6 +51,7 @@ type App struct {
 	passwords        credentials.Store
 	dataPath         string
 	mu               sync.Mutex
+	settingsMu       sync.Mutex
 	sessions         map[string]*sshSession
 	tunnels          map[string]*sshTunnel
 	transfers        map[string]*fileTransferSession
@@ -267,6 +269,17 @@ type SSHKeyInfo struct {
 
 type SSHKeySettings struct {
 	CustomDirectory string `json:"customDirectory"`
+}
+
+type WebAppBrowserSettings struct {
+	PreferredBrowserID string `json:"preferredBrowserId,omitempty"`
+	CustomBrowserPath  string `json:"customBrowserPath,omitempty"`
+}
+
+type appSettings struct {
+	CustomDirectory    string `json:"customDirectory,omitempty"`
+	PreferredBrowserID string `json:"preferredBrowserId,omitempty"`
+	CustomBrowserPath  string `json:"customBrowserPath,omitempty"`
 }
 
 type SSHKeySourceInfo struct {
@@ -735,48 +748,130 @@ func scanSSHKeySource(dir string, source string, label string, ignoreMissing boo
 }
 
 func (a *App) GetSSHKeySettings() (SSHKeySettings, error) {
-	data, err := os.ReadFile(a.settingsPath())
+	a.settingsMu.Lock()
+	defer a.settingsMu.Unlock()
+
+	settings, err := a.loadSettings()
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return SSHKeySettings{}, nil
-		}
 		return SSHKeySettings{}, err
 	}
-	var settings SSHKeySettings
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return SSHKeySettings{}, fmt.Errorf("decode settings: %w", err)
-	}
-	settings.CustomDirectory = strings.TrimSpace(settings.CustomDirectory)
-	return settings, nil
+	return SSHKeySettings{CustomDirectory: settings.CustomDirectory}, nil
 }
 
 func (a *App) SaveSSHKeySettings(input SSHKeySettings) (SSHKeySettings, error) {
-	settings := SSHKeySettings{
-		CustomDirectory: strings.TrimSpace(input.CustomDirectory),
+	a.settingsMu.Lock()
+	defer a.settingsMu.Unlock()
+
+	settings, err := a.loadSettings()
+	if err != nil {
+		return SSHKeySettings{}, err
 	}
-	if settings.CustomDirectory != "" {
-		dir := expandHome(settings.CustomDirectory)
+	customDirectory := strings.TrimSpace(input.CustomDirectory)
+	if customDirectory != "" {
+		dir := expandHome(customDirectory)
 		info, err := os.Stat(dir)
 		if err != nil {
 			return SSHKeySettings{}, fmt.Errorf("read custom keys directory: %w", err)
 		}
 		if !info.IsDir() {
-			return SSHKeySettings{}, fmt.Errorf("custom keys path is not a directory: %s", settings.CustomDirectory)
+			return SSHKeySettings{}, fmt.Errorf("custom keys path is not a directory: %s", customDirectory)
 		}
-		settings.CustomDirectory = dir
+		customDirectory = dir
 	}
-
-	if err := os.MkdirAll(filepath.Dir(a.settingsPath()), 0o700); err != nil {
+	settings.CustomDirectory = customDirectory
+	if err := a.writeSettings(settings); err != nil {
 		return SSHKeySettings{}, err
+	}
+	return SSHKeySettings{CustomDirectory: customDirectory}, nil
+}
+
+func (a *App) ListWebAppBrowsers() []webappbrowser.Browser {
+	return webappbrowser.NewDetector(goruntime.GOOS, getenv).Detect()
+}
+
+func (a *App) GetWebAppBrowserSettings() (WebAppBrowserSettings, error) {
+	a.settingsMu.Lock()
+	defer a.settingsMu.Unlock()
+
+	settings, err := a.loadSettings()
+	if err != nil {
+		return WebAppBrowserSettings{}, err
+	}
+	return WebAppBrowserSettings{
+		PreferredBrowserID: settings.PreferredBrowserID,
+		CustomBrowserPath:  settings.CustomBrowserPath,
+	}, nil
+}
+
+func (a *App) SaveWebAppBrowserSettings(input WebAppBrowserSettings) (WebAppBrowserSettings, error) {
+	a.settingsMu.Lock()
+	defer a.settingsMu.Unlock()
+
+	preferredID := strings.TrimSpace(input.PreferredBrowserID)
+	customPath := strings.TrimSpace(input.CustomBrowserPath)
+	if preferredID != "" && !validWebAppBrowserID(preferredID) {
+		return WebAppBrowserSettings{}, fmt.Errorf("unsupported browser %q", preferredID)
+	}
+	if customPath != "" {
+		info, err := os.Stat(customPath)
+		if err != nil {
+			return WebAppBrowserSettings{}, fmt.Errorf("read browser executable: %w", err)
+		}
+		if info.IsDir() {
+			return WebAppBrowserSettings{}, errors.New("browser executable path points to a directory")
+		}
+		if preferredID == "" {
+			return WebAppBrowserSettings{}, errors.New("select the browser type for the custom executable")
+		}
+	}
+	settings, err := a.loadSettings()
+	if err != nil {
+		return WebAppBrowserSettings{}, err
+	}
+	settings.PreferredBrowserID = preferredID
+	settings.CustomBrowserPath = customPath
+	if err := a.writeSettings(settings); err != nil {
+		return WebAppBrowserSettings{}, err
+	}
+	return WebAppBrowserSettings{PreferredBrowserID: preferredID, CustomBrowserPath: customPath}, nil
+}
+
+func validWebAppBrowserID(id string) bool {
+	switch webappbrowser.ID(id) {
+	case webappbrowser.Firefox, webappbrowser.Chrome, webappbrowser.Chromium, webappbrowser.Edge:
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *App) loadSettings() (appSettings, error) {
+	data, err := os.ReadFile(a.settingsPath())
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return appSettings{}, nil
+		}
+		return appSettings{}, fmt.Errorf("read settings: %w", err)
+	}
+	var settings appSettings
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return appSettings{}, fmt.Errorf("decode settings: %w", err)
+	}
+	settings.CustomDirectory = strings.TrimSpace(settings.CustomDirectory)
+	settings.PreferredBrowserID = strings.TrimSpace(settings.PreferredBrowserID)
+	settings.CustomBrowserPath = strings.TrimSpace(settings.CustomBrowserPath)
+	return settings, nil
+}
+
+func (a *App) writeSettings(settings appSettings) error {
+	if err := os.MkdirAll(filepath.Dir(a.settingsPath()), 0o700); err != nil {
+		return err
 	}
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
-		return SSHKeySettings{}, err
+		return err
 	}
-	if err := writeFileAtomic(a.settingsPath(), append(data, '\n'), 0o600); err != nil {
-		return SSHKeySettings{}, err
-	}
-	return settings, nil
+	return writeFileAtomic(a.settingsPath(), append(data, '\n'), 0o600)
 }
 
 func (a *App) ChooseSSHKeyDirectory() (string, error) {
