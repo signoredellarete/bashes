@@ -339,17 +339,17 @@ app.innerHTML = `
         <div id="session-tabs" class="session-tabs" hidden></div>
         <div id="terminal-stack" class="terminal-stack">
           <div id="empty-terminal" class="empty-terminal">No active terminal session</div>
-        </div>
-      </section>
-      <section id="webapp-workspace" class="webapp-workspace" hidden>
-        <div class="webapp-workspace-icon">${iconMarkup('world-www')}</div>
-        <h3 id="webapp-workspace-name"></h3>
-        <p id="webapp-workspace-url"></p>
-        <p id="webapp-workspace-mode"></p>
-        <p id="webapp-workspace-status" class="webapp-workspace-status"></p>
-        <div class="webapp-workspace-actions">
-          <button id="webapp-workspace-open" type="button">${iconMarkup('external-link')}<span>Open Web App</span></button>
-          <button id="webapp-workspace-tunnel-toggle" class="secondary" type="button" hidden>${iconMarkup('plug-connected-x')}<span>Stop Tunnel</span></button>
+          <section id="webapp-workspace" class="webapp-workspace" hidden>
+            <div class="webapp-workspace-icon">${iconMarkup('world-www')}</div>
+            <h3 id="webapp-workspace-name"></h3>
+            <p id="webapp-workspace-url"></p>
+            <p id="webapp-workspace-mode"></p>
+            <p id="webapp-workspace-status" class="webapp-workspace-status"></p>
+            <div class="webapp-workspace-actions">
+              <button id="webapp-workspace-open" type="button">${iconMarkup('external-link')}<span>Open Web App</span></button>
+              <button id="webapp-workspace-tunnel-toggle" class="secondary" type="button" hidden>${iconMarkup('plug-connected-x')}<span>Stop Tunnel</span></button>
+            </div>
+          </section>
         </div>
       </section>
     </section>
@@ -1212,6 +1212,11 @@ async function submitWebApp(event) {
   await withBusy(async () => {
     if (editingID) {
       await apiUpdateWebApp(editingID, input);
+      const tab = webAppTabForResource(editingID);
+      if (tab) {
+        tab.title = input.name;
+        tab.target = input.connectionMode === 'tunnel' ? `${input.url} via SSH` : input.url;
+      }
       writeNotice(`Updated ${input.name}.`);
     } else {
       await apiAddWebApp(input);
@@ -1219,6 +1224,7 @@ async function submitWebApp(event) {
     }
     closeWebAppPanel();
     await refreshHosts();
+    renderTabs();
   });
 }
 
@@ -1512,8 +1518,10 @@ async function launchWebApp(webApp, auth = null, { promptAuth = true } = {}) {
     try {
       const runtime = await launchWebAppWithHostKeyPrompt(input, gateway);
       state.webAppRuntimes.set(webApp.id, runtime);
+      promoteWebAppTab(webApp);
       writeNotice(`Opened ${webApp.name} in ${runtime.browser}.`);
       renderHosts(searchInput.value);
+      renderTabs();
       renderSelection();
       return true;
     } catch (error) {
@@ -1732,6 +1740,8 @@ async function deleteSelectedResource() {
 
   await withBusy(async () => {
     if (selected.type === 'webapp') {
+      const tab = webAppTabForResource(selected.resource.id);
+      if (tab) removeSessionFromUI(tab.id);
       await apiDeleteWebApp(selected.resource.id);
       writeNotice(`Deleted ${selected.resource.name}.`);
       state.selectedId = state.activeSessionId
@@ -1898,6 +1908,7 @@ async function disconnectActiveSession() {
 async function stopSession(sessionID) {
   const session = state.sessions.get(sessionID);
   removeSessionFromUI(sessionID);
+  if (session?.kind === 'webapp') return;
   if (session && !session.pending && !session.closed) {
     await apiStopSSHSession(sessionID);
     writeNotice(`${terminalKindLabel(session.kind)} session disconnected: ${session.title}.`);
@@ -2942,6 +2953,43 @@ function resourceTooltip(resource) {
   return `${resourceName(resource)} - ${resourceTarget(resource)}${tags.length ? ` - ${tags.map((tag) => tag.name).join(', ')}` : ''}`;
 }
 
+function webAppTabForResource(resourceID) {
+  return [...state.sessions.values()].find((session) => session.kind === 'webapp' && session.resourceId === resourceID);
+}
+
+function createWebAppTab(webApp) {
+  clearPendingTabs(webApp.id);
+  const existing = webAppTabForResource(webApp.id);
+  if (existing) {
+    focusSession(existing.id);
+    return existing.id;
+  }
+
+  const tabID = `webapp-${webApp.id}`;
+  state.sessions.set(tabID, {
+    id: tabID,
+    resourceId: webApp.id,
+    title: webApp.name,
+    target: resourceTarget(webApp),
+    kind: 'webapp',
+    pending: !state.webAppRuntimes.has(webApp.id),
+    closed: false,
+  });
+  setActiveSession(tabID);
+  renderTabs();
+  renderSelection();
+  return tabID;
+}
+
+function promoteWebAppTab(webApp) {
+  const tabID = createWebAppTab(webApp);
+  const tab = state.sessions.get(tabID);
+  if (!tab) return;
+  tab.pending = false;
+  tab.title = webApp.name;
+  tab.target = resourceTarget(webApp);
+}
+
 function createPendingTab(resource) {
   clearPendingTabs(resource.id);
   const existing = pendingSessionForResource(resource.id);
@@ -2988,10 +3036,7 @@ function clearPendingTabs(exceptResourceId = '') {
 function selectResource(resource) {
   state.selectedId = resource.id;
   if (isWebAppResource(resource)) {
-    clearPendingTabs();
-    setActiveSession(null);
-    renderTabs();
-    renderSelection();
+    createWebAppTab(resource);
     return;
   }
   const session = preferredSessionForResource(resource.id);
@@ -3165,7 +3210,9 @@ function renderTabs() {
     tab.type = 'button';
     tab.className = `session-tab ${session.id === state.activeSessionId ? 'active' : ''} ${session.closed ? 'closed' : ''} ${session.pending ? 'pending' : ''}`;
     tab.innerHTML = '<span></span><strong></strong>';
-    tab.querySelector('span').textContent = session.closed ? 'closed' : session.pending ? 'new' : terminalKindLabel(session.kind);
+    tab.querySelector('span').textContent = session.kind === 'webapp'
+      ? 'webapp'
+      : session.closed ? 'closed' : session.pending ? 'new' : terminalKindLabel(session.kind);
     tab.querySelector('strong').textContent = session.title;
     const resource = findResource(session.resourceId)?.resource;
     tab.dataset.tooltip = resource ? resourceTooltip(resource) : `${session.title} - ${session.target}`;
@@ -3183,7 +3230,12 @@ function renderTabs() {
       focusActiveTerminal();
     });
     tab.addEventListener('dblclick', () => {
-      if (session.closed) reconnectClosedSession(session.id);
+      if (session.kind === 'webapp' && session.pending) {
+        const webApp = findResource(session.resourceId)?.resource;
+        if (webApp) launchWebApp(webApp);
+      } else if (session.closed) {
+        reconnectClosedSession(session.id);
+      }
     });
     const close = document.createElement('button');
     close.type = 'button';
@@ -3812,10 +3864,10 @@ function renderSelection() {
 }
 
 function renderWorkbench(selected) {
-  const terminal = document.querySelector('.terminal-shell');
   const workspace = document.querySelector('#webapp-workspace');
-  const webApp = selected?.type === 'webapp' ? selected.resource : null;
-  terminal.hidden = Boolean(webApp);
+  const activeTab = state.sessions.get(state.activeSessionId);
+  const webApp = activeTab?.kind === 'webapp' && selected?.type === 'webapp' ? selected.resource : null;
+  stack.classList.toggle('webapp-active', Boolean(webApp));
   workspace.hidden = !webApp;
   if (!webApp) return;
   document.querySelector('#webapp-workspace-name').textContent = webApp.name;
@@ -4757,7 +4809,7 @@ function setActiveSession(sessionID) {
   if (session) {
     state.selectedId = session.resourceId;
     rememberSessionFocus(session.id);
-    if (!session.pending && !session.closed) {
+    if (session.kind !== 'webapp' && !session.pending && !session.closed) {
       state.lastSessionByResource.set(session.resourceId, session.id);
     }
   }
