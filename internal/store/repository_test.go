@@ -99,7 +99,7 @@ func TestSaveWritesReadableVersionedJSONAndBackup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), `"version": 1`) {
+	if !strings.Contains(string(data), `"version": 2`) {
 		t.Fatalf("Saved JSON does not include schema version:\n%s", data)
 	}
 	if !strings.Contains(string(data), `"hosts"`) {
@@ -123,6 +123,34 @@ func TestSaveWritesReadableVersionedJSONAndBackup(t *testing.T) {
 	}
 	if loaded.Hosts[0].ID == "" {
 		t.Fatal("Saved host ID was not normalized")
+	}
+}
+
+func TestLoadMigratesVersionOneStoreAndPreservesHostOrder(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hosts.json")
+	versionOne := `{
+  "version": 1,
+  "hosts": [
+    {"id":"host-b","hostname":"B","ip":"10.0.0.2","port":22,"user":"root","subsystems":[]},
+    {"id":"host-a","hostname":"A","ip":"10.0.0.1","port":22,"user":"root","subsystems":[]}
+  ]
+}`
+	if err := os.WriteFile(path, []byte(versionOne), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := NewRepository(path).Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.Version != domain.CurrentSchemaVersion {
+		t.Fatalf("Version = %d, want %d", loaded.Version, domain.CurrentSchemaVersion)
+	}
+	if got := strings.Join(loaded.TopLevelOrder, ","); got != "host-b,host-a" {
+		t.Fatalf("TopLevelOrder = %q, want host-b,host-a", got)
+	}
+	if loaded.WebApps == nil {
+		t.Fatal("WebApps is nil after migration")
 	}
 }
 

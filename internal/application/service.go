@@ -28,6 +28,27 @@ type EndpointInput struct {
 	Type     domain.ResourceType `json:"type,omitempty"`
 }
 
+type WebAppInput struct {
+	Name              string                      `json:"name"`
+	URL               string                      `json:"url"`
+	Tags              []string                    `json:"tags,omitempty"`
+	ConnectionMode    domain.WebAppConnectionMode `json:"connectionMode"`
+	GatewayResourceID string                      `json:"gatewayResourceId,omitempty"`
+	PortMode          domain.WebAppPortMode       `json:"portMode,omitempty"`
+	LocalSOCKSPort    int                         `json:"localSocksPort,omitempty"`
+	BrowserMode       domain.WebAppBrowserMode    `json:"browserMode"`
+	KeepCookies       bool                        `json:"keepCookies"`
+	KeepLocalStorage  bool                        `json:"keepLocalStorage"`
+	RestoreSession    bool                        `json:"restoreSession"`
+	ClearCacheOnClose bool                        `json:"clearCacheOnClose"`
+}
+
+type Workspace struct {
+	Hosts         []domain.Host   `json:"hosts"`
+	WebApps       []domain.WebApp `json:"webApps"`
+	TopLevelOrder []string        `json:"topLevelOrder"`
+}
+
 func NewService(store Store) *Service {
 	return &Service{store: store}
 }
@@ -41,6 +62,21 @@ func (s *Service) ListHosts() ([]domain.Host, error) {
 		return nil, err
 	}
 	return data.Hosts, nil
+}
+
+func (s *Service) ListWorkspace() (Workspace, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	data, err := s.store.Load()
+	if err != nil {
+		return Workspace{}, err
+	}
+	return Workspace{
+		Hosts:         data.Hosts,
+		WebApps:       data.WebApps,
+		TopLevelOrder: data.TopLevelOrder,
+	}, nil
 }
 
 func (s *Service) ListTags() ([]string, error) {
@@ -108,6 +144,9 @@ func (s *Service) RenameTag(currentName, newName string) error {
 		renameResourceTag(&data.Hosts[i].Tags, oldName, newName)
 		renameSubsystemTags(data.Hosts[i].Subsystems, oldName, newName)
 	}
+	for i := range data.WebApps {
+		renameResourceTag(&data.WebApps[i].Tags, oldName, newName)
+	}
 	return s.store.Save(data)
 }
 
@@ -133,6 +172,9 @@ func (s *Service) DeleteTag(name string) error {
 	for i := range data.Hosts {
 		removeResourceTag(&data.Hosts[i].Tags, canonicalName)
 		removeSubsystemTags(data.Hosts[i].Subsystems, canonicalName)
+	}
+	for i := range data.WebApps {
+		removeResourceTag(&data.WebApps[i].Tags, canonicalName)
 	}
 	return s.store.Save(data)
 }
@@ -189,12 +231,104 @@ func (s *Service) AddHost(input EndpointInput) (domain.Host, error) {
 	host.ID = domain.StableID(domain.ResourceHost, host.Hostname, host.IP, host.Port, host.User, len(data.Hosts))
 
 	data.Hosts = append(data.Hosts, host)
+	data.TopLevelOrder = append(data.TopLevelOrder, host.ID)
 	data.Tags = domain.MergeTags(data.Tags, host.Tags)
 	if err := s.store.Save(data); err != nil {
 		return domain.Host{}, err
 	}
 
 	return host, nil
+}
+
+func (s *Service) AddWebApp(input WebAppInput) (domain.WebApp, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	data, err := s.store.Load()
+	if err != nil {
+		return domain.WebApp{}, err
+	}
+	app := webAppFromInput(input)
+	app.ID = domain.StableID(domain.ResourceWebApp, app.Name, app.URL, 0, "", len(data.WebApps))
+	data.WebApps = append(data.WebApps, app)
+	data.TopLevelOrder = append(data.TopLevelOrder, app.ID)
+	data.Tags = domain.MergeTags(data.Tags, app.Tags)
+	if err := s.store.Save(data); err != nil {
+		return domain.WebApp{}, err
+	}
+	return app, nil
+}
+
+func (s *Service) UpdateWebApp(id string, input WebAppInput) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("web app id is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data, err := s.store.Load()
+	if err != nil {
+		return err
+	}
+	for i := range data.WebApps {
+		if data.WebApps[i].ID != id {
+			continue
+		}
+		updated := webAppFromInput(input)
+		updated.ID = id
+		data.WebApps[i] = updated
+		data.Tags = domain.MergeTags(data.Tags, updated.Tags)
+		return s.store.Save(data)
+	}
+	return fmt.Errorf("web app %q not found", id)
+}
+
+func (s *Service) DeleteWebApp(id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("web app id is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data, err := s.store.Load()
+	if err != nil {
+		return err
+	}
+	for i := range data.WebApps {
+		if data.WebApps[i].ID == id {
+			data.WebApps = append(data.WebApps[:i], data.WebApps[i+1:]...)
+			data.TopLevelOrder = removeID(data.TopLevelOrder, id)
+			return s.store.Save(data)
+		}
+	}
+	return fmt.Errorf("web app %q not found", id)
+}
+
+func webAppFromInput(input WebAppInput) domain.WebApp {
+	app := domain.WebApp{
+		Name:              strings.TrimSpace(input.Name),
+		URL:               strings.TrimSpace(input.URL),
+		Tags:              domain.NormalizeTags(input.Tags),
+		ConnectionMode:    input.ConnectionMode,
+		GatewayResourceID: strings.TrimSpace(input.GatewayResourceID),
+		PortMode:          input.PortMode,
+		LocalSOCKSPort:    input.LocalSOCKSPort,
+		BrowserMode:       input.BrowserMode,
+		KeepCookies:       input.KeepCookies,
+		KeepLocalStorage:  input.KeepLocalStorage,
+		RestoreSession:    input.RestoreSession,
+		ClearCacheOnClose: input.ClearCacheOnClose,
+	}
+	if app.ConnectionMode == domain.WebAppConnectionDirect {
+		app.GatewayResourceID = ""
+		app.PortMode = ""
+		app.LocalSOCKSPort = 0
+	} else if app.PortMode == domain.WebAppPortAutomatic {
+		app.LocalSOCKSPort = 0
+	}
+	return app
 }
 
 func (s *Service) AddSubsystem(hostID string, input EndpointInput) (domain.Endpoint, error) {
@@ -327,6 +461,13 @@ func (s *Service) SetResourceTags(id string, tags []string) error {
 		data.Tags = domain.MergeTags(data.Tags, tags)
 		return s.store.Save(data)
 	}
+	for i := range data.WebApps {
+		if data.WebApps[i].ID == id {
+			data.WebApps[i].Tags = tags
+			data.Tags = domain.MergeTags(data.Tags, tags)
+			return s.store.Save(data)
+		}
+	}
 	return fmt.Errorf("resource %q not found", id)
 }
 
@@ -352,18 +493,62 @@ func (s *Service) DeleteResource(id string) error {
 
 	for i := range data.Hosts {
 		if data.Hosts[i].ID == id {
+			ids := map[string]struct{}{data.Hosts[i].ID: {}}
+			collectEndpointIDs(data.Hosts[i].Subsystems, ids)
+			if app := webAppUsingGateway(data.WebApps, ids); app != nil {
+				return fmt.Errorf("resource is used as gateway by web app %q", app.Name)
+			}
 			data.Hosts = append(data.Hosts[:i], data.Hosts[i+1:]...)
+			data.TopLevelOrder = removeID(data.TopLevelOrder, id)
 			return s.store.Save(data)
 		}
 	}
 
 	for i := range data.Hosts {
-		if deleteSubsystemByID(&data.Hosts[i].Subsystems, id) {
+		ids := map[string]struct{}{}
+		if collectEndpointSubtreeIDs(data.Hosts[i].Subsystems, id, ids) {
+			if app := webAppUsingGateway(data.WebApps, ids); app != nil {
+				return fmt.Errorf("resource is used as gateway by web app %q", app.Name)
+			}
+			deleteSubsystemByID(&data.Hosts[i].Subsystems, id)
 			return s.store.Save(data)
 		}
 	}
 
 	return fmt.Errorf("resource %q not found", id)
+}
+
+func (s *Service) ReorderTopLevel(order []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	data, err := s.store.Load()
+	if err != nil {
+		return err
+	}
+	wanted := make(map[string]struct{}, len(data.Hosts)+len(data.WebApps))
+	for _, host := range data.Hosts {
+		wanted[host.ID] = struct{}{}
+	}
+	for _, app := range data.WebApps {
+		wanted[app.ID] = struct{}{}
+	}
+	if len(order) != len(wanted) {
+		return fmt.Errorf("top-level order length = %d, want %d", len(order), len(wanted))
+	}
+	seen := make(map[string]struct{}, len(order))
+	for _, rawID := range order {
+		id := strings.TrimSpace(rawID)
+		if _, exists := wanted[id]; !exists {
+			return fmt.Errorf("top-level item %q not found", id)
+		}
+		if _, exists := seen[id]; exists {
+			return fmt.Errorf("duplicate top-level item %q", id)
+		}
+		seen[id] = struct{}{}
+	}
+	data.TopLevelOrder = append([]string(nil), order...)
+	return s.store.Save(data)
 }
 
 func (s *Service) ReorderHosts(order []string) error {
@@ -399,7 +584,56 @@ func (s *Service) ReorderHosts(order []string) error {
 	}
 
 	data.Hosts = reordered
+	orderedHosts := make([]string, 0, len(order))
+	orderedHosts = append(orderedHosts, order...)
+	nextHost := 0
+	for i, id := range data.TopLevelOrder {
+		if _, isHost := byID[id]; isHost {
+			data.TopLevelOrder[i] = orderedHosts[nextHost]
+			nextHost++
+		}
+	}
 	return s.store.Save(data)
+}
+
+func collectEndpointIDs(endpoints []domain.Endpoint, ids map[string]struct{}) {
+	for _, endpoint := range endpoints {
+		ids[endpoint.ID] = struct{}{}
+		collectEndpointIDs(endpoint.Subsystems, ids)
+	}
+}
+
+func collectEndpointSubtreeIDs(endpoints []domain.Endpoint, id string, ids map[string]struct{}) bool {
+	for _, endpoint := range endpoints {
+		if endpoint.ID == id {
+			ids[endpoint.ID] = struct{}{}
+			collectEndpointIDs(endpoint.Subsystems, ids)
+			return true
+		}
+		if collectEndpointSubtreeIDs(endpoint.Subsystems, id, ids) {
+			return true
+		}
+	}
+	return false
+}
+
+func webAppUsingGateway(apps []domain.WebApp, ids map[string]struct{}) *domain.WebApp {
+	for i := range apps {
+		if _, exists := ids[apps[i].GatewayResourceID]; exists {
+			return &apps[i]
+		}
+	}
+	return nil
+}
+
+func removeID(ids []string, id string) []string {
+	filtered := ids[:0]
+	for _, current := range ids {
+		if current != id {
+			filtered = append(filtered, current)
+		}
+	}
+	return filtered
 }
 
 func (s *Service) SetResourceAuth(id string, auth domain.Auth) error {

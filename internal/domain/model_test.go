@@ -71,3 +71,38 @@ func TestNormalizeStoreBuildsTagCatalogFromNestedResources(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeStoreMigratesWebAppsAndTopLevelOrder(t *testing.T) {
+	store := NormalizeStore(Store{
+		Version: 1,
+		Hosts: []Host{{
+			ID: "host-1", Hostname: "host", IP: "127.0.0.1", Port: 22, User: "root",
+		}},
+	})
+	if store.Version != CurrentSchemaVersion {
+		t.Fatalf("Version = %d, want %d", store.Version, CurrentSchemaVersion)
+	}
+	if len(store.TopLevelOrder) != 1 || store.TopLevelOrder[0] != "host-1" {
+		t.Fatalf("TopLevelOrder = %v, want [host-1]", store.TopLevelOrder)
+	}
+	if err := store.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+func TestValidateWebAppRequiresExistingGateway(t *testing.T) {
+	store := NormalizeStore(Store{
+		Version: CurrentSchemaVersion,
+		Hosts: []Host{{
+			ID: "host-1", Hostname: "host", IP: "127.0.0.1", Port: 22, User: "root",
+		}},
+		WebApps: []WebApp{{
+			ID: "webapp-1", Name: "Internal", URL: "https://internal.example",
+			ConnectionMode: WebAppConnectionTunnel, GatewayResourceID: "missing",
+			PortMode: WebAppPortAutomatic, BrowserMode: WebAppBrowserStandard,
+		}},
+	})
+	if err := store.Validate(); err == nil || !strings.Contains(err.Error(), "gateway") {
+		t.Fatalf("Validate() error = %v, want gateway error", err)
+	}
+}

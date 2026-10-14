@@ -182,6 +182,10 @@ func (a *App) ListHosts() ([]domain.Host, error) {
 	return a.service.ListHosts()
 }
 
+func (a *App) ListWorkspace() (application.Workspace, error) {
+	return a.service.ListWorkspace()
+}
+
 func (a *App) ListTags() ([]string, error) {
 	return a.service.ListTags()
 }
@@ -202,6 +206,18 @@ func (a *App) AddHost(input application.EndpointInput) (domain.Host, error) {
 	return a.service.AddHost(input)
 }
 
+func (a *App) AddWebApp(input application.WebAppInput) (domain.WebApp, error) {
+	return a.service.AddWebApp(input)
+}
+
+func (a *App) UpdateWebApp(id string, input application.WebAppInput) error {
+	return a.service.UpdateWebApp(id, input)
+}
+
+func (a *App) DeleteWebApp(id string) error {
+	return a.service.DeleteWebApp(id)
+}
+
 func (a *App) AddSubsystem(hostID string, input application.EndpointInput) (domain.Endpoint, error) {
 	return a.service.AddSubsystem(hostID, input)
 }
@@ -216,6 +232,10 @@ func (a *App) SetResourceTags(id string, tags []string) error {
 
 func (a *App) ReorderHosts(order []string) error {
 	return a.service.ReorderHosts(order)
+}
+
+func (a *App) ReorderTopLevel(order []string) error {
+	return a.service.ReorderTopLevel(order)
 }
 
 func (a *App) DeleteResource(id string) error {
