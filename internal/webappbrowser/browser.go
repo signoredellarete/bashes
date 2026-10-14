@@ -138,6 +138,59 @@ type LaunchOptions struct {
 	NewTab     bool
 }
 
+type RetentionPolicy struct {
+	KeepCookies       bool
+	KeepLocalStorage  bool
+	RestoreSession    bool
+	ClearCacheOnClose bool
+}
+
+func CleanupProfile(family Family, profileDir string, policy RetentionPolicy) error {
+	if strings.TrimSpace(profileDir) == "" {
+		return nil
+	}
+	var relativePaths []string
+	if policy.ClearCacheOnClose {
+		switch family {
+		case FamilyFirefox:
+			relativePaths = append(relativePaths, "cache2", "startupCache", "shader-cache")
+		case FamilyChromium:
+			relativePaths = append(relativePaths, "Cache", "Code Cache", "GPUCache", filepath.Join("Default", "Cache"), filepath.Join("Default", "Code Cache"))
+		}
+	}
+	if !policy.KeepCookies {
+		switch family {
+		case FamilyFirefox:
+			relativePaths = append(relativePaths, "cookies.sqlite", "cookies.sqlite-shm", "cookies.sqlite-wal")
+		case FamilyChromium:
+			relativePaths = append(relativePaths, filepath.Join("Default", "Cookies"), filepath.Join("Default", "Network", "Cookies"))
+		}
+	}
+	if !policy.KeepLocalStorage {
+		switch family {
+		case FamilyFirefox:
+			relativePaths = append(relativePaths, "storage")
+		case FamilyChromium:
+			relativePaths = append(relativePaths, filepath.Join("Default", "Local Storage"), filepath.Join("Default", "IndexedDB"))
+		}
+	}
+	if !policy.RestoreSession {
+		switch family {
+		case FamilyFirefox:
+			relativePaths = append(relativePaths, "sessionstore.jsonlz4", "sessionstore-backups")
+		case FamilyChromium:
+			relativePaths = append(relativePaths, filepath.Join("Default", "Sessions"), filepath.Join("Default", "Current Session"), filepath.Join("Default", "Current Tabs"))
+		}
+	}
+	var cleanupErrors []error
+	for _, relativePath := range relativePaths {
+		if err := os.RemoveAll(filepath.Join(profileDir, relativePath)); err != nil {
+			cleanupErrors = append(cleanupErrors, err)
+		}
+	}
+	return errors.Join(cleanupErrors...)
+}
+
 func Start(browser Browser, options LaunchOptions) (*exec.Cmd, error) {
 	args, err := Arguments(browser, options)
 	if err != nil {

@@ -56,6 +56,8 @@ type App struct {
 	tunnels          map[string]*sshTunnel
 	transfers        map[string]*fileTransferSession
 	transferJobs     map[string]*fileTransferJob
+	webAppRuntimes   map[string]*webAppRuntime
+	webAppRuntimeIDs map[string]string
 	openFile         func(string) error
 	openFileCacheDir string
 }
@@ -77,6 +79,8 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 		tunnels:          make(map[string]*sshTunnel),
 		transfers:        make(map[string]*fileTransferSession),
 		transferJobs:     make(map[string]*fileTransferJob),
+		webAppRuntimes:   make(map[string]*webAppRuntime),
+		webAppRuntimeIDs: make(map[string]string),
 		openFile:         openFileWithDefaultApplication,
 		openFileCacheDir: defaultOpenFileCacheDir(dataPath),
 	}
@@ -213,10 +217,12 @@ func (a *App) AddWebApp(input application.WebAppInput) (domain.WebApp, error) {
 }
 
 func (a *App) UpdateWebApp(id string, input application.WebAppInput) error {
+	a.stopWebAppForID(id)
 	return a.service.UpdateWebApp(id, input)
 }
 
 func (a *App) DeleteWebApp(id string) error {
+	a.stopWebAppForID(id)
 	return a.service.DeleteWebApp(id)
 }
 
@@ -1940,6 +1946,7 @@ func (a *App) stopAllRuntimeConnections() {
 	for _, id := range transferIDs {
 		_ = a.CloseFileTransfer(id)
 	}
+	a.stopAllWebAppRuntimes()
 }
 
 func (a *App) resourceByID(id string) (domain.Endpoint, error) {

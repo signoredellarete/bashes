@@ -63,3 +63,35 @@ func TestWriteFirefoxPreferencesSupportsDirectAndTunnelModes(t *testing.T) {
 		t.Fatalf("Direct preferences = %q", data)
 	}
 }
+
+func TestCleanupProfileHonorsRetentionPolicy(t *testing.T) {
+	dir := t.TempDir()
+	for _, path := range []string{
+		filepath.Join("Default", "Cache", "entry"),
+		filepath.Join("Default", "Cookies"),
+		filepath.Join("Default", "Local Storage", "entry"),
+		filepath.Join("Default", "Sessions", "entry"),
+	} {
+		fullPath := filepath.Join(dir, path)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fullPath, []byte("data"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err := CleanupProfile(FamilyChromium, dir, RetentionPolicy{
+		KeepCookies: true, KeepLocalStorage: false, RestoreSession: false, ClearCacheOnClose: true,
+	})
+	if err != nil {
+		t.Fatalf("CleanupProfile() error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "Default", "Cookies")); err != nil {
+		t.Fatalf("Cookies were removed: %v", err)
+	}
+	for _, path := range []string{filepath.Join("Default", "Cache"), filepath.Join("Default", "Local Storage"), filepath.Join("Default", "Sessions")} {
+		if _, err := os.Stat(filepath.Join(dir, path)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s still exists: %v", path, err)
+		}
+	}
+}
