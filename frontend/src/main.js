@@ -128,6 +128,8 @@ const state = {
   editingTagKey: null,
   resourceDraftTags: [],
   resourceTagQuery: '',
+  webAppDraftTags: [],
+  webAppTagQuery: '',
   lastSessionByResource: new Map(),
   sessionFocusHistory: [],
   messageLog: [],
@@ -367,7 +369,7 @@ app.innerHTML = `
 
   <section id="resource-panel" class="slide-panel" hidden>
     <div class="panel-scrim" data-close-panel></div>
-    <form id="resource-form" class="panel-card resource-panel-card">
+    <form id="resource-form" class="panel-card resource-panel-card tag-editor-panel">
       <header class="panel-header resource-panel-header">
         <span class="resource-panel-heading-icon">${iconMarkup('server-2', 'resource-panel-icon')}</span>
         <div class="resource-panel-heading">
@@ -417,7 +419,7 @@ app.innerHTML = `
           </header>
           <div class="resource-tag-input">
             <div id="resource-selected-tags" class="resource-selected-tags"></div>
-            <input id="resource-tag-query" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="prod, milano..." aria-label="Search or create tags" />
+            <input id="resource-tag-query" class="resource-tag-query" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="prod, milano..." aria-label="Search or create tags" />
           </div>
           <div class="resource-tag-suggestion-box">
             <span id="resource-tag-suggestion-label">Existing tags</span>
@@ -436,7 +438,7 @@ app.innerHTML = `
 
   <section id="webapp-panel" class="slide-panel" hidden>
     <div class="panel-scrim" data-close-webapp></div>
-    <form id="webapp-form" class="panel-card webapp-panel-card">
+    <form id="webapp-form" class="panel-card webapp-panel-card tag-editor-panel">
       <header class="panel-header">
         <div>
           <p class="eyebrow">Web App</p>
@@ -492,12 +494,23 @@ app.innerHTML = `
         <label class="checkbox-row"><input name="restoreSession" type="checkbox" checked /><span>Restore browser session</span></label>
         <label class="checkbox-row"><input name="clearCacheOnClose" type="checkbox" checked /><span>Clear browser cache on close</span></label>
       </section>
-      <fieldset class="webapp-tag-fieldset">
-        <legend>Tags</legend>
-        <div id="webapp-tag-options" class="webapp-tag-options"></div>
-      </fieldset>
+      <section class="resource-tag-editor" aria-labelledby="webapp-tags-label">
+        <header>
+          <strong id="webapp-tags-label">Tags</strong>
+          <span>type to search, Enter to add</span>
+        </header>
+        <div class="resource-tag-input">
+          <div id="webapp-selected-tags" class="resource-selected-tags"></div>
+          <input id="webapp-tag-query" class="resource-tag-query" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="prod, milano..." aria-label="Search or create Web App tags" />
+        </div>
+        <div class="resource-tag-suggestion-box">
+          <span id="webapp-tag-suggestion-label">Existing tags</span>
+          <div id="webapp-tag-options" class="resource-tag-options"></div>
+        </div>
+      </section>
 
-      <footer class="panel-actions">
+      <footer class="panel-actions resource-panel-actions">
+        <span id="webapp-tag-summary">No tags on this Web App</span>
         <button class="secondary" type="button" data-close-webapp>Cancel</button>
         <button id="webapp-submit" type="submit">Save Web App</button>
       </footer>
@@ -952,6 +965,11 @@ document.querySelector('#resource-tag-query').addEventListener('input', (event) 
   renderResourceTagOptions();
 });
 document.querySelector('#resource-tag-query').addEventListener('keydown', (event) => handleResourceTagInput(event));
+document.querySelector('#webapp-tag-query').addEventListener('input', (event) => {
+  state.webAppTagQuery = event.currentTarget.value;
+  renderWebAppTagOptions();
+});
+document.querySelector('#webapp-tag-query').addEventListener('keydown', (event) => handleWebAppTagInput(event));
 document.querySelector('#tag-create-form').addEventListener('submit', (event) => submitCreateTag(event));
 document.querySelector('#tag-create-form').elements.name.addEventListener('input', () => updateTagCreateButton());
 document.querySelector('#tag-panel-clear').addEventListener('click', () => clearTagPanelSelection());
@@ -1211,7 +1229,7 @@ function webAppInput(form) {
   return {
     name: form.elements.name.value.trim(),
     url: form.elements.url.value.trim(),
-    tags: [...form.querySelectorAll('[name="webAppTag"]:checked')].map((input) => input.value),
+    tags: [...state.webAppDraftTags],
     connectionMode,
     gatewayResourceId: connectionMode === 'tunnel' ? form.elements.gatewayResourceId.value : '',
     portMode: connectionMode === 'tunnel' ? portMode : '',
@@ -1328,24 +1346,8 @@ function renderWebAppGatewayOptions(select, selectedID = '') {
   if (selectedID && [...select.options].some((option) => option.value === selectedID)) select.value = selectedID;
 }
 
-function renderWebAppTagOptions(selectedTags = []) {
-  const selected = new Set(selectedTags.map(canonicalTag));
-  const tags = mergeTagCatalog(state.tags, [...state.hosts, ...state.webApps]);
-  const options = tags.map((tag) => {
-    const label = document.createElement('label');
-    label.className = 'webapp-tag-option';
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.name = 'webAppTag';
-    input.value = tag.name;
-    input.checked = selected.has(tag.key);
-    const text = document.createElement('span');
-    text.textContent = tag.name;
-    label.append(input, text);
-    applyTagPalette(label, tag.name);
-    return label;
-  });
-  document.querySelector('#webapp-tag-options').replaceChildren(...options);
+function renderWebAppTagOptions(selectedTags) {
+  renderDraftTagOptions('webapp', selectedTags);
 }
 
 async function submitConnect(event) {
@@ -1995,10 +1997,40 @@ function endpointInput(form, type) {
   };
 }
 
+const draftTagEditors = {
+  resource: {
+    draftKey: 'resourceDraftTags',
+    queryKey: 'resourceTagQuery',
+    options: '#resource-tag-options',
+    selected: '#resource-selected-tags',
+    query: '#resource-tag-query',
+    suggestionLabel: '#resource-tag-suggestion-label',
+    summary: '#resource-tag-summary',
+    emptySummary: 'No tags on this system',
+    countLabel: 'on this system',
+  },
+  webapp: {
+    draftKey: 'webAppDraftTags',
+    queryKey: 'webAppTagQuery',
+    options: '#webapp-tag-options',
+    selected: '#webapp-selected-tags',
+    query: '#webapp-tag-query',
+    suggestionLabel: '#webapp-tag-suggestion-label',
+    summary: '#webapp-tag-summary',
+    emptySummary: 'No tags on this Web App',
+    countLabel: 'on this Web App',
+  },
+};
+
 function renderResourceTagOptions(selectedTags) {
+  renderDraftTagOptions('resource', selectedTags);
+}
+
+function renderDraftTagOptions(editorName, selectedTags) {
+  const editor = draftTagEditors[editorName];
   if (selectedTags !== undefined) {
     const seen = new Set();
-    state.resourceDraftTags = (selectedTags ?? []).reduce((tags, value) => {
+    state[editor.draftKey] = (selectedTags ?? []).reduce((tags, value) => {
       const name = String(value ?? '').trim();
       const key = canonicalTag(name);
       if (!key || seen.has(key)) return tags;
@@ -2006,21 +2038,22 @@ function renderResourceTagOptions(selectedTags) {
       tags.push(name);
       return tags;
     }, []);
-    state.resourceTagQuery = '';
-    document.querySelector('#resource-tag-query').value = '';
+    state[editor.queryKey] = '';
+    document.querySelector(editor.query).value = '';
   }
 
-  const container = document.querySelector('#resource-tag-options');
-  const selectedContainer = document.querySelector('#resource-selected-tags');
-  const queryInput = document.querySelector('#resource-tag-query');
-  const suggestionLabel = document.querySelector('#resource-tag-suggestion-label');
-  const summary = document.querySelector('#resource-tag-summary');
-  const selected = new Set(state.resourceDraftTags.map(canonicalTag));
+  const container = document.querySelector(editor.options);
+  const selectedContainer = document.querySelector(editor.selected);
+  const queryInput = document.querySelector(editor.query);
+  const suggestionLabel = document.querySelector(editor.suggestionLabel);
+  const summary = document.querySelector(editor.summary);
+  const draftTags = state[editor.draftKey];
+  const selected = new Set(draftTags.map(canonicalTag));
   const tags = mergeTagCatalog(state.tags, [...state.hosts, ...state.webApps]);
-  const query = canonicalTag(state.resourceTagQuery);
+  const query = canonicalTag(state[editor.queryKey]);
   const suggestions = tags.filter((tag) => !selected.has(tag.key) && (!query || tag.key.includes(query)));
 
-  selectedContainer.replaceChildren(...state.resourceDraftTags.map((tagName) => {
+  selectedContainer.replaceChildren(...draftTags.map((tagName) => {
     const chip = document.createElement('span');
     chip.className = 'resource-selected-tag';
     applyTagPalette(chip, tagName);
@@ -2031,16 +2064,16 @@ function renderResourceTagOptions(selectedTags) {
     remove.title = `Remove ${tagName}`;
     remove.setAttribute('aria-label', `Remove ${tagName}`);
     remove.append(iconElement('x'));
-    remove.addEventListener('click', () => removeResourceDraftTag(tagName));
+    remove.addEventListener('click', () => removeDraftTag(editorName, tagName));
     chip.append(name, remove);
     return chip;
   }));
 
-  queryInput.placeholder = state.resourceDraftTags.length === 0 ? 'prod, milano...' : 'Add another...';
+  queryInput.placeholder = draftTags.length === 0 ? 'prod, milano...' : 'Add another...';
   suggestionLabel.textContent = query ? 'Matching tags' : 'Existing tags';
-  summary.textContent = state.resourceDraftTags.length === 0
-    ? 'No tags on this system'
-    : `${state.resourceDraftTags.length} tag${state.resourceDraftTags.length === 1 ? '' : 's'} on this system`;
+  summary.textContent = draftTags.length === 0
+    ? editor.emptySummary
+    : `${draftTags.length} tag${draftTags.length === 1 ? '' : 's'} ${editor.countLabel}`;
 
   const options = suggestions.map((tag) => {
     const option = document.createElement('button');
@@ -2049,7 +2082,7 @@ function renderResourceTagOptions(selectedTags) {
     option.title = `${tag.count} system${tag.count === 1 ? '' : 's'} tagged ${tag.name}`;
     applyTagPalette(option, tag.name);
     option.textContent = tag.name;
-    option.addEventListener('click', () => addResourceDraftTag(tag.name));
+    option.addEventListener('click', () => addDraftTag(editorName, tag.name));
     return option;
   });
 
@@ -2060,9 +2093,9 @@ function renderResourceTagOptions(selectedTags) {
     create.className = 'resource-tag-create';
     create.append(iconElement('plus'));
     const label = document.createElement('span');
-    label.textContent = `Create "${state.resourceTagQuery.trim()}"`;
+    label.textContent = `Create "${state[editor.queryKey].trim()}"`;
     create.append(label);
-    create.addEventListener('click', () => createResourceDraftTag(state.resourceTagQuery));
+    create.addEventListener('click', () => createDraftTag(editorName, state[editor.queryKey]));
     options.push(create);
   }
 
@@ -2078,44 +2111,56 @@ function renderResourceTagOptions(selectedTags) {
 }
 
 function handleResourceTagInput(event) {
+  handleDraftTagInput(event, 'resource');
+}
+
+function handleWebAppTagInput(event) {
+  handleDraftTagInput(event, 'webapp');
+}
+
+function handleDraftTagInput(event, editorName) {
+  const editor = draftTagEditors[editorName];
+  const draftTags = state[editor.draftKey];
   if (event.key === 'Enter') {
     const query = event.currentTarget.value.trim();
     if (!query) return;
     event.preventDefault();
     const existing = mergeTagCatalog(state.tags, [...state.hosts, ...state.webApps]).find((tag) => tag.key === canonicalTag(query));
-    if (existing) addResourceDraftTag(existing.name);
-    else createResourceDraftTag(query);
-  } else if (event.key === 'Backspace' && !event.currentTarget.value && state.resourceDraftTags.length > 0) {
+    if (existing) addDraftTag(editorName, existing.name);
+    else createDraftTag(editorName, query);
+  } else if (event.key === 'Backspace' && !event.currentTarget.value && draftTags.length > 0) {
     event.preventDefault();
-    removeResourceDraftTag(state.resourceDraftTags.at(-1));
+    removeDraftTag(editorName, draftTags.at(-1));
   }
 }
 
-function addResourceDraftTag(name) {
+function addDraftTag(editorName, name) {
+  const editor = draftTagEditors[editorName];
   const key = canonicalTag(name);
-  if (!key || state.resourceDraftTags.some((tag) => canonicalTag(tag) === key)) return;
-  state.resourceDraftTags.push(String(name).trim());
-  state.resourceTagQuery = '';
-  const input = document.querySelector('#resource-tag-query');
+  if (!key || state[editor.draftKey].some((tag) => canonicalTag(tag) === key)) return;
+  state[editor.draftKey].push(String(name).trim());
+  state[editor.queryKey] = '';
+  const input = document.querySelector(editor.query);
   input.value = '';
-  renderResourceTagOptions();
+  renderDraftTagOptions(editorName);
   input.focus();
 }
 
-function removeResourceDraftTag(name) {
+function removeDraftTag(editorName, name) {
+  const editor = draftTagEditors[editorName];
   const key = canonicalTag(name);
-  state.resourceDraftTags = state.resourceDraftTags.filter((tag) => canonicalTag(tag) !== key);
-  renderResourceTagOptions();
-  document.querySelector('#resource-tag-query').focus();
+  state[editor.draftKey] = state[editor.draftKey].filter((tag) => canonicalTag(tag) !== key);
+  renderDraftTagOptions(editorName);
+  document.querySelector(editor.query).focus();
 }
 
-async function createResourceDraftTag(name) {
+async function createDraftTag(editorName, name) {
   const normalized = String(name ?? '').trim();
   if (!normalized) return;
   const created = await withBusy(() => apiCreateTag(normalized));
   if (!created) return;
   state.tags = [...state.tags, created];
-  addResourceDraftTag(created);
+  addDraftTag(editorName, created);
 }
 
 function scheduleHostRender() {
