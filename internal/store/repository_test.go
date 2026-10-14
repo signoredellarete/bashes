@@ -234,6 +234,37 @@ func TestSaveAndLoadPreservesResourceTags(t *testing.T) {
 	}
 }
 
+func TestSaveAndLoadPreservesPortableWebAppConfiguration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hosts.json")
+	repo := NewRepository(path)
+	store := domain.NormalizeStore(domain.Store{
+		Version: domain.CurrentSchemaVersion,
+		Hosts: []domain.Host{{
+			ID: "host-gateway", Hostname: "gateway", IP: "10.0.0.1", Port: 22, User: "root",
+		}},
+		WebApps: []domain.WebApp{{
+			ID: "webapp-dashboard", Name: "Dashboard", URL: "https://dashboard.internal", Tags: []string{"prod"},
+			ConnectionMode: domain.WebAppConnectionTunnel, GatewayResourceID: "host-gateway",
+			PortMode: domain.WebAppPortAutomatic, BrowserMode: domain.WebAppBrowserStandard,
+			KeepCookies: true, KeepLocalStorage: true, RestoreSession: true, ClearCacheOnClose: true,
+		}},
+		TopLevelOrder: []string{"webapp-dashboard", "host-gateway"},
+	})
+	if err := repo.Save(store); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	loaded, err := repo.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(loaded.WebApps) != 1 || loaded.WebApps[0].GatewayResourceID != "host-gateway" {
+		t.Fatalf("WebApps = %+v", loaded.WebApps)
+	}
+	if got := strings.Join(loaded.TopLevelOrder, ","); got != "webapp-dashboard,host-gateway" {
+		t.Fatalf("TopLevelOrder = %q", got)
+	}
+}
+
 func TestLoadRejectsInvalidLegacyPort(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hosts.json")
 	legacy := `[{"hostname":"bad","ip":"127.0.0.1","port":"nope","user":"root","lxc":[],"vm":[],"docker":[]}]`

@@ -217,13 +217,19 @@ func (a *App) AddWebApp(input application.WebAppInput) (domain.WebApp, error) {
 }
 
 func (a *App) UpdateWebApp(id string, input application.WebAppInput) error {
+	if err := a.service.UpdateWebApp(id, input); err != nil {
+		return err
+	}
 	a.stopWebAppForID(id)
-	return a.service.UpdateWebApp(id, input)
+	return nil
 }
 
 func (a *App) DeleteWebApp(id string) error {
+	if err := a.service.DeleteWebApp(id); err != nil {
+		return err
+	}
 	a.stopWebAppForID(id)
-	return a.service.DeleteWebApp(id)
+	return nil
 }
 
 func (a *App) AddSubsystem(hostID string, input application.EndpointInput) (domain.Endpoint, error) {
@@ -250,6 +256,19 @@ func (a *App) DeleteResource(id string) error {
 	resourceIDs, err := a.resourceIDsForDelete(id)
 	if err != nil {
 		return err
+	}
+	workspace, err := a.service.ListWorkspace()
+	if err != nil {
+		return err
+	}
+	resourceSet := make(map[string]struct{}, len(resourceIDs))
+	for _, resourceID := range resourceIDs {
+		resourceSet[resourceID] = struct{}{}
+	}
+	for _, webApp := range workspace.WebApps {
+		if _, referenced := resourceSet[webApp.GatewayResourceID]; referenced {
+			return fmt.Errorf("resource is used as gateway by web app %q", webApp.Name)
+		}
 	}
 	for _, resourceID := range resourceIDs {
 		a.stopSessionsForResource(resourceID)
@@ -814,7 +833,7 @@ func (a *App) SaveWebAppBrowserSettings(input WebAppBrowserSettings) (WebAppBrow
 	defer a.settingsMu.Unlock()
 
 	preferredID := strings.TrimSpace(input.PreferredBrowserID)
-	customPath := strings.TrimSpace(input.CustomBrowserPath)
+	customPath := expandHome(strings.TrimSpace(input.CustomBrowserPath))
 	if preferredID != "" && !validWebAppBrowserID(preferredID) {
 		return WebAppBrowserSettings{}, fmt.Errorf("unsupported browser %q", preferredID)
 	}
@@ -825,6 +844,9 @@ func (a *App) SaveWebAppBrowserSettings(input WebAppBrowserSettings) (WebAppBrow
 		}
 		if info.IsDir() {
 			return WebAppBrowserSettings{}, errors.New("browser executable path points to a directory")
+		}
+		if goruntime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
+			return WebAppBrowserSettings{}, errors.New("browser executable is not executable")
 		}
 		if preferredID == "" {
 			return WebAppBrowserSettings{}, errors.New("select the browser type for the custom executable")

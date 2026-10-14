@@ -6,8 +6,10 @@ import iconArrowLeft from '@tabler/icons/outline/arrow-left.svg?raw';
 import iconCheck from '@tabler/icons/outline/check.svg?raw';
 import iconCopy from '@tabler/icons/outline/copy.svg?raw';
 import iconChevronLeft from '@tabler/icons/outline/chevron-left.svg?raw';
+import iconChevronDown from '@tabler/icons/outline/chevron-down.svg?raw';
 import iconEye from '@tabler/icons/outline/eye.svg?raw';
 import iconEyeOff from '@tabler/icons/outline/eye-off.svg?raw';
+import iconExternalLink from '@tabler/icons/outline/external-link.svg?raw';
 import iconFileText from '@tabler/icons/outline/file-text.svg?raw';
 import iconFolder from '@tabler/icons/outline/folder.svg?raw';
 import iconFolderOpen from '@tabler/icons/outline/folder-open.svg?raw';
@@ -23,6 +25,7 @@ import iconSubtask from '@tabler/icons/outline/subtask.svg?raw';
 import iconTag from '@tabler/icons/outline/tag.svg?raw';
 import iconTags from '@tabler/icons/outline/tags.svg?raw';
 import iconTrash from '@tabler/icons/outline/trash.svg?raw';
+import iconWorld from '@tabler/icons/outline/world-www.svg?raw';
 import iconX from '@tabler/icons/outline/x.svg?raw';
 import iconPlayerPlay from '@tabler/icons/filled/player-play.svg?raw';
 import '@xterm/xterm/css/xterm.css';
@@ -69,6 +72,7 @@ import {
   tagHue,
   visibleResourceTags,
 } from './resource-tags.js';
+import { isWebAppResource, webAppMatchesFilters } from './web-apps/model.js';
 import './styles.css';
 
 const terminalSettings = loadTerminalSettings(localStorage);
@@ -88,15 +92,23 @@ const demoStore = {
     },
   ],
   keys: [],
+  webApps: [],
+  topLevelOrder: ['demo-host'],
 };
 
 const state = {
   hosts: [],
+  webApps: [],
+  topLevelOrder: [],
   tags: [],
   keys: [],
   keySources: [],
   keyInstallEnabled: true,
   keySettings: { customDirectory: '' },
+  webAppBrowsers: [],
+  webAppBrowserSettings: { preferredBrowserId: '', customBrowserPath: '' },
+  webAppRuntimes: new Map(),
+  webAppAuthTarget: null,
   tunnels: new Map(),
   localShellSupported: false,
   selectedId: null,
@@ -156,8 +168,10 @@ const TABLER_ICONS = Object.freeze({
   check: iconCheck,
   copy: iconCopy,
   'chevron-left': iconChevronLeft,
+  'chevron-down': iconChevronDown,
   eye: iconEye,
   'eye-off': iconEyeOff,
+  'external-link': iconExternalLink,
   'file-text': iconFileText,
   folder: iconFolder,
   'folder-open': iconFolderOpen,
@@ -174,6 +188,7 @@ const TABLER_ICONS = Object.freeze({
   tag: iconTag,
   tags: iconTags,
   trash: iconTrash,
+  'world-www': iconWorld,
   x: iconX,
 });
 const iconElement = (icon, className = '') => {
@@ -263,9 +278,13 @@ app.innerHTML = `
         ${iconMarkup('search')}
         <input id="search" type="search" placeholder="Search hosts, users, tags" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" />
       </label>
-      <button id="open-host-panel" class="toolbar-icon-button" type="button" title="Add host" aria-label="Add host">
+      <button id="open-add-menu" class="toolbar-icon-button" type="button" title="Add" aria-label="Add host or Web App" aria-expanded="false">
         ${iconMarkup('plus')}
       </button>
+      <div id="add-resource-menu" class="add-resource-menu" hidden>
+        <button type="button" data-add-resource="host">${iconMarkup('server-2')}<span>Host</span></button>
+        <button type="button" data-add-resource="webapp">${iconMarkup('world-www')}<span>Web App</span></button>
+      </div>
       <button id="open-tag-manager" class="toolbar-icon-button secondary" type="button" title="Tags" aria-label="Tags">
         ${iconMarkup('tags')}
       </button>
@@ -318,6 +337,13 @@ app.innerHTML = `
         <div id="terminal-stack" class="terminal-stack">
           <div id="empty-terminal" class="empty-terminal">No active terminal session</div>
         </div>
+      </section>
+      <section id="webapp-workspace" class="webapp-workspace" hidden>
+        <div class="webapp-workspace-icon">${iconMarkup('world-www')}</div>
+        <h3 id="webapp-workspace-name"></h3>
+        <p id="webapp-workspace-url"></p>
+        <p id="webapp-workspace-mode"></p>
+        <button id="webapp-workspace-open" type="button">${iconMarkup('external-link')}<span>Open Web App</span></button>
       </section>
     </section>
 
@@ -399,6 +425,96 @@ app.innerHTML = `
         <span id="resource-tag-summary">No tags on this system</span>
         <button class="secondary" type="button" data-close-panel>Cancel</button>
         <button id="resource-submit" type="submit">Save host</button>
+      </footer>
+    </form>
+  </section>
+
+  <section id="webapp-panel" class="slide-panel" hidden>
+    <div class="panel-scrim" data-close-webapp></div>
+    <form id="webapp-form" class="panel-card webapp-panel-card">
+      <header class="panel-header">
+        <div>
+          <p class="eyebrow">Web App</p>
+          <h3 id="webapp-panel-title">Add Web App</h3>
+        </div>
+        <button class="close-panel" type="button" data-close-webapp title="Close">${ICON_CLOSE}</button>
+      </header>
+
+      <label>
+        <span>Name</span>
+        <input name="name" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required />
+      </label>
+      <label>
+        <span>URL</span>
+        <input class="monospace-input" name="url" type="url" placeholder="https://app.internal.example" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required />
+      </label>
+      <label>
+        <span>Connection</span>
+        <select name="connectionMode">
+          <option value="direct">Direct</option>
+          <option value="tunnel">SSH tunnel</option>
+        </select>
+      </label>
+      <section id="webapp-tunnel-fields" class="conditional-fields" hidden>
+        <label>
+          <span>SSH Gateway</span>
+          <select name="gatewayResourceId"></select>
+        </label>
+        <div class="form-grid">
+          <label>
+            <span>SOCKS Port</span>
+            <select name="portMode">
+              <option value="automatic">Automatic</option>
+              <option value="manual">Manual</option>
+            </select>
+          </label>
+          <label id="webapp-manual-port-field" hidden>
+            <span>Local Port</span>
+            <input name="localSocksPort" type="number" min="1" max="65535" value="1080" />
+          </label>
+        </div>
+      </section>
+      <label>
+        <span>Browser Session</span>
+        <select name="browserMode">
+          <option value="standard">Standard</option>
+          <option value="private">Private</option>
+        </select>
+      </label>
+      <section id="webapp-persistence-fields" class="conditional-fields">
+        <label class="checkbox-row"><input name="keepCookies" type="checkbox" checked /><span>Keep cookies</span></label>
+        <label class="checkbox-row"><input name="keepLocalStorage" type="checkbox" checked /><span>Keep local storage</span></label>
+        <label class="checkbox-row"><input name="restoreSession" type="checkbox" checked /><span>Restore browser session</span></label>
+        <label class="checkbox-row"><input name="clearCacheOnClose" type="checkbox" checked /><span>Clear browser cache on close</span></label>
+      </section>
+      <fieldset class="webapp-tag-fieldset">
+        <legend>Tags</legend>
+        <div id="webapp-tag-options" class="webapp-tag-options"></div>
+      </fieldset>
+
+      <footer class="panel-actions">
+        <button class="secondary" type="button" data-close-webapp>Cancel</button>
+        <button id="webapp-submit" type="submit">Save Web App</button>
+      </footer>
+    </form>
+  </section>
+
+  <section id="webapp-auth-panel" class="slide-panel" hidden>
+    <div class="panel-scrim" data-close-webapp-auth></div>
+    <form id="webapp-auth-form" class="panel-card">
+      <header class="panel-header">
+        <div>
+          <p class="eyebrow">Web App Tunnel</p>
+          <h3>Connect Gateway</h3>
+        </div>
+        <button class="close-panel" type="button" data-close-webapp-auth title="Close">${ICON_CLOSE}</button>
+      </header>
+      <p id="webapp-auth-summary" class="parent-summary"></p>
+      <p id="webapp-auth-status" class="inline-status" hidden></p>
+      ${authFieldsMarkup('Web App tunnel')}
+      <footer class="panel-actions">
+        <button class="secondary" type="button" data-close-webapp-auth>Cancel</button>
+        <button type="submit">Open Web App</button>
       </footer>
     </form>
   </section>
@@ -506,6 +622,15 @@ app.innerHTML = `
       <label class="checkbox-row">
         <input name="terminalCopyOnSelect" type="checkbox" />
         <span>Copy selected terminal text to clipboard</span>
+      </label>
+      <div class="settings-separator"></div>
+      <label>
+        <span>Web App Browser</span>
+        <select name="webAppBrowser"></select>
+      </label>
+      <label>
+        <span>Custom Browser Executable</span>
+        <input name="customBrowserPath" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Optional executable path" />
       </label>
 
       <footer class="panel-actions">
@@ -770,25 +895,47 @@ searchInput.addEventListener('input', () => scheduleHostRender());
 ['beforeinput', 'keydown', 'keyup'].forEach((eventName) => {
   searchInput.addEventListener(eventName, (event) => event.stopPropagation());
 });
-document.querySelector('#open-host-panel').addEventListener('click', () => openResourcePanel('host'));
+document.querySelector('#open-add-menu').addEventListener('click', () => toggleAddResourceMenu());
+document.querySelectorAll('[data-add-resource]').forEach((button) => {
+  button.addEventListener('click', () => {
+    closeAddResourceMenu();
+    if (button.dataset.addResource === 'webapp') openWebAppPanel();
+    else openResourcePanel('host');
+  });
+});
 document.querySelector('#open-tag-manager').addEventListener('click', () => openTagPanel());
 document.querySelector('#tag-mode-any').addEventListener('click', () => setTagFilterMode('any'));
 document.querySelector('#tag-mode-all').addEventListener('click', () => setTagFilterMode('all'));
 document.querySelector('#open-keys-panel').addEventListener('click', () => openKeysPanel({ allowInstall: true }));
 document.querySelector('#open-tunnel-panel').addEventListener('click', () => openTunnelPanel());
 document.querySelector('#open-file-transfer').addEventListener('click', () => openFileTransferModal());
-document.querySelector('#edit-resource').addEventListener('click', () => openEditPanel());
+document.querySelector('#edit-resource').addEventListener('click', () => {
+  const selected = findResource(state.selectedId);
+  if (selected?.type === 'webapp') openWebAppPanel(selected.resource);
+  else openEditPanel();
+});
 document.querySelector('#header-add-subsystem').addEventListener('click', () => {
   const selected = findResource(state.selectedId);
-  if (selected && !isLocalResource(selected.resource)) openResourcePanel('subsystem', selected.resource.id);
+  if (selected && selected.type !== 'webapp' && !isLocalResource(selected.resource)) openResourcePanel('subsystem', selected.resource.id);
 });
-document.querySelector('#connect').addEventListener('click', () => openConnectPanel());
+document.querySelector('#connect').addEventListener('click', () => {
+  const selected = findResource(state.selectedId);
+  if (selected?.type === 'webapp') openSelectedWebApp();
+  else openConnectPanel();
+});
 document.querySelector('#disconnect').addEventListener('click', () => disconnectActiveSession());
 document.querySelector('#delete-resource').addEventListener('click', () => deleteSelectedResource());
 document.querySelector('#message-log-button').addEventListener('click', () => showMessageLog());
 document.querySelector('#decrease-terminal-font').addEventListener('click', () => adjustTerminalFontSize(-1));
 document.querySelector('#increase-terminal-font').addEventListener('click', () => adjustTerminalFontSize(1));
 document.querySelector('#resource-form').addEventListener('submit', (event) => submitResource(event));
+document.querySelector('#webapp-form').addEventListener('submit', (event) => submitWebApp(event));
+document.querySelector('#webapp-form').elements.connectionMode.addEventListener('change', () => updateWebAppFormVisibility());
+document.querySelector('#webapp-form').elements.portMode.addEventListener('change', () => updateWebAppFormVisibility());
+document.querySelector('#webapp-form').elements.browserMode.addEventListener('change', () => updateWebAppFormVisibility());
+document.querySelector('#webapp-auth-form').addEventListener('submit', (event) => submitWebAppAuth(event));
+registerAuthChoiceSync(document.querySelector('#webapp-auth-form'));
+document.querySelector('#webapp-workspace-open').addEventListener('click', () => openSelectedWebApp());
 document.querySelector('#resource-tag-query').addEventListener('input', (event) => {
   state.resourceTagQuery = event.currentTarget.value;
   renderResourceTagOptions();
@@ -828,6 +975,12 @@ document.querySelector('#clear-key-directory').addEventListener('click', () => {
 document.querySelector('#rescan-key-sources').addEventListener('click', () => rescanKeySources());
 document.querySelectorAll('[data-close-panel]').forEach((element) => {
   element.addEventListener('click', () => closeResourcePanel());
+});
+document.querySelectorAll('[data-close-webapp]').forEach((element) => {
+  element.addEventListener('click', () => closeWebAppPanel());
+});
+document.querySelectorAll('[data-close-webapp-auth]').forEach((element) => {
+  element.addEventListener('click', () => closeWebAppAuthPanel());
 });
 document.querySelectorAll('[data-close-connect]').forEach((element) => {
   element.addEventListener('click', () => closeConnectPanel());
@@ -873,6 +1026,7 @@ document.addEventListener('pointerdown', (event) => {
   if (!event.target.closest?.('#edit-context-menu')) hideEditContextMenu();
   if (!event.target.closest?.('.field-label-with-help')) closeFieldHelpPopovers();
   schedulePointerDragOutline(event);
+  if (!event.target.closest?.('#open-add-menu, #add-resource-menu')) closeAddResourceMenu();
 });
 window.addEventListener('pointerup', () => clearAllDragOutlines());
 window.addEventListener('pointercancel', () => clearAllDragOutlines());
@@ -928,15 +1082,18 @@ async function loadCapabilities() {
 }
 
 async function loadHosts() {
-  await withBusy(async () => {
+  return await withBusy(async () => {
     await refreshHosts();
   });
 }
 
 async function refreshHosts() {
-  const [hosts, tags] = await Promise.all([apiListHosts(), apiListTags()]);
-  state.hosts = hosts;
+  const [workspace, tags, runtimes] = await Promise.all([apiListWorkspace(), apiListTags(), apiListWebAppRuntimes()]);
+  state.hosts = workspace.hosts ?? [];
+  state.webApps = workspace.webApps ?? [];
+  state.topLevelOrder = workspace.topLevelOrder ?? state.hosts.map((host) => host.id);
   state.tags = tags;
+  state.webAppRuntimes = new Map((runtimes ?? []).map((runtime) => [runtime.webAppId, runtime]));
   const activeSession = state.sessions.get(state.activeSessionId);
   if (activeSession && findResource(activeSession.resourceId)) {
     state.selectedId = activeSession.resourceId;
@@ -945,8 +1102,8 @@ async function refreshHosts() {
   }
   if (!state.selectedId && !activeSession && state.localShellSupported) {
     state.selectedId = LOCAL_RESOURCE_ID;
-  } else if (!state.selectedId && !activeSession && state.hosts.length > 0) {
-    state.selectedId = state.hosts[0].id;
+  } else if (!state.selectedId && !activeSession && state.topLevelOrder.length > 0) {
+    state.selectedId = state.topLevelOrder[0];
   }
   renderHosts(searchInput.value);
   renderSelection();
@@ -971,6 +1128,12 @@ async function loadKeySettings() {
   renderKeySettings();
 }
 
+async function loadWebAppBrowserSettings() {
+  const [browsers, settings] = await Promise.all([apiListWebAppBrowsers(), apiGetWebAppBrowserSettings()]);
+  state.webAppBrowsers = browsers ?? [];
+  state.webAppBrowserSettings = settings ?? { preferredBrowserId: '', customBrowserPath: '' };
+}
+
 async function loadTunnels() {
   const tunnels = await apiListSSHTunnels();
   state.tunnels = new Map(tunnels.map((tunnel) => [tunnel.tunnelId, tunnel]));
@@ -984,7 +1147,7 @@ async function submitResource(event) {
   const type = state.drawerMode === 'subsystem' || editing?.type !== 'host' ? form.elements.type.value : '';
   const input = endpointInput(form, type);
 
-  await withBusy(async () => {
+  return await withBusy(async () => {
     if (state.drawerMode === 'edit') {
       const resource = findResource(state.editResourceId)?.resource;
       await apiUpdateResource(state.editResourceId, input);
@@ -1004,6 +1167,169 @@ async function submitResource(event) {
     await refreshHosts();
     renderTabs();
   });
+}
+
+async function submitWebApp(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const input = webAppInput(form);
+  const editingID = form.dataset.webAppId || '';
+
+  await withBusy(async () => {
+    if (editingID) {
+      await apiUpdateWebApp(editingID, input);
+      writeNotice(`Updated ${input.name}.`);
+    } else {
+      await apiAddWebApp(input);
+      writeNotice(`Added Web App ${input.name}.`);
+    }
+    closeWebAppPanel();
+    await refreshHosts();
+  });
+}
+
+function webAppInput(form) {
+  const connectionMode = form.elements.connectionMode.value;
+  const portMode = form.elements.portMode.value;
+  const browserMode = form.elements.browserMode.value;
+  return {
+    name: form.elements.name.value.trim(),
+    url: form.elements.url.value.trim(),
+    tags: [...form.querySelectorAll('[name="webAppTag"]:checked')].map((input) => input.value),
+    connectionMode,
+    gatewayResourceId: connectionMode === 'tunnel' ? form.elements.gatewayResourceId.value : '',
+    portMode: connectionMode === 'tunnel' ? portMode : '',
+    localSocksPort: connectionMode === 'tunnel' && portMode === 'manual'
+      ? Number.parseInt(form.elements.localSocksPort.value, 10)
+      : 0,
+    browserMode,
+    keepCookies: browserMode === 'standard' && form.elements.keepCookies.checked,
+    keepLocalStorage: browserMode === 'standard' && form.elements.keepLocalStorage.checked,
+    restoreSession: browserMode === 'standard' && form.elements.restoreSession.checked,
+    clearCacheOnClose: browserMode === 'standard' && form.elements.clearCacheOnClose.checked,
+  };
+}
+
+function toggleAddResourceMenu() {
+  const menu = document.querySelector('#add-resource-menu');
+  const button = document.querySelector('#open-add-menu');
+  const open = menu.hidden;
+  menu.hidden = !open;
+  button.setAttribute('aria-expanded', String(open));
+}
+
+function closeAddResourceMenu() {
+  document.querySelector('#add-resource-menu').hidden = true;
+  document.querySelector('#open-add-menu').setAttribute('aria-expanded', 'false');
+}
+
+async function openWebAppPanel(webApp = null) {
+  try {
+    await loadWebAppBrowserSettings();
+  } catch (error) {
+    writeNotice(`Could not detect Web App browsers: ${errorDetail(error)}`, 'error');
+    return;
+  }
+  if (!webApp && state.webAppBrowsers.length === 0 && !state.webAppBrowserSettings.customBrowserPath) {
+    showAppModal({
+      kicker: 'Web App Browser',
+      title: 'A supported browser is required',
+      message: 'Install Firefox, Chrome, Chromium, or Microsoft Edge before adding a Web App.',
+      primaryLabel: 'Firefox',
+      primaryAction: () => openExternalURL('https://www.mozilla.org/firefox/new/'),
+      secondaryLabel: 'Chrome',
+      secondaryAction: () => openExternalURL('https://www.google.com/chrome/'),
+    });
+    return;
+  }
+
+  const panel = document.querySelector('#webapp-panel');
+  const form = document.querySelector('#webapp-form');
+  form.reset();
+  form.dataset.webAppId = webApp?.id ?? '';
+  document.querySelector('#webapp-panel-title').textContent = webApp ? 'Edit Web App' : 'Add Web App';
+  document.querySelector('#webapp-submit').textContent = webApp ? 'Save Changes' : 'Save Web App';
+  renderWebAppGatewayOptions(form.elements.gatewayResourceId, webApp?.gatewayResourceId ?? '');
+  renderWebAppTagOptions(webApp?.tags ?? []);
+
+  if (webApp) {
+    form.elements.name.value = webApp.name;
+    form.elements.url.value = webApp.url;
+    form.elements.connectionMode.value = webApp.connectionMode;
+    form.elements.portMode.value = webApp.portMode || 'automatic';
+    form.elements.localSocksPort.value = String(webApp.localSocksPort || 1080);
+    form.elements.browserMode.value = webApp.browserMode || 'standard';
+    form.elements.keepCookies.checked = Boolean(webApp.keepCookies);
+    form.elements.keepLocalStorage.checked = Boolean(webApp.keepLocalStorage);
+    form.elements.restoreSession.checked = Boolean(webApp.restoreSession);
+    form.elements.clearCacheOnClose.checked = Boolean(webApp.clearCacheOnClose);
+  } else {
+    form.elements.connectionMode.value = 'direct';
+    form.elements.portMode.value = 'automatic';
+    form.elements.browserMode.value = 'standard';
+    form.elements.keepCookies.checked = true;
+    form.elements.keepLocalStorage.checked = true;
+    form.elements.restoreSession.checked = true;
+    form.elements.clearCacheOnClose.checked = true;
+  }
+  updateWebAppFormVisibility();
+  panel.hidden = false;
+  requestAnimationFrame(() => panel.classList.add('open'));
+  form.elements.name.focus();
+}
+
+function closeWebAppPanel() {
+  const panel = document.querySelector('#webapp-panel');
+  panel.classList.remove('open');
+  panel.hidden = true;
+  document.querySelector('#webapp-form').dataset.webAppId = '';
+  restoreTerminalFocusAfterOverlay();
+}
+
+function updateWebAppFormVisibility() {
+  const form = document.querySelector('#webapp-form');
+  const tunnel = form.elements.connectionMode.value === 'tunnel';
+  const manualPort = tunnel && form.elements.portMode.value === 'manual';
+  const standard = form.elements.browserMode.value === 'standard';
+  document.querySelector('#webapp-tunnel-fields').hidden = !tunnel;
+  document.querySelector('#webapp-manual-port-field').hidden = !manualPort;
+  document.querySelector('#webapp-persistence-fields').hidden = !standard;
+  form.elements.gatewayResourceId.required = tunnel;
+  form.elements.localSocksPort.required = manualPort;
+}
+
+function renderWebAppGatewayOptions(select, selectedID = '') {
+  const options = [];
+  const append = (resource, depth) => {
+    const option = document.createElement('option');
+    option.value = resource.id;
+    option.textContent = `${'  '.repeat(depth)}${resource.hostname} (${resource.user}@${resource.ip || resource.hostname})`;
+    options.push(option);
+    for (const child of resource.subsystems ?? []) append(child, depth + 1);
+  };
+  state.hosts.forEach((host) => append(host, 0));
+  select.replaceChildren(...options);
+  if (selectedID && [...select.options].some((option) => option.value === selectedID)) select.value = selectedID;
+}
+
+function renderWebAppTagOptions(selectedTags = []) {
+  const selected = new Set(selectedTags.map(canonicalTag));
+  const tags = mergeTagCatalog(state.tags, [...state.hosts, ...state.webApps]);
+  const options = tags.map((tag) => {
+    const label = document.createElement('label');
+    label.className = 'webapp-tag-option';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.name = 'webAppTag';
+    input.value = tag.name;
+    input.checked = selected.has(tag.key);
+    const text = document.createElement('span');
+    text.textContent = tag.name;
+    label.append(input, text);
+    applyTagPalette(label, tag.name);
+    return label;
+  });
+  document.querySelector('#webapp-tag-options').replaceChildren(...options);
 }
 
 async function submitConnect(event) {
@@ -1131,6 +1457,127 @@ async function quickConnect(resource, { failureSessionID = '' } = {}) {
   });
 }
 
+async function openSelectedWebApp() {
+  const selected = findResource(state.selectedId);
+  if (selected?.type !== 'webapp') return;
+  await launchWebApp(selected.resource);
+}
+
+async function launchWebApp(webApp, auth = null, { promptAuth = true } = {}) {
+  const gateway = webApp.connectionMode === 'tunnel'
+    ? findResource(webApp.gatewayResourceId)?.resource
+    : null;
+  const input = {
+    webAppId: webApp.id,
+    ...(gateway ? auth ?? authInputFromPreference(gateway) : {}),
+    trustHostKey: gateway ? auth?.trustHostKey ?? trustHostKeyFromPreference(gateway) : false,
+  };
+  return await withBusy(async () => {
+    try {
+      const runtime = await launchWebAppWithHostKeyPrompt(input, gateway);
+      state.webAppRuntimes.set(webApp.id, runtime);
+      writeNotice(`Opened ${webApp.name} in ${runtime.browser}.`);
+      renderHosts(searchInput.value);
+      renderSelection();
+      return true;
+    } catch (error) {
+      const detail = errorDetail(error);
+      if (/supported browser|selected browser|browser.*not installed/i.test(detail)) {
+        showAppModal({
+          kicker: 'Web App Browser',
+          title: 'A supported browser is required',
+          message: detail,
+          primaryLabel: 'Firefox',
+          primaryAction: () => openExternalURL('https://www.mozilla.org/firefox/new/'),
+          secondaryLabel: 'Chrome',
+          secondaryAction: () => openExternalURL('https://www.google.com/chrome/'),
+        });
+        return false;
+      }
+      if (gateway && isAuthError(error)) {
+        const message = connectErrorMessage(error, gateway);
+        if (promptAuth) await openWebAppAuthPanel(webApp, gateway, message);
+        else {
+          setWebAppAuthStatus(message, 'error');
+          focusConnectPasswordInput(document.querySelector('#webapp-auth-form'));
+        }
+        return false;
+      }
+      if (gateway && !promptAuth) {
+        setWebAppAuthStatus(connectErrorMessage(error, gateway), 'error');
+        return false;
+      }
+      writeNotice(gateway ? connectErrorMessage(error, gateway) : `Could not open ${webApp.name}: ${detail}`, 'error');
+      return false;
+    }
+  });
+}
+
+async function launchWebAppWithHostKeyPrompt(input, gateway) {
+  try {
+    return await apiLaunchWebApp(input);
+  } catch (error) {
+    if (!gateway || input.acceptHostKey || input.replaceHostKey) throw error;
+    const retryInput = await confirmHostKeyChange(error, gateway, 'Trust and open Web App');
+    if (!retryInput) throw error;
+    return await apiLaunchWebApp({ ...input, ...retryInput });
+  }
+}
+
+async function openWebAppAuthPanel(webApp, gateway, message = '') {
+  await loadKeys();
+  state.webAppAuthTarget = { webApp, gateway };
+  const panel = document.querySelector('#webapp-auth-panel');
+  const form = document.querySelector('#webapp-auth-form');
+  form.reset();
+  renderKeyOptions(form.elements.keyName, true);
+  applyConnectDefaults(form, gateway);
+  await applySavedPasswordDefault(form, gateway);
+  form.elements.trustHostKey.checked = trustHostKeyFromPreference(gateway);
+  document.querySelector('#webapp-auth-summary').textContent =
+    `${webApp.name} via ${gateway.user}@${gateway.ip || gateway.hostname}:${gateway.port}`;
+  setWebAppAuthStatus(message, message ? 'error' : '');
+  panel.hidden = false;
+  requestAnimationFrame(() => panel.classList.add('open'));
+  focusConnectPasswordInput(form);
+}
+
+async function submitWebAppAuth(event) {
+  event.preventDefault();
+  const target = state.webAppAuthTarget;
+  if (!target) return;
+  const form = event.currentTarget;
+  setWebAppAuthStatus('', '');
+  try {
+    const opened = await launchWebApp(target.webApp, {
+      ...authInputFromForm(form),
+      trustHostKey: form.elements.trustHostKey.checked,
+    }, { promptAuth: false });
+    if (opened) closeWebAppAuthPanel();
+  } catch (error) {
+    const message = connectErrorMessage(error, target.gateway);
+    setWebAppAuthStatus(message, 'error');
+    if (isAuthError(error)) focusConnectPasswordInput(form);
+  }
+}
+
+function setWebAppAuthStatus(message, kind) {
+  const status = document.querySelector('#webapp-auth-status');
+  status.textContent = message;
+  status.title = message;
+  status.dataset.kind = kind;
+  status.hidden = !message;
+}
+
+function closeWebAppAuthPanel() {
+  const panel = document.querySelector('#webapp-auth-panel');
+  panel.classList.remove('open');
+  panel.hidden = true;
+  state.webAppAuthTarget = null;
+  setWebAppAuthStatus('', '');
+  restoreTerminalFocusAfterOverlay();
+}
+
 async function submitGenerateKey(event) {
   event.preventDefault();
   const form = event.currentTarget;
@@ -1248,6 +1695,15 @@ async function deleteSelectedResource() {
   if (!(await confirmDeleteResource(selected))) return;
 
   await withBusy(async () => {
+    if (selected.type === 'webapp') {
+      await apiDeleteWebApp(selected.resource.id);
+      writeNotice(`Deleted ${selected.resource.name}.`);
+      state.selectedId = state.activeSessionId
+        ? state.sessions.get(state.activeSessionId)?.resourceId ?? null
+        : null;
+      await refreshHosts();
+      return;
+    }
     const resourceIDs = resourceIDsForSelection(selected);
     for (const resourceID of resourceIDs) {
       for (const session of sessionsForResource(resourceID)) {
@@ -1279,6 +1735,14 @@ function nestedResourceIDs(subsystems) {
 }
 
 function confirmDeleteResource(selected) {
+  if (selected.type === 'webapp') {
+    return openConfirmModal({
+      kicker: 'Delete',
+      title: `Delete ${selected.resource.name}?`,
+      message: 'This action cannot be undone.',
+      confirmLabel: 'Delete',
+    });
+  }
   const subsystemCount = nestedResourceIDs(selected.resource.subsystems ?? []).length;
   const extra = subsystemCount > 0
     ? `\n\nThis will also delete ${subsystemCount} subsystem${subsystemCount === 1 ? '' : 's'}.`
@@ -1518,7 +1982,7 @@ function renderResourceTagOptions(selectedTags) {
   const suggestionLabel = document.querySelector('#resource-tag-suggestion-label');
   const summary = document.querySelector('#resource-tag-summary');
   const selected = new Set(state.resourceDraftTags.map(canonicalTag));
-  const tags = mergeTagCatalog(state.tags, state.hosts);
+  const tags = mergeTagCatalog(state.tags, [...state.hosts, ...state.webApps]);
   const query = canonicalTag(state.resourceTagQuery);
   const suggestions = tags.filter((tag) => !selected.has(tag.key) && (!query || tag.key.includes(query)));
 
@@ -1584,7 +2048,7 @@ function handleResourceTagInput(event) {
     const query = event.currentTarget.value.trim();
     if (!query) return;
     event.preventDefault();
-    const existing = mergeTagCatalog(state.tags, state.hosts).find((tag) => tag.key === canonicalTag(query));
+    const existing = mergeTagCatalog(state.tags, [...state.hosts, ...state.webApps]).find((tag) => tag.key === canonicalTag(query));
     if (existing) addResourceDraftTag(existing.name);
     else createResourceDraftTag(query);
   } else if (event.key === 'Backspace' && !event.currentTarget.value && state.resourceDraftTags.length > 0) {
@@ -1650,22 +2114,41 @@ function renderHosts(filter = '') {
     activeTags: state.activeTagFilters,
     mode: state.tagFilterMode,
   });
+  const filteredWebApps = state.webApps.filter((webApp) => webAppMatchesFilters(webApp, {
+    query,
+    activeTags: state.activeTagFilters,
+    mode: state.tagFilterMode,
+  }));
+  const items = new Map();
   for (const node of filteredHosts) {
     const block = document.createElement('div');
     block.className = 'host-block';
-    block.dataset.hostId = node.resource.id;
+    block.dataset.topLevelId = node.resource.id;
     block.append(...resourceRows(node, 'host', 0).map((row) => row.element));
-    elements.push(block);
+    items.set(node.resource.id, block);
   }
+  for (const webApp of filteredWebApps) {
+    const block = document.createElement('div');
+    block.className = 'host-block webapp-block';
+    block.dataset.topLevelId = webApp.id;
+    block.append(resourceRow(webApp, 'webapp', 0).element);
+    items.set(webApp.id, block);
+  }
+  for (const id of state.topLevelOrder) {
+    if (!items.has(id)) continue;
+    elements.push(items.get(id));
+    items.delete(id);
+  }
+  elements.push(...items.values());
 
-  if (hasFilters && filteredHosts.length === 0) {
+  if (hasFilters && filteredHosts.length === 0 && filteredWebApps.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'host-filter-empty';
     empty.textContent = 'No connection matches the current filters.';
     elements.push(empty);
   }
   container.replaceChildren(...elements);
-  if (canReorder && filteredHosts.length > 1) initializeHostSorting(container);
+  if (canReorder && state.topLevelOrder.length > 1) initializeHostSorting(container);
   initializeTagSorting();
 }
 
@@ -1682,8 +2165,10 @@ function resourceRow(resource, type, depth = 0) {
   const row = document.createElement('div');
   row.className = `host-row ${depth > 0 ? 'child' : ''}`;
   if (isLocalResource(resource)) row.classList.add('local-row');
+  if (type === 'webapp') row.classList.add('webapp-row');
   row.dataset.id = resource.id;
   row.style.setProperty('--tree-offset', `${depth * 18}px`);
+  const name = resourceName(resource);
   const target = resourceTarget(resource);
   const tags = resourceTags(resource);
   const tooltip = resourceTooltip(resource);
@@ -1715,9 +2200,9 @@ function resourceRow(resource, type, depth = 0) {
     chip.setAttribute('aria-label', tunnelLabel(tunnel.type));
     selectButton.querySelector('.resource-name-line').append(chip);
   }
-  selectButton.querySelector('.type').textContent = type;
-  selectButton.querySelector('.compact-name').textContent = compactResourceName(resource.hostname);
-  selectButton.querySelector('strong').textContent = resource.hostname;
+  selectButton.querySelector('.type').textContent = type === 'webapp' ? 'WebApp' : type;
+  selectButton.querySelector('.compact-name').textContent = compactResourceName(name);
+  selectButton.querySelector('strong').textContent = name;
   selectButton.querySelector('small').textContent = target;
   renderResourceTagPills(selectButton.querySelector('.resource-tags'), tags, resource.id);
   if (!isLocalResource(resource)) {
@@ -1732,8 +2217,13 @@ function resourceRow(resource, type, depth = 0) {
   });
   selectButton.addEventListener('dblclick', () => {
     state.selectedId = resource.id;
-    createPendingTab(resource);
-    quickConnect(resource);
+    if (type === 'webapp') {
+      selectResource(resource);
+      launchWebApp(resource);
+    } else {
+      createPendingTab(resource);
+      quickConnect(resource);
+    }
   });
   selectButton.addEventListener('mouseenter', () => showTooltip(selectButton, state.sidebarCollapsed ? 0 : TOOLTIP_DELAY));
   selectButton.addEventListener('focus', () => showTooltip(selectButton, state.sidebarCollapsed ? 0 : TOOLTIP_DELAY));
@@ -1749,7 +2239,7 @@ function resourceRow(resource, type, depth = 0) {
 function renderTagFilters() {
   const section = document.querySelector('#tag-filters');
   const container = document.querySelector('#tag-filter-chips');
-  const tags = mergeTagCatalog(state.tags, state.hosts);
+  const tags = mergeTagCatalog(state.tags, [...state.hosts, ...state.webApps]);
   const available = new Set(tags.map((tag) => tag.key));
   state.activeTagFilters = state.activeTagFilters.filter((tag) => available.has(tag));
   section.hidden = tags.length === 0;
@@ -2038,7 +2528,7 @@ async function updateResourceTagAssignment(resourceID, tagName, assigned) {
     await apiSetResourceTags(resourceID, nextTags);
     await refreshHosts();
     if (restorePopover) restoreTagPopover(resourceID);
-    writeNotice(`${assigned ? 'Added' : 'Removed'} tag ${normalizedName} ${assigned ? 'to' : 'from'} ${found.resource.hostname}.`);
+    writeNotice(`${assigned ? 'Added' : 'Removed'} tag ${normalizedName} ${assigned ? 'to' : 'from'} ${resourceName(found.resource)}.`);
   });
 }
 
@@ -2082,7 +2572,7 @@ function closeTagPanel() {
 }
 
 function renderTagPanel() {
-  const tags = mergeTagCatalog(state.tags, state.hosts);
+  const tags = mergeTagCatalog(state.tags, [...state.hosts, ...state.webApps]);
   const title = document.querySelector('#tag-panel-title');
   const subtitle = document.querySelector('#tag-panel-subtitle');
   const hint = document.querySelector('#tag-list-hint');
@@ -2281,14 +2771,14 @@ function initializeHostSorting(container) {
 }
 
 async function persistHostOrder(container) {
-  const order = [...container.querySelectorAll(':scope > .host-block')].map((block) => block.dataset.hostId);
-  const previousOrder = state.hosts.map((host) => host.id);
+  const order = [...container.querySelectorAll(':scope > .host-block')].map((block) => block.dataset.topLevelId);
+  const previousOrder = state.topLevelOrder;
   if (order.length !== previousOrder.length || order.every((id, index) => id === previousOrder[index])) return;
 
   await withBusy(async () => {
-    await apiReorderHosts(order);
-    state.hosts = order.map((id) => state.hosts.find((host) => host.id === id)).filter(Boolean);
-    writeNotice('Host order updated.');
+    await apiReorderTopLevel(order);
+    state.topLevelOrder = [...order];
+    writeNotice('Connection order updated.');
   });
   renderHosts(searchInput.value);
   renderSelection();
@@ -2366,7 +2856,7 @@ function hideTooltip() {
 
 function resourceTooltip(resource) {
   const tags = resourceTags(resource);
-  return `${resource.hostname} - ${resourceTarget(resource)}${tags.length ? ` - ${tags.map((tag) => tag.name).join(', ')}` : ''}`;
+  return `${resourceName(resource)} - ${resourceTarget(resource)}${tags.length ? ` - ${tags.map((tag) => tag.name).join(', ')}` : ''}`;
 }
 
 function createPendingTab(resource) {
@@ -2414,6 +2904,13 @@ function clearPendingTabs(exceptResourceId = '') {
 
 function selectResource(resource) {
   state.selectedId = resource.id;
+  if (isWebAppResource(resource)) {
+    clearPendingTabs();
+    setActiveSession(null);
+    renderTabs();
+    renderSelection();
+    return;
+  }
   const session = preferredSessionForResource(resource.id);
   if (session) {
     if (!session.pending) clearPendingTabs(resource.id);
@@ -3176,46 +3673,74 @@ function renderSelection() {
   const disconnect = document.querySelector('#disconnect');
   const remove = document.querySelector('#delete-resource');
 
+  const webAppSelected = selected?.type === 'webapp';
   if (activeSession) {
     title.textContent = activeSession.title;
   } else if (selected) {
-    title.textContent = selected.resource.hostname;
+    title.textContent = resourceName(selected.resource);
   } else {
     title.textContent = 'No session selected';
   }
   renderKeyInstallSummary();
+  renderWorkbench(selected);
 
   if (!selected) {
     edit.disabled = true;
     addSubsystem.disabled = true;
     addSubsystem.hidden = false;
+    keys.hidden = false;
+    keys.closest('.session-action-group').hidden = false;
     keys.disabled = state.busy;
     fileTransfer.disabled = true;
     fileTransfer.hidden = !FILE_TRANSFER_ENABLED;
     tunnel.disabled = true;
+    tunnel.hidden = false;
     connect.disabled = true;
     disconnect.disabled = true;
+    disconnect.hidden = false;
     remove.disabled = true;
     return;
   }
 
   const localSelected = isLocalResource(selected.resource);
   const connectionPending = state.connectingResourceIds.has(selected.resource.id);
-  addSubsystem.hidden = false;
+  addSubsystem.hidden = webAppSelected;
   edit.disabled = state.busy || !selected || localSelected;
-  addSubsystem.disabled = state.busy || !selected || localSelected;
+  addSubsystem.disabled = state.busy || !selected || localSelected || webAppSelected;
+  keys.hidden = webAppSelected;
+  keys.closest('.session-action-group').hidden = webAppSelected;
   keys.disabled = state.busy;
-  fileTransfer.hidden = !FILE_TRANSFER_ENABLED;
-  fileTransfer.disabled = state.busy || !selected || localSelected || !FILE_TRANSFER_ENABLED;
-  tunnel.disabled = state.busy || !selected || localSelected;
-  const connectLabel = realSessionsForResource(selected.resource.id).length > 0 ? 'New Session' : 'Connect';
+  fileTransfer.hidden = webAppSelected || !FILE_TRANSFER_ENABLED;
+  fileTransfer.disabled = state.busy || !selected || localSelected || webAppSelected || !FILE_TRANSFER_ENABLED;
+  tunnel.hidden = webAppSelected;
+  tunnel.disabled = state.busy || !selected || localSelected || webAppSelected;
+  disconnect.hidden = webAppSelected;
+  const connectLabel = webAppSelected
+    ? 'Open'
+    : realSessionsForResource(selected.resource.id).length > 0 ? 'New Session' : 'Connect';
+  connect.querySelector('.connect-action-icon').replaceChildren(iconElement(webAppSelected ? 'external-link' : 'player-play-filled'));
   connect.querySelector('.connect-action-label').textContent = connectLabel;
   connect.title = connectLabel;
   connect.setAttribute('aria-label', connectLabel);
   connect.disabled = state.busy || !selected || connectionPending;
-  disconnect.disabled = state.busy || !activeSession || activeSession.closed;
+  disconnect.disabled = state.busy || !activeSession || activeSession.closed || webAppSelected;
   remove.disabled = state.busy || !selected || localSelected;
   renderTunnelStatus();
+}
+
+function renderWorkbench(selected) {
+  const terminal = document.querySelector('.terminal-shell');
+  const workspace = document.querySelector('#webapp-workspace');
+  const webApp = selected?.type === 'webapp' ? selected.resource : null;
+  terminal.hidden = Boolean(webApp);
+  workspace.hidden = !webApp;
+  if (!webApp) return;
+  document.querySelector('#webapp-workspace-name').textContent = webApp.name;
+  document.querySelector('#webapp-workspace-url').textContent = webApp.url;
+  const gateway = webApp.connectionMode === 'tunnel' ? findResource(webApp.gatewayResourceId)?.resource : null;
+  document.querySelector('#webapp-workspace-mode').textContent = gateway
+    ? `SSH tunnel via ${gateway.hostname}`
+    : 'Direct connection';
 }
 
 function renderKeyOptions(select = document.querySelector('#key-select'), includeEmpty = false) {
@@ -3789,7 +4314,7 @@ function renderKeyInstallSummary() {
   const summary = document.querySelector('#key-install-summary');
   if (!form || !summary) return;
   const selected = findResource(state.selectedId)?.resource;
-  const remoteSelected = state.keyInstallEnabled && selected && !isLocalResource(selected);
+  const remoteSelected = state.keyInstallEnabled && selected && !isLocalResource(selected) && !isWebAppResource(selected);
   form.hidden = !remoteSelected;
   if (!remoteSelected) {
     form.reset();
@@ -4020,6 +4545,8 @@ function findResource(id) {
     const found = findNestedResource(host.subsystems ?? [], id, host);
     if (found) return found;
   }
+  const webApp = state.webApps.find((item) => item.id === id);
+  if (webApp) return { type: 'webapp', resource: webApp, parent: null };
   return null;
 }
 
@@ -4056,7 +4583,14 @@ function sessionTitle(hostname, ordinal) {
 
 function resourceTarget(resource) {
   if (isLocalResource(resource)) return 'Local shell';
+  if (isWebAppResource(resource)) {
+    return resource.connectionMode === 'tunnel' ? `${resource.url} via SSH` : resource.url;
+  }
   return `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`;
+}
+
+function resourceName(resource) {
+  return isWebAppResource(resource) ? resource.name : resource.hostname;
 }
 
 function terminalKindLabel(kind = 'ssh') {
@@ -4198,7 +4732,12 @@ async function runAutomaticUpdateCheck() {
   }
 }
 
-function openSettingsPanel() {
+async function openSettingsPanel() {
+  try {
+    await loadWebAppBrowserSettings();
+  } catch (error) {
+    writeNotice(`Could not detect Web App browsers: ${errorDetail(error)}`, 'error');
+  }
   renderSettingsForm();
   const panel = document.querySelector('#settings-panel');
   panel.hidden = false;
@@ -4221,9 +4760,20 @@ function renderSettingsForm() {
   form.elements.terminalScrollback.value = String(state.terminalScrollback);
   form.elements.terminalFontFamily.value = state.terminalFontFamily;
   form.elements.terminalCopyOnSelect.checked = state.terminalCopyOnSelect;
+  const detected = new Map(state.webAppBrowsers.map((browser) => [browser.id, browser]));
+  const browserNames = new Map([
+    ['firefox', 'Firefox'], ['chrome', 'Google Chrome'], ['chromium', 'Chromium'], ['edge', 'Microsoft Edge'],
+  ]);
+  const options = [new Option('Automatic (Firefox preferred)', '')];
+  for (const [id, name] of browserNames) {
+    options.push(new Option(`${name}${detected.has(id) ? '' : ' (not detected)'}`, id));
+  }
+  form.elements.webAppBrowser.replaceChildren(...options);
+  form.elements.webAppBrowser.value = state.webAppBrowserSettings.preferredBrowserId || '';
+  form.elements.customBrowserPath.value = state.webAppBrowserSettings.customBrowserPath || '';
 }
 
-function submitSettings(event) {
+async function submitSettings(event) {
   event.preventDefault();
   const form = event.currentTarget;
   state.terminalFontSize = clampNumber(
@@ -4235,6 +4785,15 @@ function submitSettings(event) {
   state.terminalScrollback = clampNumber(form.elements.terminalScrollback.value, 1000, 500000, DEFAULT_TERMINAL_SCROLLBACK);
   state.terminalFontFamily = form.elements.terminalFontFamily.value.trim() || DEFAULT_TERMINAL_FONT_FAMILY;
   state.terminalCopyOnSelect = form.elements.terminalCopyOnSelect.checked;
+  try {
+    state.webAppBrowserSettings = await apiSaveWebAppBrowserSettings({
+      preferredBrowserId: form.elements.webAppBrowser.value,
+      customBrowserPath: form.elements.customBrowserPath.value.trim(),
+    });
+  } catch (error) {
+    writeNotice(`Could not save browser settings: ${errorDetail(error)}`, 'error');
+    return;
+  }
   saveTerminalSettings();
   applyTerminalSettings();
   writeNotice('Settings saved.');
@@ -4513,6 +5072,18 @@ function registerAppEvents() {
   const eventsOn = globalThis.runtime?.EventsOn;
   if (!eventsOn) return;
 
+  eventsOn('webapp:closed', (event) => {
+    for (const [webAppID, runtime] of state.webAppRuntimes) {
+      if (runtime.runtimeId === event?.runtimeId) state.webAppRuntimes.delete(webAppID);
+    }
+    renderHosts(searchInput.value);
+    renderSelection();
+    if (event?.message && /failed|error|closed:/i.test(event.message)) writeNotice(event.message, 'error');
+  });
+  eventsOn('webapp:status', (event) => {
+    if (event?.message) writeNotice(event.message);
+  });
+
   eventsOn('database:exported', (event) => {
     if (event?.message) writeNotice(`${event.message} ${event.path ?? ''}`.trim());
   });
@@ -4732,10 +5303,16 @@ async function apiListHosts() {
   return clone(demoStore.hosts);
 }
 
+async function apiListWorkspace() {
+  const api = wailsAPI();
+  if (api?.ListWorkspace) return await api.ListWorkspace();
+  return clone({ hosts: demoStore.hosts, webApps: demoStore.webApps, topLevelOrder: demoStore.topLevelOrder });
+}
+
 async function apiListTags() {
   const api = wailsAPI();
   if (api?.ListTags) return (await api.ListTags()) ?? [];
-  return mergeTagCatalog(demoStore.tags, demoStore.hosts).map((tag) => tag.name);
+  return mergeTagCatalog(demoStore.tags, [...demoStore.hosts, ...demoStore.webApps]).map((tag) => tag.name);
 }
 
 async function apiCreateTag(name) {
@@ -4821,7 +5398,34 @@ async function apiAddHost(input) {
   if (api?.AddHost) return await api.AddHost(input);
   const host = { id: `host-${Date.now()}`, hostname: input.hostname, ip: input.ip, port: input.port, user: input.user, tags: input.tags ?? [], subsystems: [] };
   demoStore.hosts.push(host);
+  demoStore.topLevelOrder.push(host.id);
   return clone(host);
+}
+
+async function apiAddWebApp(input) {
+  const api = wailsAPI();
+  if (api?.AddWebApp) return await api.AddWebApp(input);
+  const webApp = { id: `webapp-${Date.now()}`, ...input };
+  demoStore.webApps.push(webApp);
+  demoStore.topLevelOrder.push(webApp.id);
+  return clone(webApp);
+}
+
+async function apiUpdateWebApp(id, input) {
+  const api = wailsAPI();
+  if (api?.UpdateWebApp) return await api.UpdateWebApp(id, input);
+  const index = demoStore.webApps.findIndex((webApp) => webApp.id === id);
+  if (index < 0) throw new Error(`Web App ${id} not found`);
+  demoStore.webApps[index] = { id, ...input };
+}
+
+async function apiDeleteWebApp(id) {
+  const api = wailsAPI();
+  if (api?.DeleteWebApp) return await api.DeleteWebApp(id);
+  const index = demoStore.webApps.findIndex((webApp) => webApp.id === id);
+  if (index < 0) throw new Error(`Web App ${id} not found`);
+  demoStore.webApps.splice(index, 1);
+  demoStore.topLevelOrder = demoStore.topLevelOrder.filter((item) => item !== id);
 }
 
 async function apiAddSubsystem(hostID, input) {
@@ -4873,11 +5477,19 @@ async function apiReorderHosts(order) {
   });
 }
 
+async function apiReorderTopLevel(order) {
+  const api = wailsAPI();
+  if (api?.ReorderTopLevel) return await api.ReorderTopLevel(order);
+  if (order.length !== demoStore.topLevelOrder.length) throw new Error('Invalid connection order');
+  demoStore.topLevelOrder = [...order];
+}
+
 async function apiDeleteResource(id) {
   const api = wailsAPI();
   if (api?.DeleteResource) return await api.DeleteResource(id);
   const hostIndex = demoStore.hosts.findIndex((host) => host.id === id);
   if (hostIndex >= 0) {
+    demoStore.topLevelOrder = demoStore.topLevelOrder.filter((item) => item !== id);
     demoStore.hosts.splice(hostIndex, 1);
     return;
   }
@@ -4895,7 +5507,7 @@ function findDemoResource(id) {
     const subsystem = findDemoNestedResource(host.subsystems ?? [], id);
     if (subsystem) return subsystem;
   }
-  return null;
+  return demoStore.webApps.find((webApp) => webApp.id === id) ?? null;
 }
 
 function findDemoNestedResource(subsystems, id) {
@@ -4926,6 +5538,7 @@ function visitDemoResources(visitor) {
     for (const child of resource.subsystems ?? []) visit(child);
   };
   for (const host of demoStore.hosts) visit(host);
+  for (const webApp of demoStore.webApps) visitor(webApp);
 }
 
 async function apiStartSSHSession(input) {
@@ -4989,6 +5602,48 @@ async function apiStartSSHTunnel(input) {
 async function apiStopSSHTunnel(tunnelID) {
   const api = wailsAPI();
   if (api?.StopSSHTunnel) return await api.StopSSHTunnel(tunnelID);
+}
+
+async function apiListWebAppBrowsers() {
+  const api = wailsAPI();
+  if (api?.ListWebAppBrowsers) return (await api.ListWebAppBrowsers()) ?? [];
+  return [{ id: 'firefox', name: 'Firefox', path: '/usr/bin/firefox', family: 'firefox' }];
+}
+
+async function apiGetWebAppBrowserSettings() {
+  const api = wailsAPI();
+  if (api?.GetWebAppBrowserSettings) return await api.GetWebAppBrowserSettings();
+  return {
+    preferredBrowserId: localStorage.getItem('bashes.webapps.browser') || '',
+    customBrowserPath: localStorage.getItem('bashes.webapps.browserPath') || '',
+  };
+}
+
+async function apiSaveWebAppBrowserSettings(input) {
+  const api = wailsAPI();
+  if (api?.SaveWebAppBrowserSettings) return await api.SaveWebAppBrowserSettings(input);
+  localStorage.setItem('bashes.webapps.browser', input.preferredBrowserId || '');
+  localStorage.setItem('bashes.webapps.browserPath', input.customBrowserPath || '');
+  return input;
+}
+
+async function apiLaunchWebApp(input) {
+  const api = wailsAPI();
+  if (api?.LaunchWebApp) return await api.LaunchWebApp(input);
+  return {
+    runtimeId: `demo-webapp-${Date.now()}`,
+    webAppId: input.webAppId,
+    browserId: 'firefox',
+    browser: 'Firefox',
+    tunnel: false,
+    startedAt: new Date().toISOString(),
+  };
+}
+
+async function apiListWebAppRuntimes() {
+  const api = wailsAPI();
+  if (api?.ListWebAppRuntimes) return (await api.ListWebAppRuntimes()) ?? [];
+  return [...state.webAppRuntimes.values()];
 }
 
 async function apiListSSHKeys() {

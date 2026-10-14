@@ -1,6 +1,6 @@
 # Web Apps Implementation Plan
 
-Status: design approved in principle; do not implement until explicitly requested.
+Status: implemented on `feature/web-apps`; automated checks pass and cross-platform artifacts are pending manual acceptance.
 
 ## Goal
 
