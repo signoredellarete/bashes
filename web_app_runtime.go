@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/signoredellarete/bashes/internal/domain"
@@ -35,35 +36,39 @@ type WebAppLaunchInput struct {
 }
 
 type WebAppRuntimeInfo struct {
-	RuntimeID string `json:"runtimeId"`
-	WebAppID  string `json:"webAppId"`
-	BrowserID string `json:"browserId"`
-	Browser   string `json:"browser"`
-	SOCKSPort int    `json:"socksPort,omitempty"`
-	Tunnel    bool   `json:"tunnel"`
-	StartedAt string `json:"startedAt"`
+	RuntimeID    string `json:"runtimeId"`
+	WebAppID     string `json:"webAppId"`
+	BrowserID    string `json:"browserId"`
+	Browser      string `json:"browser"`
+	SOCKSPort    int    `json:"socksPort,omitempty"`
+	Tunnel       bool   `json:"tunnel"`
+	TunnelActive bool   `json:"tunnelActive"`
+	StartedAt    string `json:"startedAt"`
 }
 
 const browserLauncherDetachWindow = 5 * time.Second
 
 type webAppRuntime struct {
-	id          string
-	groupKey    string
-	browser     webappbrowser.Browser
-	profileDir  string
-	private     bool
-	policy      webappbrowser.RetentionPolicy
-	process     *exec.Cmd
-	clientMu    sync.RWMutex
-	client      *ssh.Client
-	listener    net.Listener
-	cancel      context.CancelFunc
-	gateway     domain.Endpoint
-	sshInput    SSHSessionInput
-	reconnectMu sync.Mutex
-	apps        map[string]struct{}
-	info        WebAppRuntimeInfo
-	stopOnce    sync.Once
+	id           string
+	groupKey     string
+	browser      webappbrowser.Browser
+	profileDir   string
+	private      bool
+	policy       webappbrowser.RetentionPolicy
+	process      *exec.Cmd
+	clientMu     sync.RWMutex
+	client       *ssh.Client
+	listener     net.Listener
+	ctx          context.Context
+	cancel       context.CancelFunc
+	gateway      domain.Endpoint
+	sshInput     SSHSessionInput
+	reconnectMu  sync.Mutex
+	tunnelActive atomic.Bool
+	tunnelPaused atomic.Bool
+	apps         map[string]struct{}
+	info         WebAppRuntimeInfo
+	stopOnce     sync.Once
 }
 
 func (a *App) LaunchWebApp(input WebAppLaunchInput) (WebAppRuntimeInfo, error) {
@@ -82,9 +87,13 @@ func (a *App) LaunchWebApp(input WebAppLaunchInput) (WebAppRuntimeInfo, error) {
 		if runtime.groupKey == groupKey {
 			runtime.apps[app.ID] = struct{}{}
 			a.webAppRuntimeIDs[app.ID] = runtime.id
-			info := runtime.info
-			info.WebAppID = app.ID
+			info := webAppRuntimeInfo(runtime, app.ID)
 			a.mu.Unlock()
+			if info.Tunnel && !info.TunnelActive {
+				if info, err = a.StartWebAppTunnel(app.ID); err != nil {
+					return WebAppRuntimeInfo{}, err
+				}
+			}
 			if err := a.openWebAppTab(runtime, app.URL); err != nil {
 				return WebAppRuntimeInfo{}, err
 			}
@@ -97,7 +106,7 @@ func (a *App) LaunchWebApp(input WebAppLaunchInput) (WebAppRuntimeInfo, error) {
 	if err != nil {
 		return WebAppRuntimeInfo{}, err
 	}
-	return runtime.info, nil
+	return webAppRuntimeInfo(runtime, app.ID), nil
 }
 
 func (a *App) ListWebAppRuntimes() []WebAppRuntimeInfo {
@@ -107,12 +116,73 @@ func (a *App) ListWebAppRuntimes() []WebAppRuntimeInfo {
 	result := make([]WebAppRuntimeInfo, 0, len(a.webAppRuntimeIDs))
 	for appID, runtimeID := range a.webAppRuntimeIDs {
 		if runtime := a.webAppRuntimes[runtimeID]; runtime != nil {
-			info := runtime.info
-			info.WebAppID = appID
-			result = append(result, info)
+			result = append(result, webAppRuntimeInfo(runtime, appID))
 		}
 	}
 	return result
+}
+
+func (a *App) StopWebAppTunnel(webAppID string) (WebAppRuntimeInfo, error) {
+	runtime, err := a.webAppRuntimeByAppID(webAppID)
+	if err != nil {
+		return WebAppRuntimeInfo{}, err
+	}
+	if runtime.listener == nil {
+		return WebAppRuntimeInfo{}, errors.New("Web App does not use an SSH tunnel")
+	}
+
+	runtime.tunnelPaused.Store(true)
+	runtime.reconnectMu.Lock()
+	runtime.clientMu.Lock()
+	client := runtime.client
+	runtime.client = nil
+	runtime.clientMu.Unlock()
+	runtime.tunnelActive.Store(false)
+	if client != nil {
+		_ = client.Close()
+	}
+	runtime.reconnectMu.Unlock()
+
+	info := webAppRuntimeInfo(runtime, webAppID)
+	a.emitWebAppRuntimeStatus(runtime, "Web App SSH tunnel stopped", false)
+	return info, nil
+}
+
+func (a *App) StartWebAppTunnel(webAppID string) (WebAppRuntimeInfo, error) {
+	runtime, err := a.webAppRuntimeByAppID(webAppID)
+	if err != nil {
+		return WebAppRuntimeInfo{}, err
+	}
+	if runtime.listener == nil {
+		return WebAppRuntimeInfo{}, errors.New("Web App does not use an SSH tunnel")
+	}
+
+	runtime.reconnectMu.Lock()
+	if runtime.tunnelActive.Load() {
+		runtime.reconnectMu.Unlock()
+		return webAppRuntimeInfo(runtime, webAppID), nil
+	}
+	client, err := a.dialResource(runtime.gateway, a.resolveSessionKeyPath(runtime.sshInput), remotessh.DefaultTimeout)
+	if err != nil {
+		runtime.reconnectMu.Unlock()
+		return WebAppRuntimeInfo{}, fmt.Errorf("start Web App SSH tunnel: %w", err)
+	}
+	if runtime.ctx.Err() != nil {
+		client.Close()
+		runtime.reconnectMu.Unlock()
+		return WebAppRuntimeInfo{}, errors.New("Web App runtime is closing")
+	}
+	runtime.clientMu.Lock()
+	runtime.client = client
+	runtime.clientMu.Unlock()
+	runtime.tunnelPaused.Store(false)
+	runtime.tunnelActive.Store(true)
+	runtime.reconnectMu.Unlock()
+
+	a.monitorWebAppTunnel(runtime.ctx, runtime, client)
+	info := webAppRuntimeInfo(runtime, webAppID)
+	a.emitWebAppRuntimeStatus(runtime, "Web App SSH tunnel started", false)
+	return info, nil
 }
 
 func (a *App) StopWebAppRuntime(runtimeID string) error {
@@ -210,13 +280,14 @@ func (a *App) startWebAppRuntime(app domain.WebApp, browser webappbrowser.Browse
 	runtime := &webAppRuntime{
 		id: runtimeID, groupKey: groupKey, browser: browser, profileDir: profileDir,
 		private: privateProfile, policy: policy, process: command, client: client,
-		listener: listener, cancel: cancel, apps: map[string]struct{}{app.ID: {}},
+		listener: listener, ctx: ctx, cancel: cancel, apps: map[string]struct{}{app.ID: {}},
 		gateway: gateway, sshInput: sessionInput,
 		info: WebAppRuntimeInfo{
 			RuntimeID: runtimeID, WebAppID: app.ID, BrowserID: string(browser.ID), Browser: browser.Name,
 			SOCKSPort: socksPort, Tunnel: listener != nil, StartedAt: time.Now().Format(time.RFC3339),
 		},
 	}
+	runtime.tunnelActive.Store(listener != nil)
 	a.mu.Lock()
 	a.webAppRuntimes[runtimeID] = runtime
 	a.webAppRuntimeIDs[app.ID] = runtimeID
@@ -233,10 +304,7 @@ func (a *App) startWebAppRuntime(app domain.WebApp, browser webappbrowser.Browse
 	go func() {
 		err := command.Wait()
 		if browserLauncherDetached(err, time.Since(processStartedAt)) {
-			a.emitData("webapp:status", map[string]interface{}{
-				"runtimeId": runtime.id, "webAppId": app.ID,
-				"message": "Web App browser launcher handed off to the browser process",
-			})
+			a.emitWebAppRuntimeStatus(runtime, "Web App browser launcher handed off to the browser process", false)
 			return
 		}
 		message := "Web App browser closed"
@@ -245,8 +313,45 @@ func (a *App) startWebAppRuntime(app domain.WebApp, browser webappbrowser.Browse
 		}
 		a.closeWebAppRuntime(runtime, false, message)
 	}()
-	a.emitData("webapp:status", runtime.info)
+	a.emitWebAppRuntimeStatus(runtime, "", false)
 	return runtime, nil
+}
+
+func webAppRuntimeInfo(runtime *webAppRuntime, webAppID string) WebAppRuntimeInfo {
+	info := runtime.info
+	info.WebAppID = webAppID
+	info.TunnelActive = runtime.tunnelActive.Load()
+	return info
+}
+
+func (a *App) webAppRuntimeByAppID(webAppID string) (*webAppRuntime, error) {
+	webAppID = strings.TrimSpace(webAppID)
+	a.mu.Lock()
+	runtime := a.webAppRuntimes[a.webAppRuntimeIDs[webAppID]]
+	a.mu.Unlock()
+	if runtime == nil {
+		return nil, errors.New("Web App runtime is not active")
+	}
+	return runtime, nil
+}
+
+func (a *App) emitWebAppRuntimeStatus(runtime *webAppRuntime, message string, isError bool) {
+	a.mu.Lock()
+	appIDs := make([]string, 0, len(runtime.apps))
+	for appID := range runtime.apps {
+		appIDs = append(appIDs, appID)
+	}
+	a.mu.Unlock()
+	for _, appID := range appIDs {
+		info := webAppRuntimeInfo(runtime, appID)
+		a.emitData("webapp:status", map[string]interface{}{
+			"runtimeId": info.RuntimeID, "webAppId": info.WebAppID,
+			"browserId": info.BrowserID, "browser": info.Browser,
+			"socksPort": info.SOCKSPort, "tunnel": info.Tunnel,
+			"tunnelActive": info.TunnelActive, "startedAt": info.StartedAt,
+			"message": message, "error": isError,
+		})
+	}
 }
 
 func browserLauncherDetached(waitErr error, lifetime time.Duration) bool {
@@ -313,6 +418,8 @@ func (runtime *webAppRuntime) closeNetwork() {
 	if client != nil {
 		_ = client.Close()
 	}
+	runtime.tunnelActive.Store(false)
+	runtime.tunnelPaused.Store(true)
 }
 
 func (a *App) monitorWebAppTunnel(ctx context.Context, runtime *webAppRuntime, client *ssh.Client) {
@@ -328,7 +435,7 @@ func (a *App) reconnectWebAppTunnel(ctx context.Context, runtime *webAppRuntime,
 	runtime.clientMu.RLock()
 	current := runtime.client
 	runtime.clientMu.RUnlock()
-	if current != failedClient || ctx.Err() != nil {
+	if current != failedClient || ctx.Err() != nil || runtime.tunnelPaused.Load() {
 		return
 	}
 	_ = failedClient.Close()
@@ -337,9 +444,14 @@ func (a *App) reconnectWebAppTunnel(ctx context.Context, runtime *webAppRuntime,
 		runtime.client = nil
 	}
 	runtime.clientMu.Unlock()
+	runtime.tunnelActive.Store(false)
+	a.emitWebAppRuntimeStatus(runtime, "Web App SSH tunnel connection lost; reconnecting", false)
 
 	var lastError = failure
 	for attempt, delay := range []time.Duration{0, time.Second, 2 * time.Second} {
+		if runtime.tunnelPaused.Load() {
+			return
+		}
 		if delay > 0 {
 			select {
 			case <-ctx.Done():
@@ -350,22 +462,29 @@ func (a *App) reconnectWebAppTunnel(ctx context.Context, runtime *webAppRuntime,
 		client, err := a.dialResource(runtime.gateway, a.resolveSessionKeyPath(runtime.sshInput), remotessh.DefaultTimeout)
 		if err != nil {
 			lastError = err
+			if runtime.tunnelPaused.Load() {
+				return
+			}
 			continue
 		}
 		if ctx.Err() != nil {
 			client.Close()
 			return
 		}
+		if runtime.tunnelPaused.Load() {
+			client.Close()
+			return
+		}
 		runtime.clientMu.Lock()
 		runtime.client = client
 		runtime.clientMu.Unlock()
-		a.emitData("webapp:status", map[string]interface{}{
-			"runtimeId": runtime.id, "message": "Web App SSH tunnel reconnected", "attempt": attempt + 1,
-		})
+		runtime.tunnelActive.Store(true)
+		a.emitWebAppRuntimeStatus(runtime, fmt.Sprintf("Web App SSH tunnel reconnected (attempt %d)", attempt+1), false)
 		a.monitorWebAppTunnel(ctx, runtime, client)
 		return
 	}
-	a.closeWebAppRuntime(runtime, true, fmt.Sprintf("Web App tunnel could not reconnect: %v", lastError))
+	runtime.tunnelPaused.Store(true)
+	a.emitWebAppRuntimeStatus(runtime, fmt.Sprintf("Web App tunnel could not reconnect: %v", lastError), true)
 }
 
 func (a *App) stopWebAppForID(appID string) {

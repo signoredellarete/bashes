@@ -346,7 +346,7 @@ app.innerHTML = `
         <p id="webapp-workspace-status" class="webapp-workspace-status"></p>
         <div class="webapp-workspace-actions">
           <button id="webapp-workspace-open" type="button">${iconMarkup('external-link')}<span>Open Web App</span></button>
-          <button id="webapp-workspace-stop" class="secondary" type="button" hidden>${iconMarkup('plug-connected-x')}<span>Stop Tunnel</span></button>
+          <button id="webapp-workspace-tunnel-toggle" class="secondary" type="button" hidden>${iconMarkup('plug-connected-x')}<span>Stop Tunnel</span></button>
         </div>
       </section>
     </section>
@@ -940,7 +940,7 @@ document.querySelector('#webapp-form').elements.browserMode.addEventListener('ch
 document.querySelector('#webapp-auth-form').addEventListener('submit', (event) => submitWebAppAuth(event));
 registerAuthChoiceSync(document.querySelector('#webapp-auth-form'));
 document.querySelector('#webapp-workspace-open').addEventListener('click', () => openSelectedWebApp());
-document.querySelector('#webapp-workspace-stop').addEventListener('click', () => stopSelectedWebAppTunnel());
+document.querySelector('#webapp-workspace-tunnel-toggle').addEventListener('click', () => toggleSelectedWebAppTunnel());
 document.querySelector('#resource-tag-query').addEventListener('input', (event) => {
   state.resourceTagQuery = event.currentTarget.value;
   renderResourceTagOptions();
@@ -1468,16 +1468,18 @@ async function openSelectedWebApp() {
   await launchWebApp(selected.resource);
 }
 
-async function stopSelectedWebAppTunnel() {
+async function toggleSelectedWebAppTunnel() {
   const selected = findResource(state.selectedId);
   if (selected?.type !== 'webapp') return;
   const runtime = state.webAppRuntimes.get(selected.resource.id);
   if (!runtime?.tunnel) return;
 
   await withBusy(async () => {
-    await apiStopWebAppRuntime(runtime.runtimeId);
-    state.webAppRuntimes.delete(selected.resource.id);
-    writeNotice(`Stopped Web App tunnel on 127.0.0.1:${runtime.socksPort}.`);
+    const updated = runtime.tunnelActive
+      ? await apiStopWebAppTunnel(selected.resource.id)
+      : await apiStartWebAppTunnel(selected.resource.id);
+    state.webAppRuntimes.set(selected.resource.id, updated);
+    writeNotice(`${updated.tunnelActive ? 'Started' : 'Stopped'} Web App tunnel on 127.0.0.1:${updated.socksPort}.`);
     renderHosts(searchInput.value);
     renderSelection();
   });
@@ -2194,7 +2196,7 @@ function resourceRow(resource, type, depth = 0) {
   const tooltip = resourceTooltip(resource);
   const tunnel = tunnelForResource(resource.id);
   const webAppRuntime = type === 'webapp' ? state.webAppRuntimes.get(resource.id) : null;
-  const webAppTunnelActive = Boolean(webAppRuntime?.tunnel);
+  const webAppTunnelActive = Boolean(webAppRuntime?.tunnelActive);
 
   const selectButton = document.createElement('button');
   selectButton.type = 'button';
@@ -3767,16 +3769,27 @@ function renderWorkbench(selected) {
     : 'Direct connection';
   const runtime = state.webAppRuntimes.get(webApp.id);
   const status = document.querySelector('#webapp-workspace-status');
-  const stop = document.querySelector('#webapp-workspace-stop');
-  if (runtime?.tunnel) {
+  const toggle = document.querySelector('#webapp-workspace-tunnel-toggle');
+  if (runtime?.tunnelActive) {
     status.textContent = `Tunnel active on 127.0.0.1:${runtime.socksPort}`;
+  } else if (runtime?.tunnel) {
+    status.textContent = `Tunnel stopped on 127.0.0.1:${runtime.socksPort}`;
   } else if (runtime) {
     status.textContent = `Open in ${runtime.browser}`;
   } else {
     status.textContent = webApp.connectionMode === 'tunnel' ? 'Tunnel inactive' : 'Ready to open';
   }
-  stop.hidden = !runtime?.tunnel;
-  stop.disabled = state.busy || !runtime?.tunnel;
+  toggle.hidden = !runtime?.tunnel;
+  toggle.disabled = state.busy || !runtime?.tunnel;
+  if (runtime?.tunnel) {
+    const active = Boolean(runtime.tunnelActive);
+    toggle.replaceChildren(iconElement(active ? 'plug-connected-x' : 'player-play-filled'));
+    const label = document.createElement('span');
+    label.textContent = active ? 'Stop Tunnel' : 'Start Tunnel';
+    toggle.append(label);
+    toggle.title = label.textContent;
+    toggle.setAttribute('aria-label', label.textContent);
+  }
 }
 
 function renderKeyOptions(select = document.querySelector('#key-select'), includeEmpty = false) {
@@ -5117,7 +5130,13 @@ function registerAppEvents() {
     if (event?.message && /failed|error|closed:/i.test(event.message)) writeNotice(event.message, 'error');
   });
   eventsOn('webapp:status', (event) => {
-    if (event?.message) writeNotice(event.message);
+    if (event?.webAppId && event?.runtimeId) {
+      const current = state.webAppRuntimes.get(event.webAppId) ?? {};
+      state.webAppRuntimes.set(event.webAppId, { ...current, ...event });
+      renderHosts(searchInput.value);
+      renderSelection();
+    }
+    if (event?.message) writeNotice(event.message, event.error ? 'error' : undefined);
   });
 
   eventsOn('database:exported', (event) => {
@@ -5674,13 +5693,25 @@ async function apiLaunchWebApp(input) {
     browser: 'Firefox',
     socksPort: webApp?.connectionMode === 'tunnel' ? 49100 : 0,
     tunnel: webApp?.connectionMode === 'tunnel',
+    tunnelActive: webApp?.connectionMode === 'tunnel',
     startedAt: new Date().toISOString(),
   };
 }
 
-async function apiStopWebAppRuntime(runtimeID) {
+async function apiStopWebAppTunnel(webAppID) {
   const api = wailsAPI();
-  if (api?.StopWebAppRuntime) return await api.StopWebAppRuntime(runtimeID);
+  if (api?.StopWebAppTunnel) return await api.StopWebAppTunnel(webAppID);
+  const runtime = state.webAppRuntimes.get(webAppID);
+  if (!runtime?.tunnel) throw new Error('Web App does not use an SSH tunnel');
+  return { ...runtime, tunnelActive: false };
+}
+
+async function apiStartWebAppTunnel(webAppID) {
+  const api = wailsAPI();
+  if (api?.StartWebAppTunnel) return await api.StartWebAppTunnel(webAppID);
+  const runtime = state.webAppRuntimes.get(webAppID);
+  if (!runtime?.tunnel) throw new Error('Web App does not use an SSH tunnel');
+  return { ...runtime, tunnelActive: true };
 }
 
 async function apiListWebAppRuntimes() {
