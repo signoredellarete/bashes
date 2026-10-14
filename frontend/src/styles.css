@@ -1325,41 +1325,6 @@ html.sorting-tags * {
   padding-left: 10px;
 }
 
-.webapp-tag-fieldset {
-  min-width: 0;
-  margin: 0;
-  border: 1px solid #dce1e6;
-  border-radius: 6px;
-  padding: 8px;
-}
-
-.webapp-tag-fieldset legend {
-  color: var(--color-muted);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.webapp-tag-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.panel-card label.webapp-tag-option {
-  display: inline-flex;
-  width: auto;
-  align-items: center;
-  gap: 5px;
-  border: 1px solid hsl(var(--tag-hue) 24% 76%);
-  border-radius: 999px;
-  background: hsl(var(--tag-hue) 38% 94%);
-  padding: 4px 7px;
-}
-
-.webapp-tag-option input {
-  margin: 0;
-}
-
 .settings-separator {
   height: 1px;
   margin: 3px 0;
@@ -1406,6 +1371,12 @@ html.sorting-tags * {
   background: #f4f6f8;
   overflow: hidden;
   padding: 0;
+}
+
+.webapp-panel-card {
+  height: 100vh;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .resource-panel-header {
@@ -1553,7 +1524,7 @@ html.sorting-tags * {
   font-weight: 600;
 }
 
-.resource-panel-card .resource-selected-tag button {
+.tag-editor-panel .resource-selected-tag button {
   display: grid;
   width: 14px;
   height: 14px;
@@ -1574,7 +1545,7 @@ html.sorting-tags * {
   font-size: 11px;
 }
 
-.resource-panel-card #resource-tag-query {
+.tag-editor-panel .resource-tag-query {
   width: auto;
   min-width: 90px;
   height: 24px;
@@ -1612,8 +1583,8 @@ html.sorting-tags * {
   overflow-y: auto;
 }
 
-.resource-panel-card .resource-tag-option,
-.resource-panel-card .resource-tag-create {
+.tag-editor-panel .resource-tag-option,
+.tag-editor-panel .resource-tag-create {
   display: inline-flex;
   width: auto;
   min-width: 0;
@@ -1628,24 +1599,24 @@ html.sorting-tags * {
   user-select: none;
 }
 
-.resource-panel-card .resource-tag-option {
+.tag-editor-panel .resource-tag-option {
   border: 1px solid oklch(0.9 0.045 var(--tag-hue));
   background: oklch(0.965 0.028 var(--tag-hue));
   color: oklch(0.45 0.11 var(--tag-hue));
 }
 
-.resource-panel-card .resource-tag-option:hover {
+.tag-editor-panel .resource-tag-option:hover {
   border-color: oklch(0.76 0.09 var(--tag-hue));
   background: oklch(0.94 0.04 var(--tag-hue));
 }
 
-.resource-panel-card .resource-tag-create {
+.tag-editor-panel .resource-tag-create {
   border: 1px dashed #e8b681;
   background: #fdf2e6;
   color: #df7f28;
 }
 
-.resource-panel-card .resource-tag-create:hover {
+.tag-editor-panel .resource-tag-create:hover {
   border-color: #df7f28;
   background: #fae8d3;
 }
