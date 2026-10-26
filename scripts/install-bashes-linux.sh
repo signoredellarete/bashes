@@ -59,6 +59,54 @@ download_optional() {
   return 1
 }
 
+install_apt_webkit_runtime() {
+  policy="${BASHES_INSTALL_SYSTEM_DEPS:-ask}"
+  case "$policy" in
+    1|true|yes) policy="yes" ;;
+    0|false|no) policy="no" ;;
+    ask|'') policy="ask" ;;
+    *) die "invalid BASHES_INSTALL_SYSTEM_DEPS value: $policy (use yes, no, or ask)" ;;
+  esac
+
+  if ! have apt-get; then
+    return 1
+  fi
+
+  if [ "$policy" = "ask" ]; then
+    if [ ! -t 0 ]; then
+      printf 'WebKitGTK is missing. Install it with:\n  sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-0\n' >&2
+      return 1
+    fi
+    printf 'Bashes requires WebKitGTK 4.1. Install libwebkit2gtk-4.1-0 now? [Y/n] '
+    read -r answer
+    case "$answer" in
+      ''|y|Y|yes|YES|Yes) ;;
+      *) return 1 ;;
+    esac
+  elif [ "$policy" = "no" ]; then
+    return 1
+  fi
+
+  if [ "$(id -u)" -eq 0 ]; then
+    privilege_command=""
+  elif have sudo; then
+    privilege_command="sudo"
+  else
+    printf 'Cannot install WebKitGTK automatically because sudo is unavailable.\n' >&2
+    printf 'Install it as root with: apt-get update && apt-get install -y libwebkit2gtk-4.1-0\n' >&2
+    return 1
+  fi
+
+  printf 'Installing required WebKitGTK 4.1 runtime...\n'
+  if [ -n "$privilege_command" ]; then
+    "$privilege_command" apt-get update || return 1
+    "$privilege_command" apt-get install -y libwebkit2gtk-4.1-0 || return 1
+  else
+    apt-get update || return 1
+    apt-get install -y libwebkit2gtk-4.1-0 || return 1
+  fi
+}
+
 detect_arch() {
   case "$(uname -m)" in
     x86_64|amd64)
@@ -172,6 +220,7 @@ main() {
   require ln
   require awk
   require sha256sum
+  require id
 
   arch="$(detect_arch)"
   release_version="$(latest_version)"
@@ -200,8 +249,17 @@ main() {
   [ -d "$package_dir" ] || die "release archive does not contain the expected package directory"
   selector="$package_dir/select-bashes-linux-binary.sh"
   if [ -x "$selector" ]; then
-    if ! package_binary="$("$selector" "$package_dir")"; then
-      die "release archive does not contain a binary compatible with this Linux system"
+    selector_diagnostics="$tmp_dir/webkit-diagnostics"
+    if ! package_binary="$("$selector" "$package_dir" 2>"$selector_diagnostics")"; then
+      if install_apt_webkit_runtime; then
+        if ! package_binary="$("$selector" "$package_dir" 2>"$selector_diagnostics")"; then
+          cat "$selector_diagnostics" >&2
+          die "WebKitGTK was installed, but no compatible Bashes binary was found"
+        fi
+      else
+        cat "$selector_diagnostics" >&2
+        die "release archive does not contain a binary compatible with this Linux system"
+      fi
     fi
     case "${package_binary##*/}" in
       bashes-webkit41) printf 'Selected WebKitGTK 4.1 build.\n' ;;
