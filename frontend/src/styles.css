@@ -865,6 +865,7 @@ html.sorting-assigned-tag .tag-remove-zone {
 #app.sidebar-collapsed .sidebar {
   align-items: stretch;
   gap: 10px;
+  overflow: visible;
   padding: 10px;
 }
 
@@ -895,6 +896,12 @@ html.sorting-assigned-tag .tag-remove-zone {
 
 #app.sidebar-collapsed .toolbar {
   grid-template-columns: 1fr;
+}
+
+#app.sidebar-collapsed .add-resource-menu {
+  top: 0;
+  right: auto;
+  left: calc(100% + 8px);
 }
 
 #app.sidebar-collapsed .search-control {
