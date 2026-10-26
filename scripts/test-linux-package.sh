@@ -30,7 +30,9 @@ cat > "$tmp_dir/bin/ldd" <<'LDD'
 #!/usr/bin/env bash
 case "$1" in
   *webkit41)
-    if [ "${TEST_WEBKIT41_MISSING:-false}" = true ]; then
+    if [ -n "${TEST_WEBKIT_INSTALLED_MARKER:-}" ] && [ -f "$TEST_WEBKIT_INSTALLED_MARKER" ]; then
+      printf 'libwebkit2gtk-4.1.so.0 => /lib/libwebkit2gtk-4.1.so.0\n'
+    elif [ "${TEST_WEBKIT41_MISSING:-false}" = true ]; then
       printf 'libwebkit2gtk-4.1.so.0 => not found\n'
     else
       printf 'libwebkit2gtk-4.1.so.0 => /lib/libwebkit2gtk-4.1.so.0\n'
@@ -45,6 +47,17 @@ case "$1" in
     ;;
 esac
 LDD
+cat > "$tmp_dir/bin/apt-get" <<'APT'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$TEST_APT_LOG"
+if [ "${1:-}" = install ]; then
+  touch "$TEST_WEBKIT_INSTALLED_MARKER"
+fi
+APT
+cat > "$tmp_dir/bin/sudo" <<'SUDO'
+#!/usr/bin/env bash
+exec "$@"
+SUDO
 cat > "$tmp_dir/bin/uname" <<'UNAME'
 #!/usr/bin/env bash
 case "${1:-}" in
@@ -81,6 +94,8 @@ chmod 755 \
   "$tmp_dir/bashes-webkit40" \
   "$tmp_dir/bashes-webkit41" \
   "$tmp_dir/bin/ldd" \
+  "$tmp_dir/bin/apt-get" \
+  "$tmp_dir/bin/sudo" \
   "$tmp_dir/bin/uname" \
   "$tmp_dir/bin/curl"
 
@@ -120,5 +135,26 @@ output="$("$tmp_dir/install/bashes" installed)"
 [ "$output" = "webkit40 installed" ] || fail "installer did not install the compatible binary"
 [ "$(cat "$tmp_dir/install/VERSION")" = vtest ] || fail "installer did not write the version marker"
 [ -f "$tmp_dir/share/applications/bashes.desktop" ] || fail "installer did not create the desktop entry"
+
+mkdir -p "$tmp_dir/runtime-home"
+: > "$tmp_dir/apt.log"
+PATH="$tmp_dir/bin:$PATH" \
+HOME="$tmp_dir/runtime-home" \
+XDG_DATA_HOME="$tmp_dir/runtime-share" \
+BASHES_VERSION="vtest-runtime" \
+BASHES_INSTALL_DIR="$tmp_dir/runtime-install" \
+BASHES_BIN_DIR="$tmp_dir/runtime-bin" \
+BASHES_INSTALL_SYSTEM_DEPS=yes \
+TEST_RELEASE_ARCHIVE="$archive" \
+TEST_WEBKIT41_MISSING=true \
+TEST_WEBKIT40_MISSING=true \
+TEST_WEBKIT_INSTALLED_MARKER="$tmp_dir/webkit-installed" \
+TEST_APT_LOG="$tmp_dir/apt.log" \
+scripts/install-bashes-linux.sh >/dev/null
+
+output="$("$tmp_dir/runtime-install/bashes" installed)"
+[ "$output" = "webkit41 installed" ] || fail "installer did not retry with the installed WebKitGTK runtime"
+grep -qx 'update' "$tmp_dir/apt.log" || fail "installer did not update apt metadata"
+grep -qx 'install -y libwebkit2gtk-4.1-0' "$tmp_dir/apt.log" || fail "installer did not install the WebKitGTK 4.1 runtime"
 
 printf 'Linux package tests passed.\n'
