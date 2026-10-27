@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - fix/collapsed-add-menu-position
     tags:
       - v*
   workflow_dispatch:
