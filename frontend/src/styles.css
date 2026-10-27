@@ -908,7 +908,7 @@ html.sorting-assigned-tag .tag-remove-zone {
   display: none;
 }
 
-#app.sidebar-collapsed .toolbar button {
+#app.sidebar-collapsed .toolbar > button {
   width: 100%;
   min-height: 30px;
   padding: 0;
@@ -916,7 +916,7 @@ html.sorting-assigned-tag .tag-remove-zone {
   font-size: 0;
 }
 
-#app.sidebar-collapsed .toolbar button::before {
+#app.sidebar-collapsed .toolbar > button::before {
   content: none;
 }
 
