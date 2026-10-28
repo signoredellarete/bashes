@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - fix/terminal-multiline-paste
     tags:
       - v*
   workflow_dispatch:

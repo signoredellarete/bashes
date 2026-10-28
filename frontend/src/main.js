@@ -63,6 +63,7 @@ import {
 } from './terminal-settings.js';
 import { repeatedKeyData } from './terminal-keyboard.js';
 import { createOrderedWriter } from './ordered-writer.js';
+import { pasteIntoTerminal } from './terminal-paste.js';
 import { loadTunnelPreference, saveTunnelPreference } from './tunnel-preferences.js';
 import {
   canonicalTag,
@@ -3099,7 +3100,7 @@ function createSession(sessionID, resource, kind = 'ssh', replaceSessionID = '')
     readClipboard()
       .then((text) => {
         if (state.sessions.get(sessionID)?.closed) return undefined;
-        if (text) return writeInput(text);
+        pasteIntoTerminal(terminal, text);
         return undefined;
       })
       .catch(() => {});
