@@ -865,6 +865,7 @@ html.sorting-assigned-tag .tag-remove-zone {
 #app.sidebar-collapsed .sidebar {
   align-items: stretch;
   gap: 10px;
+  overflow: visible;
   padding: 10px;
 }
 
@@ -897,11 +898,17 @@ html.sorting-assigned-tag .tag-remove-zone {
   grid-template-columns: 1fr;
 }
 
+#app.sidebar-collapsed .add-resource-menu {
+  top: 0;
+  right: auto;
+  left: calc(100% + 8px);
+}
+
 #app.sidebar-collapsed .search-control {
   display: none;
 }
 
-#app.sidebar-collapsed .toolbar button {
+#app.sidebar-collapsed .toolbar > button {
   width: 100%;
   min-height: 30px;
   padding: 0;
@@ -909,7 +916,7 @@ html.sorting-assigned-tag .tag-remove-zone {
   font-size: 0;
 }
 
-#app.sidebar-collapsed .toolbar button::before {
+#app.sidebar-collapsed .toolbar > button::before {
   content: none;
 }
 
