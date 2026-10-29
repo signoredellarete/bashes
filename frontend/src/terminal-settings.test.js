@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_TERMINAL_SCROLLBACK,
   MAX_TERMINAL_FONT_SIZE,
+  TERMINAL_FONT_FAMILY_OPTIONS,
   loadTerminalSettings,
   persistTerminalSettings,
 } from './terminal-settings.js';
@@ -15,6 +16,14 @@ function memoryStorage(initial = {}) {
 }
 
 describe('terminal settings', () => {
+  it('provides a compact list of distinct terminal font stacks', () => {
+    expect(TERMINAL_FONT_FAMILY_OPTIONS.length).toBeGreaterThanOrEqual(5);
+    expect(new Set(TERMINAL_FONT_FAMILY_OPTIONS.map(({ value }) => value)).size).toBe(
+      TERMINAL_FONT_FAMILY_OPTIONS.length,
+    );
+    expect(TERMINAL_FONT_FAMILY_OPTIONS[0].label).toBe('System Monospace');
+  });
+
   it('uses the high scrollback default and clamps invalid values', () => {
     const settings = loadTerminalSettings(memoryStorage({ 'bashes.terminalFontSize': '999' }));
     expect(settings.terminalFontSize).toBe(MAX_TERMINAL_FONT_SIZE);

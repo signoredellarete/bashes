@@ -58,6 +58,7 @@ import {
   DEFAULT_TERMINAL_SCROLLBACK,
   MAX_TERMINAL_FONT_SIZE,
   MIN_TERMINAL_FONT_SIZE,
+  TERMINAL_FONT_FAMILY_OPTIONS,
   loadTerminalSettings,
   persistTerminalSettings,
 } from './terminal-settings.js';
@@ -635,7 +636,7 @@ app.innerHTML = `
       </div>
       <label>
         <span>Terminal Font Family</span>
-        <input name="terminalFontFamily" autocomplete="off" spellcheck="false" />
+        <select name="terminalFontFamily"></select>
       </label>
       <label class="checkbox-row">
         <input name="terminalCopyOnSelect" type="checkbox" />
@@ -4905,6 +4906,11 @@ function renderSettingsForm() {
   const form = document.querySelector('#settings-form');
   form.elements.terminalFontSize.value = String(state.terminalFontSize);
   form.elements.terminalScrollback.value = String(state.terminalScrollback);
+  const fontOptions = TERMINAL_FONT_FAMILY_OPTIONS.map(({ label, value }) => new Option(label, value));
+  if (!TERMINAL_FONT_FAMILY_OPTIONS.some(({ value }) => value === state.terminalFontFamily)) {
+    fontOptions.push(new Option('Previously configured font', state.terminalFontFamily));
+  }
+  form.elements.terminalFontFamily.replaceChildren(...fontOptions);
   form.elements.terminalFontFamily.value = state.terminalFontFamily;
   form.elements.terminalCopyOnSelect.checked = state.terminalCopyOnSelect;
   const detected = new Map(state.webAppBrowsers.map((browser) => [browser.id, browser]));
@@ -4930,7 +4936,7 @@ async function submitSettings(event) {
     DEFAULT_TERMINAL_FONT_SIZE,
   );
   state.terminalScrollback = clampNumber(form.elements.terminalScrollback.value, 1000, 500000, DEFAULT_TERMINAL_SCROLLBACK);
-  state.terminalFontFamily = form.elements.terminalFontFamily.value.trim() || DEFAULT_TERMINAL_FONT_FAMILY;
+  state.terminalFontFamily = form.elements.terminalFontFamily.value || DEFAULT_TERMINAL_FONT_FAMILY;
   state.terminalCopyOnSelect = form.elements.terminalCopyOnSelect.checked;
   try {
     state.webAppBrowserSettings = await apiSaveWebAppBrowserSettings({

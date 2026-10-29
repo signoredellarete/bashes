@@ -70,6 +70,10 @@ Queste istruzioni valgono per tutto il repository.
 - La preview viene costruita dal primo dei due commit; il secondo deve modificare esclusivamente il trigger del workflow, quindi il codice applicativo dell'artifact deve coincidere con quello presente all'HEAD del branch.
 - Non usare `gh workflow run` per le preview dei feature o fix branch: il flusso stabilito usa i trigger `push` temporanei e non richiede autenticazione GitHub CLI.
 - Dopo avere avviato la preview, non attendere il completamento del workflow: comunicare all'utente che puo' verificarne l'esito e scaricare gli artifact dalla pagina Actions.
+- Creare ogni nuova modifica su un feature o fix branch dedicato derivato da `main`.
+- Eseguire il merge in `main` soltanto dopo una richiesta esplicita dell'utente e unire esclusivamente il branch concordato, senza includere altri branch in sviluppo.
+- Dopo il merge concordato, eliminare quel branch sia localmente sia da `origin`; non eliminare altri branch senza una richiesta esplicita.
+- Il push del merge su `main` avvia la build della nuova versione; non creare tag o release finche' l'utente non richiede esplicitamente la pubblicazione.
 - Creare tag e release ufficiali solo dopo una richiesta esplicita dell'utente e solo dal commit concordato.
 - Scrivere le release note in inglese, in forma sintetica, elencando le funzionalita' e i fix realmente inclusi nella versione.
 
