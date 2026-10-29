@@ -63,6 +63,7 @@ import {
 } from './terminal-settings.js';
 import { repeatedKeyData } from './terminal-keyboard.js';
 import { createOrderedWriter } from './ordered-writer.js';
+import { pasteIntoTerminal } from './terminal-paste.js';
 import { loadTunnelPreference, saveTunnelPreference } from './tunnel-preferences.js';
 import {
   canonicalTag,
@@ -111,7 +112,6 @@ const state = {
   webAppAuthTarget: null,
   tunnels: new Map(),
   localShellSupported: false,
-  x11ForwardingSupported: false,
   selectedId: null,
   activeSessionId: null,
   ...terminalSettings,
@@ -552,11 +552,6 @@ app.innerHTML = `
       <p class="inline-status" id="connect-status" hidden></p>
 
       ${authFieldsMarkup('session')}
-
-      <label id="connect-x11-field" class="checkbox-row" hidden>
-        <input name="x11Forwarding" type="checkbox" />
-        <span>Enable X11 forwarding (-X)</span>
-      </label>
 
       <footer class="panel-actions">
         <button class="secondary" type="button" data-close-connect>Cancel</button>
@@ -1107,12 +1102,7 @@ window.setTimeout(() => {
 }, 0);
 
 async function loadCapabilities() {
-  [state.localShellSupported, state.x11ForwardingSupported] = await Promise.all([
-    apiSupportsLocalShell(),
-    apiSupportsX11Forwarding(),
-  ]);
-  const x11Field = document.querySelector('#connect-x11-field');
-  if (x11Field) x11Field.hidden = !state.x11ForwardingSupported;
+  state.localShellSupported = await apiSupportsLocalShell();
 }
 
 async function loadHosts() {
@@ -1377,7 +1367,6 @@ async function submitConnect(event) {
         resourceId: selected.id,
         ...auth,
         trustHostKey: form.elements.trustHostKey.checked,
-        x11Forwarding: state.x11ForwardingSupported && form.elements.x11Forwarding.checked,
         cols: 120,
         rows: 32,
       }, selected, 'Trust and connect');
@@ -3099,7 +3088,7 @@ function createSession(sessionID, resource, kind = 'ssh', replaceSessionID = '')
     readClipboard()
       .then((text) => {
         if (state.sessions.get(sessionID)?.closed) return undefined;
-        if (text) return writeInput(text);
+        pasteIntoTerminal(terminal, text);
         return undefined;
       })
       .catch(() => {});
@@ -4210,7 +4199,6 @@ function applyConnectDefaults(form, resource) {
   showSavedPassword(form.elements.password, false);
   form.elements.savePassword.checked = false;
   form.elements.privateKeyPassphrase.value = '';
-  if (form.elements.x11Forwarding) form.elements.x11Forwarding.checked = false;
   if (!auth) {
     updateAuthFields(form);
     return;
@@ -5555,12 +5543,6 @@ async function apiCheckForUpdate() {
 async function apiSupportsLocalShell() {
   const api = wailsAPI();
   if (api?.SupportsLocalShell) return Boolean(await api.SupportsLocalShell());
-  return false;
-}
-
-async function apiSupportsX11Forwarding() {
-  const api = wailsAPI();
-  if (api?.SupportsX11Forwarding) return Boolean(await api.SupportsX11Forwarding());
   return false;
 }
 
