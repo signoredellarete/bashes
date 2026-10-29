@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - fix/remove-windows-x11
     tags:
       - v*
   workflow_dispatch:
