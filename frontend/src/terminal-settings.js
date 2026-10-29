@@ -1,7 +1,11 @@
 export const DEFAULT_TERMINAL_FONT_SIZE = 13;
-export const DEFAULT_TERMINAL_FONT_FAMILY = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
+export const SYSTEM_TERMINAL_FONT_FAMILY = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
+export const DEFAULT_TERMINAL_FONT_FAMILY = '"Bashes JetBrains Mono", "JetBrains Mono", ui-monospace, monospace';
 export const TERMINAL_FONT_FAMILY_OPTIONS = Object.freeze([
-  { label: 'System Monospace', value: DEFAULT_TERMINAL_FONT_FAMILY },
+  { label: 'JetBrains Mono', value: DEFAULT_TERMINAL_FONT_FAMILY },
+  { label: 'Ubuntu Mono', value: '"Bashes Ubuntu Mono", "Ubuntu Mono", ui-monospace, monospace' },
+  { label: 'Roboto Mono', value: '"Bashes Roboto Mono", "Roboto Mono", ui-monospace, monospace' },
+  { label: 'System Monospace', value: SYSTEM_TERMINAL_FONT_FAMILY },
   { label: 'Cascadia Mono', value: '"Cascadia Mono", "Cascadia Code", Consolas, monospace' },
   { label: 'Consolas', value: 'Consolas, "Liberation Mono", monospace' },
   { label: 'Menlo', value: 'Menlo, Monaco, "Courier New", monospace' },

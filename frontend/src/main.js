@@ -75,6 +75,7 @@ import {
   visibleResourceTags,
 } from './resource-tags.js';
 import { isWebAppResource, webAppMatchesFilters } from './web-apps/model.js';
+import './terminal-fonts.css';
 import './styles.css';
 
 const terminalSettings = loadTerminalSettings(localStorage);
