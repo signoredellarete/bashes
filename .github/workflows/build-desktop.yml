@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - feature/terminal-font-family-select
     tags:
       - v*
   workflow_dispatch:
