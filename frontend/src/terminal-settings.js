@@ -44,6 +44,17 @@ export function persistTerminalSettings(storage, settings) {
   storage.setItem('bashes.terminalCopyOnSelect', String(settings.terminalCopyOnSelect));
 }
 
+export function terminalAppearancePreview(current, fontSize, fontFamily) {
+  const parsedSize = Number(fontSize);
+  return {
+    terminalFontSize: Number.isInteger(parsedSize) && parsedSize >= MIN_TERMINAL_FONT_SIZE && parsedSize <= MAX_TERMINAL_FONT_SIZE
+      ? parsedSize
+      : current.terminalFontSize,
+    terminalFontFamily: String(fontFamily ?? '').trim() || current.terminalFontFamily,
+    terminalScrollback: current.terminalScrollback,
+  };
+}
+
 function readBoolean(value, fallback) {
   if (value === 'true') return true;
   if (value === 'false') return false;

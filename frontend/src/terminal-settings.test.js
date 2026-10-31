@@ -6,6 +6,7 @@ import {
   TERMINAL_FONT_FAMILY_OPTIONS,
   loadTerminalSettings,
   persistTerminalSettings,
+  terminalAppearancePreview,
 } from './terminal-settings.js';
 
 function memoryStorage(initial = {}) {
@@ -54,5 +55,21 @@ describe('terminal settings', () => {
       terminalScrollback: 200000,
       terminalCopyOnSelect: false,
     });
+  });
+
+  it('builds a temporary terminal appearance without changing invalid values', () => {
+    const current = {
+      terminalFontSize: 13,
+      terminalFontFamily: 'monospace',
+      terminalScrollback: 100000,
+    };
+
+    expect(terminalAppearancePreview(current, '18', '"Bashes Ubuntu Mono"')).toEqual({
+      terminalFontSize: 18,
+      terminalFontFamily: '"Bashes Ubuntu Mono"',
+      terminalScrollback: 100000,
+    });
+    expect(terminalAppearancePreview(current, '', '')).toEqual(current);
+    expect(current.terminalFontSize).toBe(13);
   });
 });

@@ -61,6 +61,7 @@ import {
   TERMINAL_FONT_FAMILY_OPTIONS,
   loadTerminalSettings,
   persistTerminalSettings,
+  terminalAppearancePreview,
 } from './terminal-settings.js';
 import { repeatedKeyData } from './terminal-keyboard.js';
 import { createOrderedWriter } from './ordered-writer.js';
@@ -972,7 +973,10 @@ document.querySelector('#tag-create-form').elements.name.addEventListener('input
 document.querySelector('#tag-panel-clear').addEventListener('click', () => clearTagPanelSelection());
 document.querySelector('#connect-form').addEventListener('submit', (event) => submitConnect(event));
 document.querySelector('#tunnel-form').addEventListener('submit', (event) => submitTunnel(event));
-document.querySelector('#settings-form').addEventListener('submit', (event) => submitSettings(event));
+const settingsForm = document.querySelector('#settings-form');
+settingsForm.addEventListener('submit', (event) => submitSettings(event));
+settingsForm.elements.terminalFontSize.addEventListener('input', () => previewTerminalAppearance());
+settingsForm.elements.terminalFontFamily.addEventListener('change', () => previewTerminalAppearance());
 document.querySelector('#tunnel-form').addEventListener('input', () => updateTunnelSummary());
 document.querySelector('#tunnel-form').elements.type.addEventListener('change', () => updateTunnelMode());
 registerAuthChoiceSync(document.querySelector('#connect-form'));
@@ -4896,7 +4900,8 @@ async function openSettingsPanel() {
   }, 0);
 }
 
-function closeSettingsPanel() {
+function closeSettingsPanel({ restoreTerminalSettings = true } = {}) {
+  if (restoreTerminalSettings) applyTerminalSettings(state, { focus: false });
   const panel = document.querySelector('#settings-panel');
   panel.classList.remove('open');
   panel.hidden = true;
@@ -4951,18 +4956,28 @@ async function submitSettings(event) {
   saveTerminalSettings();
   applyTerminalSettings();
   writeNotice('Settings saved.');
-  closeSettingsPanel();
+  closeSettingsPanel({ restoreTerminalSettings: false });
 }
 
-function applyTerminalSettings() {
+function previewTerminalAppearance() {
+  const form = document.querySelector('#settings-form');
+  const preview = terminalAppearancePreview(
+    state,
+    form.elements.terminalFontSize.value,
+    form.elements.terminalFontFamily.value,
+  );
+  applyTerminalSettings(preview, { focus: false });
+}
+
+function applyTerminalSettings(settings = state, { focus = true } = {}) {
   for (const session of state.sessions.values()) {
     if (!session.terminal) continue;
-    session.terminal.options.fontSize = state.terminalFontSize;
-    session.terminal.options.fontFamily = state.terminalFontFamily;
-    session.terminal.options.scrollback = state.terminalScrollback;
+    session.terminal.options.fontSize = settings.terminalFontSize;
+    session.terminal.options.fontFamily = settings.terminalFontFamily;
+    session.terminal.options.scrollback = settings.terminalScrollback;
   }
   scheduleTerminalFit();
-  focusActiveTerminal();
+  if (focus) focusActiveTerminal();
 }
 
 function saveTerminalSettings() {
