@@ -1365,13 +1365,18 @@ html.sorting-tags * {
   margin: 0;
   border: 1px solid #d7dde4;
   border-radius: 7px;
+  background: #f7f8fa;
   padding: 10px 10px 11px;
+}
+
+.settings-group + .settings-group {
+  margin-top: 6px;
 }
 
 .settings-group legend {
   padding: 0 6px;
   color: #495479;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1;
 }
