@@ -139,6 +139,7 @@ const state = {
   sessions: new Map(),
   pendingSSHOutput: new Map(),
   fileTransferWorkspaces: new Map(),
+  backgroundFileTransferResourceIds: new Set(),
   activeFileTransferResourceId: null,
 };
 
@@ -3634,6 +3635,7 @@ async function openFileTransferModal() {
     element.dataset.resourceId = selected.id;
     element.addEventListener('bashes-file-transfer-active', (event) => {
       workspace.active = Boolean(event.detail?.active);
+      renderFileTransferBackgroundIndicator();
     });
     root.append(element);
     workspace = {
@@ -3660,7 +3662,11 @@ function closeFileTransferModal() {
 }
 
 function backgroundFileTransferModal() {
+  if (state.activeFileTransferResourceId) {
+    state.backgroundFileTransferResourceIds.add(state.activeFileTransferResourceId);
+  }
   hideFileTransferModal();
+  renderFileTransferBackgroundIndicator();
 }
 
 function hideFileTransferModal() {
@@ -3675,6 +3681,8 @@ function showFileTransferWorkspace(resourceId) {
     workspace.element.hidden = id !== resourceId;
   }
   state.activeFileTransferResourceId = resourceId;
+  state.backgroundFileTransferResourceIds.delete(resourceId);
+  renderFileTransferBackgroundIndicator();
 }
 
 function destroyFileTransferWorkspace(resourceId) {
@@ -3684,9 +3692,29 @@ function destroyFileTransferWorkspace(resourceId) {
   workspace.unmount();
   workspace.element.remove();
   state.fileTransferWorkspaces.delete(resourceId);
+  state.backgroundFileTransferResourceIds.delete(resourceId);
   if (state.activeFileTransferResourceId === resourceId) {
     state.activeFileTransferResourceId = null;
   }
+  renderFileTransferBackgroundIndicator();
+}
+
+function renderFileTransferBackgroundIndicator() {
+  const button = document.querySelector('#open-file-transfer');
+  if (!button) return;
+
+  const backgrounded = state.backgroundFileTransferResourceIds.size > 0;
+  const transferActive = [...state.backgroundFileTransferResourceIds].some(
+    (resourceId) => state.fileTransferWorkspaces.get(resourceId)?.active,
+  );
+  const label = transferActive
+    ? 'File transfer running in background'
+    : backgrounded ? 'Files in background' : 'Files';
+
+  button.classList.toggle('file-transfer-backgrounded', backgrounded);
+  button.classList.toggle('file-transfer-running', transferActive);
+  button.title = label;
+  button.setAttribute('aria-label', label);
 }
 
 function closeAllFileTransferWorkspaces() {

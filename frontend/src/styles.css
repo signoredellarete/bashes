@@ -443,8 +443,32 @@ svg.ti {
 }
 
 .session-actions .icon-action {
+  position: relative;
   background: #fff;
   color: #6b7280;
+}
+
+#open-file-transfer.file-transfer-backgrounded::after {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border: 1px solid #fff;
+  border-radius: 50%;
+  background: #d98235;
+  content: "";
+  pointer-events: none;
+}
+
+#open-file-transfer.file-transfer-running::after {
+  animation: file-transfer-badge-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes file-transfer-badge-pulse {
+  50% {
+    box-shadow: 0 0 0 3px rgba(217, 130, 53, 0.22);
+  }
 }
 
 .session-actions .icon-action:hover:not(:disabled) {
@@ -1376,7 +1400,7 @@ html.sorting-tags * {
 .settings-group legend {
   padding: 0 6px;
   color: #495479;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   line-height: 1;
 }
@@ -2446,6 +2470,18 @@ html.sorting-tags * {
   cursor: pointer;
   font-size: 12px;
   padding: 4px 9px;
+}
+
+#file-transfer-background {
+  border-color: #d8b18d;
+  background: #f5e6d8;
+  color: #86522a;
+}
+
+#file-transfer-background:hover {
+  border-color: #ca986b;
+  background: #f0dac6;
+  color: #73431f;
 }
 
 .file-transfer-root {
