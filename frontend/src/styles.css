@@ -1353,10 +1353,27 @@ html.sorting-tags * {
   padding-left: 10px;
 }
 
-.settings-separator {
-  height: 1px;
-  margin: 3px 0;
-  background: #e3e7ec;
+#settings-form {
+  max-height: 100vh;
+  overflow-y: auto;
+}
+
+.settings-group {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  margin: 0;
+  border: 1px solid #d7dde4;
+  border-radius: 7px;
+  padding: 10px 10px 11px;
+}
+
+.settings-group legend {
+  padding: 0 6px;
+  color: #495479;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .resource-form,

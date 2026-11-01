@@ -626,33 +626,43 @@ app.innerHTML = `
         <button class="close-panel" type="button" data-close-settings title="Close">${ICON_CLOSE}</button>
       </header>
 
-      <div class="form-grid">
-        <label>
-          <span>Terminal Font Size</span>
-          <input name="terminalFontSize" type="number" min="${MIN_TERMINAL_FONT_SIZE}" max="${MAX_TERMINAL_FONT_SIZE}" step="1" />
-        </label>
+      <fieldset class="settings-group">
+        <legend>Terminal Appearance</legend>
+        <div class="form-grid">
+          <label>
+            <span>Terminal Font Size</span>
+            <input name="terminalFontSize" type="number" min="${MIN_TERMINAL_FONT_SIZE}" max="${MAX_TERMINAL_FONT_SIZE}" step="1" />
+          </label>
+          <label>
+            <span>Terminal Font Family</span>
+            <select name="terminalFontFamily"></select>
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset class="settings-group">
+        <legend>Terminal Behavior</legend>
         <label>
           <span>Scrollback Lines</span>
           <input name="terminalScrollback" type="number" min="1000" max="500000" step="1000" />
         </label>
-      </div>
-      <label>
-        <span>Terminal Font Family</span>
-        <select name="terminalFontFamily"></select>
-      </label>
-      <label class="checkbox-row">
-        <input name="terminalCopyOnSelect" type="checkbox" />
-        <span>Copy selected terminal text to clipboard</span>
-      </label>
-      <div class="settings-separator"></div>
-      <label>
-        <span>Web App Browser</span>
-        <select name="webAppBrowser"></select>
-      </label>
-      <label>
-        <span>Custom Browser Executable</span>
-        <input name="customBrowserPath" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Optional executable path" />
-      </label>
+        <label class="checkbox-row">
+          <input name="terminalCopyOnSelect" type="checkbox" />
+          <span>Copy selected terminal text to clipboard</span>
+        </label>
+      </fieldset>
+
+      <fieldset class="settings-group">
+        <legend>Web App Browser</legend>
+        <label>
+          <span>Preferred Browser</span>
+          <select name="webAppBrowser"></select>
+        </label>
+        <label>
+          <span>Custom Browser Executable</span>
+          <input name="customBrowserPath" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Optional executable path" />
+        </label>
+      </fieldset>
 
       <footer class="panel-actions">
         <button class="secondary" type="button" data-close-settings>Cancel</button>
