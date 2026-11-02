@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_TERMINAL_FONT_FAMILY,
   DEFAULT_TERMINAL_SCROLLBACK,
   MAX_TERMINAL_FONT_SIZE,
+  TERMINAL_FONT_FAMILY_OPTIONS,
   loadTerminalSettings,
   persistTerminalSettings,
+  terminalAppearancePreview,
 } from './terminal-settings.js';
 
 function memoryStorage(initial = {}) {
@@ -15,9 +18,26 @@ function memoryStorage(initial = {}) {
 }
 
 describe('terminal settings', () => {
+  it('provides a compact list of distinct terminal font stacks', () => {
+    expect(TERMINAL_FONT_FAMILY_OPTIONS.length).toBeGreaterThanOrEqual(5);
+    expect(new Set(TERMINAL_FONT_FAMILY_OPTIONS.map(({ value }) => value)).size).toBe(
+      TERMINAL_FONT_FAMILY_OPTIONS.length,
+    );
+    expect(TERMINAL_FONT_FAMILY_OPTIONS[0]).toEqual({
+      label: 'JetBrains Mono',
+      value: DEFAULT_TERMINAL_FONT_FAMILY,
+    });
+    expect(TERMINAL_FONT_FAMILY_OPTIONS.map(({ label }) => label)).toEqual(expect.arrayContaining([
+      'Ubuntu Mono',
+      'Roboto Mono',
+      'System Monospace',
+    ]));
+  });
+
   it('uses the high scrollback default and clamps invalid values', () => {
     const settings = loadTerminalSettings(memoryStorage({ 'bashes.terminalFontSize': '999' }));
     expect(settings.terminalFontSize).toBe(MAX_TERMINAL_FONT_SIZE);
+    expect(settings.terminalFontFamily).toBe(DEFAULT_TERMINAL_FONT_FAMILY);
     expect(settings.terminalScrollback).toBe(DEFAULT_TERMINAL_SCROLLBACK);
   });
 
@@ -35,5 +55,21 @@ describe('terminal settings', () => {
       terminalScrollback: 200000,
       terminalCopyOnSelect: false,
     });
+  });
+
+  it('builds a temporary terminal appearance without changing invalid values', () => {
+    const current = {
+      terminalFontSize: 13,
+      terminalFontFamily: 'monospace',
+      terminalScrollback: 100000,
+    };
+
+    expect(terminalAppearancePreview(current, '18', '"Bashes Ubuntu Mono"')).toEqual({
+      terminalFontSize: 18,
+      terminalFontFamily: '"Bashes Ubuntu Mono"',
+      terminalScrollback: 100000,
+    });
+    expect(terminalAppearancePreview(current, '', '')).toEqual(current);
+    expect(current.terminalFontSize).toBe(13);
   });
 });

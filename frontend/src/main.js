@@ -58,8 +58,10 @@ import {
   DEFAULT_TERMINAL_SCROLLBACK,
   MAX_TERMINAL_FONT_SIZE,
   MIN_TERMINAL_FONT_SIZE,
+  TERMINAL_FONT_FAMILY_OPTIONS,
   loadTerminalSettings,
   persistTerminalSettings,
+  terminalAppearancePreview,
 } from './terminal-settings.js';
 import { repeatedKeyData } from './terminal-keyboard.js';
 import { createOrderedWriter } from './ordered-writer.js';
@@ -74,6 +76,7 @@ import {
   visibleResourceTags,
 } from './resource-tags.js';
 import { isWebAppResource, webAppMatchesFilters } from './web-apps/model.js';
+import './terminal-fonts.css';
 import './styles.css';
 
 const terminalSettings = loadTerminalSettings(localStorage);
@@ -136,6 +139,7 @@ const state = {
   sessions: new Map(),
   pendingSSHOutput: new Map(),
   fileTransferWorkspaces: new Map(),
+  backgroundFileTransferResourceIds: new Set(),
   activeFileTransferResourceId: null,
 };
 
@@ -623,33 +627,43 @@ app.innerHTML = `
         <button class="close-panel" type="button" data-close-settings title="Close">${ICON_CLOSE}</button>
       </header>
 
-      <div class="form-grid">
-        <label>
-          <span>Terminal Font Size</span>
-          <input name="terminalFontSize" type="number" min="${MIN_TERMINAL_FONT_SIZE}" max="${MAX_TERMINAL_FONT_SIZE}" step="1" />
-        </label>
+      <fieldset class="settings-group">
+        <legend>Terminal Appearance</legend>
+        <div class="form-grid">
+          <label>
+            <span>Terminal Font Size</span>
+            <input name="terminalFontSize" type="number" min="${MIN_TERMINAL_FONT_SIZE}" max="${MAX_TERMINAL_FONT_SIZE}" step="1" />
+          </label>
+          <label>
+            <span>Terminal Font Family</span>
+            <select name="terminalFontFamily"></select>
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset class="settings-group">
+        <legend>Terminal Behavior</legend>
         <label>
           <span>Scrollback Lines</span>
           <input name="terminalScrollback" type="number" min="1000" max="500000" step="1000" />
         </label>
-      </div>
-      <label>
-        <span>Terminal Font Family</span>
-        <input name="terminalFontFamily" autocomplete="off" spellcheck="false" />
-      </label>
-      <label class="checkbox-row">
-        <input name="terminalCopyOnSelect" type="checkbox" />
-        <span>Copy selected terminal text to clipboard</span>
-      </label>
-      <div class="settings-separator"></div>
-      <label>
-        <span>Web App Browser</span>
-        <select name="webAppBrowser"></select>
-      </label>
-      <label>
-        <span>Custom Browser Executable</span>
-        <input name="customBrowserPath" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Optional executable path" />
-      </label>
+        <label class="checkbox-row">
+          <input name="terminalCopyOnSelect" type="checkbox" />
+          <span>Copy selected terminal text to clipboard</span>
+        </label>
+      </fieldset>
+
+      <fieldset class="settings-group">
+        <legend>Web App Browser</legend>
+        <label>
+          <span>Preferred Browser</span>
+          <select name="webAppBrowser"></select>
+        </label>
+        <label>
+          <span>Custom Browser Executable</span>
+          <input name="customBrowserPath" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Optional executable path" />
+        </label>
+      </fieldset>
 
       <footer class="panel-actions">
         <button class="secondary" type="button" data-close-settings>Cancel</button>
@@ -970,7 +984,10 @@ document.querySelector('#tag-create-form').elements.name.addEventListener('input
 document.querySelector('#tag-panel-clear').addEventListener('click', () => clearTagPanelSelection());
 document.querySelector('#connect-form').addEventListener('submit', (event) => submitConnect(event));
 document.querySelector('#tunnel-form').addEventListener('submit', (event) => submitTunnel(event));
-document.querySelector('#settings-form').addEventListener('submit', (event) => submitSettings(event));
+const settingsForm = document.querySelector('#settings-form');
+settingsForm.addEventListener('submit', (event) => submitSettings(event));
+settingsForm.elements.terminalFontSize.addEventListener('input', () => previewTerminalAppearance());
+settingsForm.elements.terminalFontFamily.addEventListener('change', () => previewTerminalAppearance());
 document.querySelector('#tunnel-form').addEventListener('input', () => updateTunnelSummary());
 document.querySelector('#tunnel-form').elements.type.addEventListener('change', () => updateTunnelMode());
 registerAuthChoiceSync(document.querySelector('#connect-form'));
@@ -3618,6 +3635,7 @@ async function openFileTransferModal() {
     element.dataset.resourceId = selected.id;
     element.addEventListener('bashes-file-transfer-active', (event) => {
       workspace.active = Boolean(event.detail?.active);
+      renderFileTransferBackgroundIndicator();
     });
     root.append(element);
     workspace = {
@@ -3644,7 +3662,11 @@ function closeFileTransferModal() {
 }
 
 function backgroundFileTransferModal() {
+  if (state.activeFileTransferResourceId) {
+    state.backgroundFileTransferResourceIds.add(state.activeFileTransferResourceId);
+  }
   hideFileTransferModal();
+  renderFileTransferBackgroundIndicator();
 }
 
 function hideFileTransferModal() {
@@ -3659,6 +3681,8 @@ function showFileTransferWorkspace(resourceId) {
     workspace.element.hidden = id !== resourceId;
   }
   state.activeFileTransferResourceId = resourceId;
+  state.backgroundFileTransferResourceIds.delete(resourceId);
+  renderFileTransferBackgroundIndicator();
 }
 
 function destroyFileTransferWorkspace(resourceId) {
@@ -3668,9 +3692,29 @@ function destroyFileTransferWorkspace(resourceId) {
   workspace.unmount();
   workspace.element.remove();
   state.fileTransferWorkspaces.delete(resourceId);
+  state.backgroundFileTransferResourceIds.delete(resourceId);
   if (state.activeFileTransferResourceId === resourceId) {
     state.activeFileTransferResourceId = null;
   }
+  renderFileTransferBackgroundIndicator();
+}
+
+function renderFileTransferBackgroundIndicator() {
+  const button = document.querySelector('#open-file-transfer');
+  if (!button) return;
+
+  const backgrounded = state.backgroundFileTransferResourceIds.size > 0;
+  const transferActive = [...state.backgroundFileTransferResourceIds].some(
+    (resourceId) => state.fileTransferWorkspaces.get(resourceId)?.active,
+  );
+  const label = transferActive
+    ? 'File transfer running in background'
+    : backgrounded ? 'Files in background' : 'Files';
+
+  button.classList.toggle('file-transfer-backgrounded', backgrounded);
+  button.classList.toggle('file-transfer-running', transferActive);
+  button.title = label;
+  button.setAttribute('aria-label', label);
 }
 
 function closeAllFileTransferWorkspaces() {
@@ -4894,7 +4938,8 @@ async function openSettingsPanel() {
   }, 0);
 }
 
-function closeSettingsPanel() {
+function closeSettingsPanel({ restoreTerminalSettings = true } = {}) {
+  if (restoreTerminalSettings) applyTerminalSettings(state, { focus: false });
   const panel = document.querySelector('#settings-panel');
   panel.classList.remove('open');
   panel.hidden = true;
@@ -4905,6 +4950,11 @@ function renderSettingsForm() {
   const form = document.querySelector('#settings-form');
   form.elements.terminalFontSize.value = String(state.terminalFontSize);
   form.elements.terminalScrollback.value = String(state.terminalScrollback);
+  const fontOptions = TERMINAL_FONT_FAMILY_OPTIONS.map(({ label, value }) => new Option(label, value));
+  if (!TERMINAL_FONT_FAMILY_OPTIONS.some(({ value }) => value === state.terminalFontFamily)) {
+    fontOptions.push(new Option('Previously configured font', state.terminalFontFamily));
+  }
+  form.elements.terminalFontFamily.replaceChildren(...fontOptions);
   form.elements.terminalFontFamily.value = state.terminalFontFamily;
   form.elements.terminalCopyOnSelect.checked = state.terminalCopyOnSelect;
   const detected = new Map(state.webAppBrowsers.map((browser) => [browser.id, browser]));
@@ -4930,7 +4980,7 @@ async function submitSettings(event) {
     DEFAULT_TERMINAL_FONT_SIZE,
   );
   state.terminalScrollback = clampNumber(form.elements.terminalScrollback.value, 1000, 500000, DEFAULT_TERMINAL_SCROLLBACK);
-  state.terminalFontFamily = form.elements.terminalFontFamily.value.trim() || DEFAULT_TERMINAL_FONT_FAMILY;
+  state.terminalFontFamily = form.elements.terminalFontFamily.value || DEFAULT_TERMINAL_FONT_FAMILY;
   state.terminalCopyOnSelect = form.elements.terminalCopyOnSelect.checked;
   try {
     state.webAppBrowserSettings = await apiSaveWebAppBrowserSettings({
@@ -4944,18 +4994,28 @@ async function submitSettings(event) {
   saveTerminalSettings();
   applyTerminalSettings();
   writeNotice('Settings saved.');
-  closeSettingsPanel();
+  closeSettingsPanel({ restoreTerminalSettings: false });
 }
 
-function applyTerminalSettings() {
+function previewTerminalAppearance() {
+  const form = document.querySelector('#settings-form');
+  const preview = terminalAppearancePreview(
+    state,
+    form.elements.terminalFontSize.value,
+    form.elements.terminalFontFamily.value,
+  );
+  applyTerminalSettings(preview, { focus: false });
+}
+
+function applyTerminalSettings(settings = state, { focus = true } = {}) {
   for (const session of state.sessions.values()) {
     if (!session.terminal) continue;
-    session.terminal.options.fontSize = state.terminalFontSize;
-    session.terminal.options.fontFamily = state.terminalFontFamily;
-    session.terminal.options.scrollback = state.terminalScrollback;
+    session.terminal.options.fontSize = settings.terminalFontSize;
+    session.terminal.options.fontFamily = settings.terminalFontFamily;
+    session.terminal.options.scrollback = settings.terminalScrollback;
   }
   scheduleTerminalFit();
-  focusActiveTerminal();
+  if (focus) focusActiveTerminal();
 }
 
 function saveTerminalSettings() {

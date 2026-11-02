@@ -443,8 +443,32 @@ svg.ti {
 }
 
 .session-actions .icon-action {
+  position: relative;
   background: #fff;
   color: #6b7280;
+}
+
+#open-file-transfer.file-transfer-backgrounded::after {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border: 1px solid #fff;
+  border-radius: 50%;
+  background: #d98235;
+  content: "";
+  pointer-events: none;
+}
+
+#open-file-transfer.file-transfer-running::after {
+  animation: file-transfer-badge-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes file-transfer-badge-pulse {
+  50% {
+    box-shadow: 0 0 0 3px rgba(217, 130, 53, 0.22);
+  }
 }
 
 .session-actions .icon-action:hover:not(:disabled) {
@@ -1353,10 +1377,32 @@ html.sorting-tags * {
   padding-left: 10px;
 }
 
-.settings-separator {
-  height: 1px;
-  margin: 3px 0;
-  background: #e3e7ec;
+#settings-form {
+  max-height: 100vh;
+  overflow-y: auto;
+}
+
+.settings-group {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  margin: 0;
+  border: 1px solid #d7dde4;
+  border-radius: 7px;
+  background: #f7f8fa;
+  padding: 10px 10px 11px;
+}
+
+.settings-group + .settings-group {
+  margin-top: 6px;
+}
+
+.settings-group legend {
+  padding: 0 6px;
+  color: #495479;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .resource-form,
@@ -2424,6 +2470,18 @@ html.sorting-tags * {
   cursor: pointer;
   font-size: 12px;
   padding: 4px 9px;
+}
+
+#file-transfer-background {
+  border-color: #d8b18d;
+  background: #f5e6d8;
+  color: #86522a;
+}
+
+#file-transfer-background:hover {
+  border-color: #ca986b;
+  background: #f0dac6;
+  color: #73431f;
 }
 
 .file-transfer-root {

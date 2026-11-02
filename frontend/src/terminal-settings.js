@@ -1,5 +1,18 @@
 export const DEFAULT_TERMINAL_FONT_SIZE = 13;
-export const DEFAULT_TERMINAL_FONT_FAMILY = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
+export const SYSTEM_TERMINAL_FONT_FAMILY = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
+export const DEFAULT_TERMINAL_FONT_FAMILY = '"Bashes JetBrains Mono", "JetBrains Mono", ui-monospace, monospace';
+export const TERMINAL_FONT_FAMILY_OPTIONS = Object.freeze([
+  { label: 'JetBrains Mono', value: DEFAULT_TERMINAL_FONT_FAMILY },
+  { label: 'Ubuntu Mono', value: '"Bashes Ubuntu Mono", "Ubuntu Mono", ui-monospace, monospace' },
+  { label: 'Roboto Mono', value: '"Bashes Roboto Mono", "Roboto Mono", ui-monospace, monospace' },
+  { label: 'System Monospace', value: SYSTEM_TERMINAL_FONT_FAMILY },
+  { label: 'Cascadia Mono', value: '"Cascadia Mono", "Cascadia Code", Consolas, monospace' },
+  { label: 'Consolas', value: 'Consolas, "Liberation Mono", monospace' },
+  { label: 'Menlo', value: 'Menlo, Monaco, "Courier New", monospace' },
+  { label: 'DejaVu Sans Mono', value: '"DejaVu Sans Mono", "Liberation Mono", monospace' },
+  { label: 'Liberation Mono', value: '"Liberation Mono", "Courier New", monospace' },
+  { label: 'Courier New', value: '"Courier New", Courier, monospace' },
+]);
 export const DEFAULT_TERMINAL_SCROLLBACK = 100000;
 export const MIN_TERMINAL_FONT_SIZE = 10;
 export const MAX_TERMINAL_FONT_SIZE = 36;
@@ -29,6 +42,17 @@ export function persistTerminalSettings(storage, settings) {
   storage.setItem('bashes.terminalFontFamily', settings.terminalFontFamily);
   storage.setItem('bashes.terminalScrollback', String(settings.terminalScrollback));
   storage.setItem('bashes.terminalCopyOnSelect', String(settings.terminalCopyOnSelect));
+}
+
+export function terminalAppearancePreview(current, fontSize, fontFamily) {
+  const parsedSize = Number(fontSize);
+  return {
+    terminalFontSize: Number.isInteger(parsedSize) && parsedSize >= MIN_TERMINAL_FONT_SIZE && parsedSize <= MAX_TERMINAL_FONT_SIZE
+      ? parsedSize
+      : current.terminalFontSize,
+    terminalFontFamily: String(fontFamily ?? '').trim() || current.terminalFontFamily,
+    terminalScrollback: current.terminalScrollback,
+  };
 }
 
 function readBoolean(value, fallback) {
