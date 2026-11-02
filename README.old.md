@@ -1,0 +1,334 @@
+# Bashes
+
+Bashes is a fast desktop application for managing remote servers from one local interface.
+
+It lets you keep an ordered list of hosts and related subsystems, open SSH terminal sessions in tabs, manage connection details, and keep the application data in plain JSON so it remains easy to inspect, back up and move between machines.
+
+The app is built with Wails, Go and a Vite frontend. The terminal surface uses `xterm.js`; SSH and local shell sessions are handled by the Go backend.
+
+## Features
+
+- Host management with name, address, port and user.
+- Subsystems attached to a host, with VM, LXC and Docker resource types.
+- Fast searchable sidebar for hosts and subsystems, with a compact mode for maximizing terminal space.
+- Persistent tags assignable while adding or editing a connection, or by dragging a sidebar tag onto a connection card; tags can be removed by drag and combined with `ANY` or `ALL` filters.
+- Animated drag-and-drop ordering of host blocks in the sidebar; subsystem drags move the parent host block with all children.
+- Top-level Web App entries for internal HTTP/HTTPS applications, opened directly or through a Bashes-managed SSH SOCKS tunnel with remote DNS resolution.
+- Active Web App tunnels show a `tun` chip and their loopback SOCKS port in the Web App workspace. The SSH connection can be stopped and started again without changing the assigned proxy port or closing the managed browser.
+- Isolated standard or private browser profiles for Web Apps, optional cookie/local-storage/session retention, and cache cleanup on browser close. Firefox, Chrome, Chromium and Microsoft Edge are supported; Safari is not used for proxied Web Apps.
+- Contextual actions for the selected resource: edit, add subsystem, key management, delete and connect.
+- Tabbed terminal area for multiple SSH sessions, including multiple sessions to the same resource and drag-and-drop tab ordering.
+- Local `localhost` shell tab on Linux and macOS, backed by a native PTY and not stored in `hosts.json`.
+- Temporary tabs when selecting a resource before connecting.
+- Double-click a host or subsystem card to start an SSH connection.
+- Terminal text selection copies to the clipboard.
+- Right-click in the terminal pastes from the clipboard.
+- Automatic terminal focus after a connection starts.
+- SSH authentication with password, SSH agent, default keys, explicit key path, Bashes-generated keys, and keys discovered in the system or custom SSH key directories.
+- Optional secure password saving through macOS Keychain, Windows Credential Manager, or a Secret Service-compatible Linux keyring.
+- SSH tunnels from a selected host or subsystem, including SOCKS proxy (`-D`), local forwarding (`-L`) and remote forwarding (`-R`), without opening a terminal tab.
+- File transfer modal with a Svelte/SVAR dual-pane file manager: local home on the left, remote SFTP home on the right.
+- File transfers through drag and drop or copy and paste, with background progress, transfer speed, completed-transfer dismissal, and a per-window hidden-file toggle.
+- Open common local or remote documents and media with the operating system's default application; remote files are downloaded to a temporary cache with transfer progress first.
+- Native Tools menu actions for exporting and importing the JSON datastore.
+- Native Tools menu action for importing SSH host entries from the operating system hosts file.
+- Native Help menu actions for About, README and GitHub Releases.
+- Startup and periodic update checks with an in-app notification when a newer GitHub release is available.
+- Ed25519 SSH key generation from inside the app.
+- Public key installation on a remote host or subsystem.
+- Plain JSON datastore with validation, backups and atomic writes.
+- Cross-platform release builds for Linux, macOS and Windows.
+
+The file transfer UI is isolated under `frontend/src/file-transfer/` and can be disabled from `frontend/src/main.js` by setting `FILE_TRANSFER_ENABLED` to `false`.
+
+## Install
+
+Download the latest release from GitHub Releases and choose the package for your operating system:
+
+- Linux amd64: `bashes-linux-amd64.tar.gz`
+- macOS Apple Silicon and Intel: `bashes-darwin-universal.zip`
+- Windows amd64: `bashes-windows-amd64.zip`
+- Linux arm64: `bashes-linux-arm64.tar.gz`
+- Windows arm64: `bashes-windows-arm64.zip`
+
+### Linux
+
+The recommended Linux install method is the user-local installer script:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/signoredellarete/bashes/main/scripts/install-bashes-linux.sh
+bash install-bashes-linux.sh
+```
+
+The same command updates an existing installation to the latest GitHub release. It installs the app, desktop launcher and icon for the current user.
+
+The Linux amd64 archive contains builds for both WebKitGTK 4.0 and 4.1. The installer automatically checks their runtime dependencies and installs the compatible build, preferring WebKitGTK 4.1 when both are available. The commands above do not change and the user does not need to select a WebKitGTK variant.
+
+To install a specific release:
+
+```bash
+BASHES_VERSION=v0.1.48 bash install-bashes-linux.sh
+```
+
+The script currently supports Linux `amd64` and `arm64`, matching the release assets. For the dual-runtime amd64 package, on Debian, Ubuntu and derivatives that use `apt`, the installer offers to install the `libwebkit2gtk-4.1-0` runtime through `sudo` when WebKitGTK is missing. It does not install development packages. This prompt can be answered non-interactively with `BASHES_INSTALL_SYSTEM_DEPS=yes` or disabled with `BASHES_INSTALL_SYSTEM_DEPS=no`. On other distributions, the installer reports the missing libraries so they can be installed with the system package manager.
+
+You can still use the release archive manually: extract `bashes-linux-<arch>.tar.gz` into a folder you want to keep and run `./bashes`. On amd64, this launcher performs the same automatic WebKitGTK selection without requiring the binaries to be renamed.
+
+### macOS
+
+Extract the zip and open `Bashes.app`.
+
+Current release builds are unsigned unless signing secrets are configured in the repository. If macOS blocks the first launch during testing, remove the quarantine attribute:
+
+```bash
+xattr -dr com.apple.quarantine Bashes.app
+open Bashes.app
+```
+
+### Windows
+
+Extract the zip into a normal user-writable folder and run `bashes.exe`.
+
+Current release builds are unsigned unless Windows signing secrets are configured in the repository. Windows SmartScreen may warn on first launch.
+
+## Runtime Files
+
+Bashes writes application data to the current user's application data directory. It does not write hosts, keys or settings beside the executable.
+
+### Linux
+
+If `XDG_DATA_HOME` is set:
+
+```text
+$XDG_DATA_HOME/bashes/
+```
+
+Otherwise:
+
+```text
+~/.local/share/bashes/
+```
+
+Files and folders:
+
+- `hosts.json`: main host/subsystem datastore.
+- `hosts.json.bak`: backup of the previous datastore before the latest successful save.
+- `.hosts.json.*.tmp`: temporary file used during atomic writes; normally it exists only while saving.
+- `settings.json`: local app settings, including the optional custom SSH keys directory and Web App browser preference.
+- `keys/`: SSH keys generated by Bashes.
+- `keys/<name>`: generated private key.
+- `keys/<name>.pub`: generated public key.
+- `webapp-browser/profiles/`: isolated persistent browser profiles used by standard Web App sessions.
+- `webapp-browser/private-*`: temporary private profiles, normally removed when their browser session closes.
+
+Remote files opened from the file manager are cached under `${XDG_CACHE_HOME:-$HOME/.cache}/Bashes/opened-files/`. Cached items older than seven days are removed when another remote file is opened.
+
+The Linux install/update script writes the application binary and launcher files for the current user:
+
+```text
+~/.local/opt/bashes/bashes
+~/.local/opt/bashes/VERSION
+~/.local/bin/bashes
+${XDG_DATA_HOME:-$HOME/.local/share}/applications/bashes.desktop
+${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/<size>x<size>/apps/bashes.png
+```
+
+Re-running the script replaces only the installed binary, version marker, launcher and icon. It does not delete or rewrite the Bashes data directory, `hosts.json`, backups or generated SSH keys.
+
+### macOS
+
+```text
+~/Library/Application Support/Bashes/
+```
+
+Files and folders:
+
+- `hosts.json`
+- `hosts.json.bak`
+- `.hosts.json.*.tmp`
+- `settings.json`
+- `keys/`
+- `keys/<name>`
+- `keys/<name>.pub`
+- `webapp-browser/profiles/`
+- transient `webapp-browser/private-*` directories while private Web Apps are open
+
+Remote files opened from the file manager are cached under `~/Library/Caches/Bashes/opened-files/`. Cached items older than seven days are removed when another remote file is opened.
+
+### Windows
+
+```text
+%APPDATA%\Bashes\
+```
+
+Usually this resolves to:
+
+```text
+C:\Users\<user>\AppData\Roaming\Bashes\
+```
+
+Files and folders:
+
+- `hosts.json`
+- `hosts.json.bak`
+- `.hosts.json.*.tmp`
+- `settings.json`
+- `keys\`
+- `keys\<name>`
+- `keys\<name>.pub`
+- `webapp-browser\profiles\`
+- transient `webapp-browser\private-*` directories while private Web Apps are open
+
+Remote files opened from the file manager are cached under `%LOCALAPPDATA%\Bashes\opened-files\`. Cached items older than seven days are removed when another remote file is opened.
+
+## Backup And Restore
+
+The important portable file is:
+
+```text
+hosts.json
+```
+
+It contains hosts, subsystems, Web App definitions, mixed sidebar ordering, the tag catalog and assignments, saved connection metadata, and authentication preferences that are safe to store in the JSON datastore. Passwords, key passphrases, browser profiles, cookies and browser storage are never written to this file.
+
+When requested from the password login form, Bashes stores SSH passwords in the operating system credential store: macOS Keychain, Windows Credential Manager, or a Secret Service-compatible keyring on Linux. These credentials are local to that operating-system account and are not included in database exports or backups of `hosts.json`.
+
+On Linux, password storage requires an active Secret Service-compatible provider. SSH password login remains available without it by leaving the save option disabled.
+
+`settings.json` is intentionally separate from `hosts.json`: it stores local machine preferences such as the optional custom SSH keys directory and preferred Web App browser. Those paths are usually OS-specific and are not part of the portable database.
+
+### Manual Backup
+
+Close Bashes, then copy `hosts.json` from the runtime data directory for your operating system.
+
+If you use Bashes-generated SSH keys and want to move them too, also copy the `keys/` directory. Treat private keys as secrets.
+
+### Export
+
+Use:
+
+```text
+Tools > Export Database...
+```
+
+This writes a validated, normalized JSON copy of the current datastore to the file selected in the native save dialog. Hosts, Web Apps, ordering and tags are included; saved passwords, key passphrases, generated private keys and browser profile data are not.
+
+### Import
+
+Use:
+
+```text
+Tools > Import Database...
+```
+
+The selected JSON file is loaded, normalized and validated before it replaces the current datastore. Bashes creates `hosts.json.bak` from the previous datastore before saving the imported data. Active SSH sessions, tunnels, Web App browser runtimes and file transfers are closed after a successful import so the UI matches the imported data.
+
+### Import From Hosts File
+
+Use:
+
+```text
+Tools > Import from hosts file
+```
+
+Bashes reads the operating system hosts file and imports non-local entries as top-level SSH hosts. Existing hostnames or IP addresses already present in Bashes are skipped.
+
+Default connection values:
+
+- Port: `22`
+- User: the current local username
+
+On Linux and macOS, Bashes also reads `~/.ssh/config` and applies simple explicit `Host` blocks when they match a hosts file entry. Only `HostName`, `User` and `Port` are used. Wildcards, `Host *`, `Match` and `Include` are ignored.
+
+Hosts file locations:
+
+- Linux and macOS: `/etc/hosts`
+- Windows: `%SystemRoot%\System32\drivers\etc\hosts`
+
+### Automatic Backup
+
+Before every successful save, Bashes copies the previous datastore to:
+
+```text
+hosts.json.bak
+```
+
+This backup is overwritten on each save. It is meant as a quick rollback file, not as a full backup history.
+
+### Restore
+
+Close Bashes, then replace the current `hosts.json` with your backup copy.
+
+If restoring Bashes-generated keys, restore the `keys/` directory next to `hosts.json`.
+
+On Linux and macOS, private keys should be readable only by your user:
+
+```bash
+chmod 700 keys
+chmod 600 keys/*
+chmod 644 keys/*.pub
+```
+
+Then start Bashes again. The app loads the JSON file on startup and validates it before use.
+
+## Build From Source
+
+Required tools:
+
+- Go matching `go.mod`
+- Node.js and npm
+- Wails CLI v2
+- Native Wails desktop dependencies for the target OS
+
+Install frontend dependencies:
+
+```bash
+npm install --prefix frontend
+```
+
+Run tests:
+
+```bash
+go test ./...
+```
+
+Build the frontend:
+
+```bash
+npm run build --prefix frontend
+```
+
+Regenerate app icons after replacing `icons/bashes.png`:
+
+```bash
+scripts/generate-icons.sh
+```
+
+`icons/bashes.png` is the source image for the in-app logo, Wails app icon, Linux hicolor icons and Windows `.ico` file.
+
+Build the desktop app:
+
+```bash
+wails build -tags desktop
+```
+
+On Linux, run `wails doctor` and install only the missing GTK/WebKitGTK packages required by Wails for your distribution.
+
+## Data CLI
+
+Validate a Bashes JSON datastore:
+
+```bash
+go run ./cmd/bashes-data validate /path/to/hosts.json
+```
+
+Write a normalized copy of a datastore to another file:
+
+```bash
+go run ./cmd/bashes-data migrate input-hosts.json output-hosts.json
+```
+
+## Documentation
+
+- [Development notes](docs/DEVELOPMENT.md)
+- [Desktop testing guide](docs/DESKTOP_TESTING.md)
