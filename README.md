@@ -8,8 +8,7 @@ A lightweight alternative to MobaXterm, Termius and SecureCRT — for Linux, mac
 [![Latest Release](https://img.shields.io/github/v/release/signoredellarete/bashes)](https://github.com/signoredellarete/bashes/releases)
 [![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-informational)](#install)
 
-<!-- TODO: replace with a real screenshot (sidebar + tabbed terminal) -->
-![Bashes main window](docs/screenshots/main-window.png)
+![Bashes main window](img/bashes-main-window.png)
 
 
 Bashes keeps all your servers in one place: a searchable, taggable sidebar of hosts and subsystems (VMs, LXC containers, Docker), tabbed SSH terminals, SSH tunnels, key management, a dual-pane SFTP file manager, and one-click access to internal web applications through an automatic SSH tunnel. Portable connection and Web App data lives in a plain JSON file that is easy to inspect, back up and move between machines.
