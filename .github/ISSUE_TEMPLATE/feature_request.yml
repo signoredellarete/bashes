@@ -1,0 +1,39 @@
+name: Feature request
+description: Suggest a focused improvement to Bashes
+title: "[Feature]: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: Describe the workflow problem first, then the behavior you would like Bashes to provide.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What task is difficult or unavailable today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Explain the smallest useful solution and how it should work in the interface.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe any existing workaround or alternative design.
+  - type: dropdown
+    id: platforms
+    attributes:
+      label: Relevant platforms
+      multiple: true
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - All platforms
+    validations:
+      required: true

@@ -1,0 +1,51 @@
+name: Bug report
+description: Report reproducible incorrect behavior in Bashes
+title: "[Bug]: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting a problem. Remove credentials, private keys and internal infrastructure details before submitting.
+  - type: input
+    id: version
+    attributes:
+      label: Bashes version
+      placeholder: "For example: 1.7.5"
+    validations:
+      required: true
+  - type: input
+    id: operating-system
+    attributes:
+      label: Operating system
+      placeholder: "For example: Windows 11 arm64, macOS 15, Ubuntu 24.04"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide the shortest sequence that consistently reproduces the issue.
+      placeholder: |
+        1. Open ...
+        2. Select ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+      description: Include exact error messages when available.
+    validations:
+      required: true
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add relevant logs or screenshots after removing sensitive information.
