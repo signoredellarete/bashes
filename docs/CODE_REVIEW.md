@@ -3,7 +3,7 @@
 Data: 2026-07-11
 Ambito: backend Go/Wails, datastore JSON, SSH/tunnel, shell locale, file transfer, frontend, test, workflow e packaging.
 
-Revisione statica dello stato corrente. Il report precedente e' archiviato in `CODE_REVIEW.md.OLD`; i problemi gia' risolti non sono ripetuti.
+Revisione statica dello stato corrente al momento dell'analisi; i problemi delle revisioni precedenti gia' risolti non sono ripetuti.
 
 ## Riepilogo
 
