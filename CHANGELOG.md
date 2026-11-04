@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.7.6] - 2026-11-04
+
+### Fixed
+
+- Fixed right-click terminal paste on macOS after extending a word selection.
+
 ## [1.7.5] - 2026-11-02
 
 ### Added
@@ -134,7 +140,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Release history before 1.6.0 remains available in the Git tags and commit history.
 
-[Unreleased]: https://github.com/signoredellarete/bashes/compare/v1.7.5...HEAD
+[Unreleased]: https://github.com/signoredellarete/bashes/compare/v1.7.6...HEAD
+[1.7.6]: https://github.com/signoredellarete/bashes/releases/tag/v1.7.6
 [1.7.5]: https://github.com/signoredellarete/bashes/releases/tag/v1.7.5
 [1.7.4]: https://github.com/signoredellarete/bashes/releases/tag/v1.7.4
 [1.7.3]: https://github.com/signoredellarete/bashes/releases/tag/v1.7.3
