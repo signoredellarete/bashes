@@ -3156,6 +3156,7 @@ function terminalOptions(disableStdin = false) {
     disableStdin,
     fontFamily: state.terminalFontFamily,
     fontSize: state.terminalFontSize,
+    rightClickSelectsWord: false,
     scrollback: state.terminalScrollback,
     linkHandler: {
       activate: (event, url) => openTerminalLink(event, url),
