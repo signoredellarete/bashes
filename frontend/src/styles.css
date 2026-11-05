@@ -515,6 +515,7 @@ svg.ti {
   flex-direction: column;
   gap: 8px;
   overflow: auto;
+  padding-inline-end: 10px;
 }
 
 .host-block {
@@ -952,6 +953,7 @@ html.sorting-assigned-tag .tag-remove-zone {
 #app.sidebar-collapsed .hosts {
   gap: 7px;
   overflow: auto;
+  padding-inline-end: 5px;
 }
 
 #app.sidebar-collapsed .host-row,
