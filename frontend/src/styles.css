@@ -51,14 +51,14 @@ svg.ti {
 
 #app {
   display: grid;
-  grid-template-columns: minmax(296px, 356px) minmax(0, 1fr);
+  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
   height: 100vh;
   min-height: 0;
   overflow: hidden;
 }
 
 #app.sidebar-collapsed {
-  grid-template-columns: 80px minmax(0, 1fr);
+  grid-template-columns: 88px minmax(0, 1fr);
 }
 
 .sidebar {
@@ -515,7 +515,13 @@ svg.ti {
   flex-direction: column;
   gap: 8px;
   overflow: auto;
-  padding-inline-end: 16px;
+  padding-block: 2px;
+  padding-inline-end: 20px;
+  scrollbar-width: thin;
+}
+
+.hosts::-webkit-scrollbar {
+  width: 8px;
 }
 
 .host-block {
@@ -953,7 +959,7 @@ html.sorting-assigned-tag .tag-remove-zone {
 #app.sidebar-collapsed .hosts {
   gap: 7px;
   overflow: auto;
-  padding-inline-end: 8px;
+  padding-inline-end: 16px;
 }
 
 #app.sidebar-collapsed .host-row,
