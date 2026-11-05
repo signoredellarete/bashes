@@ -51,7 +51,7 @@ svg.ti {
 
 #app {
   display: grid;
-  grid-template-columns: minmax(288px, 348px) minmax(0, 1fr);
+  grid-template-columns: minmax(284px, 344px) minmax(0, 1fr);
   height: 100vh;
   min-height: 0;
   overflow: hidden;
@@ -518,7 +518,7 @@ svg.ti {
   margin-inline-end: -12px;
   overflow: auto;
   padding-block: 2px;
-  padding-inline-end: 20px;
+  padding-inline-end: 16px;
   scrollbar-width: thin;
 }
 
