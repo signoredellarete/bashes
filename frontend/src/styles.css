@@ -51,14 +51,14 @@ svg.ti {
 
 #app {
   display: grid;
-  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+  grid-template-columns: minmax(288px, 348px) minmax(0, 1fr);
   height: 100vh;
   min-height: 0;
   overflow: hidden;
 }
 
 #app.sidebar-collapsed {
-  grid-template-columns: 88px minmax(0, 1fr);
+  grid-template-columns: 80px minmax(0, 1fr);
 }
 
 .sidebar {
@@ -510,10 +510,12 @@ svg.ti {
 
 .hosts {
   display: flex;
+  width: calc(100% + 12px);
   min-height: 0;
   flex: 1;
   flex-direction: column;
   gap: 8px;
+  margin-inline-end: -12px;
   overflow: auto;
   padding-block: 2px;
   padding-inline-end: 20px;
@@ -957,7 +959,9 @@ html.sorting-assigned-tag .tag-remove-zone {
 }
 
 #app.sidebar-collapsed .hosts {
+  width: calc(100% + 8px);
   gap: 7px;
+  margin-inline-end: -8px;
   overflow: auto;
   padding-inline-end: 16px;
 }
