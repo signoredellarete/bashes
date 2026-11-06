@@ -66,6 +66,7 @@ import {
 import { repeatedKeyData } from './terminal-keyboard.js';
 import { createOrderedWriter } from './ordered-writer.js';
 import { pasteIntoTerminal } from './terminal-paste.js';
+import { sidebarListInset } from './sidebar-scroll.js';
 import { loadTunnelPreference, saveTunnelPreference } from './tunnel-preferences.js';
 import {
   canonicalTag,
@@ -308,7 +309,9 @@ app.innerHTML = `
       <div id="tag-filter-chips" class="tag-filter-chips"></div>
     </section>
 
-    <section id="hosts" class="hosts" aria-label="Hosts"></section>
+    <div id="hosts-scroll" class="hosts-scroll">
+      <section id="hosts" class="hosts" aria-label="Hosts"></section>
+    </div>
     <div id="tag-remove-zone" class="tag-remove-zone" aria-hidden="true">
       ${iconMarkup('trash')}
       <span>Remove tag</span>
@@ -907,15 +910,19 @@ app.innerHTML = `
 `;
 
 const stack = document.querySelector('#terminal-stack');
+const hostsScroll = document.querySelector('#hosts-scroll');
 
 window.addEventListener('resize', () => {
   scheduleTerminalFit();
   clampFileTransferModalSize();
+  syncSidebarScrollbarInset();
 });
 
 if (globalThis.ResizeObserver) {
   const terminalResizeObserver = new ResizeObserver(() => scheduleTerminalFit());
   terminalResizeObserver.observe(stack);
+  const hostsResizeObserver = new ResizeObserver(() => syncSidebarScrollbarInset());
+  hostsResizeObserver.observe(hostsScroll);
 }
 
 registerSSHEvents();
@@ -2244,6 +2251,7 @@ function renderHosts(filter = '') {
     elements.push(empty);
   }
   container.replaceChildren(...elements);
+  requestAnimationFrame(syncSidebarScrollbarInset);
   if (canReorder && state.topLevelOrder.length > 1) initializeHostSorting(container);
   initializeTagSorting();
 }
@@ -2909,6 +2917,12 @@ function applySidebarState() {
   toggle.setAttribute('aria-label', toggle.title);
   toggle.setAttribute('aria-expanded', String(!state.sidebarCollapsed));
   hideTooltip();
+  requestAnimationFrame(syncSidebarScrollbarInset);
+}
+
+function syncSidebarScrollbarInset() {
+  const inset = sidebarListInset(hostsScroll.offsetWidth, hostsScroll.clientWidth);
+  hostsScroll.style.setProperty('--hosts-scroll-inset', `${inset}px`);
 }
 
 function showTooltip(anchor, delay = TOOLTIP_DELAY) {

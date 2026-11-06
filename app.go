@@ -2098,7 +2098,7 @@ func (a *App) importDatabaseFromMenu() {
 		a.showErrorDialog("Import Database", err)
 		return
 	}
-	if choice != "Import" {
+	if !databaseImportConfirmed(choice) {
 		return
 	}
 
@@ -2107,6 +2107,16 @@ func (a *App) importDatabaseFromMenu() {
 		return
 	}
 	a.showInfoDialog("Import Database", "Database imported.")
+}
+
+func databaseImportConfirmed(choice string) bool {
+	// Wails GTK and Windows question dialogs return native labels even when custom labels are requested.
+	switch strings.ToLower(strings.TrimSpace(choice)) {
+	case "import", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *App) importHostsFileFromMenu() {

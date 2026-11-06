@@ -1059,6 +1059,19 @@ func TestExportAndImportDatabase(t *testing.T) {
 	}
 }
 
+func TestDatabaseImportConfirmedSupportsNativeDialogResponses(t *testing.T) {
+	for _, choice := range []string{"Import", "import", "Yes", " yes "} {
+		if !databaseImportConfirmed(choice) {
+			t.Errorf("databaseImportConfirmed(%q) = false, want true", choice)
+		}
+	}
+	for _, choice := range []string{"", "Cancel", "No", "OK"} {
+		if databaseImportConfirmed(choice) {
+			t.Errorf("databaseImportConfirmed(%q) = true, want false", choice)
+		}
+	}
+}
+
 func TestImportFromHostsFileAddsNewHostsAndSkipsDuplicates(t *testing.T) {
 	dir := t.TempDir()
 	app := NewApp(filepath.Join(dir, "hosts.json"))
