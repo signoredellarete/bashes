@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.7.7] - 2026-11-06
+
+### Fixed
+
+- Fixed database imports from native Linux desktop dialogs.
+- Kept sidebar scrollbars separate from connection cards across desktop platforms.
+
 ## [1.7.6] - 2026-11-04
 
 ### Fixed
@@ -140,7 +147,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Release history before 1.6.0 remains available in the Git tags and commit history.
 
-[Unreleased]: https://github.com/signoredellarete/bashes/compare/v1.7.6...HEAD
+[Unreleased]: https://github.com/signoredellarete/bashes/compare/v1.7.7...HEAD
+[1.7.7]: https://github.com/signoredellarete/bashes/releases/tag/v1.7.7
 [1.7.6]: https://github.com/signoredellarete/bashes/releases/tag/v1.7.6
 [1.7.5]: https://github.com/signoredellarete/bashes/releases/tag/v1.7.5
 [1.7.4]: https://github.com/signoredellarete/bashes/releases/tag/v1.7.4
