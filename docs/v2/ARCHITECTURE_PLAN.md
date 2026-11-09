@@ -50,14 +50,21 @@ Status on 2026-11-09 for branch `feature/v2-modular-architecture`:
 - application settings use a versioned, locked, atomic repository while keeping
   the Bashes 1.x JSON fields compatible;
 - hosts file and SSH config import logic lives in an independent tested module;
+- terminal session lifecycle, SSH tunnel lifecycle and file transfer job state
+  are owned by dedicated managers with idempotent cancellation and race-tested
+  concurrent cleanup;
+- SSH keepalive behavior is shared by sessions, tunnels and Web App gateways
+  through a tested native adapter;
+- frontend application state and the hierarchical resource model are isolated
+  from DOM rendering and covered by unit tests;
 - plugin manifest validation, discovery and handshake contracts exist, but no
   external plugin process is executed yet;
 - plugin package details are documented in
   [PLUGIN_MANIFEST.md](PLUGIN_MANIFEST.md).
 
-The next implementation milestone is backend runtime ownership. Plugin process
-supervision must not be enabled before bounded shutdown and failure isolation
-are available.
+The next implementation milestone is completing backend runtime ownership for
+SFTP sessions and Web App browser/tunnel groups. Plugin process supervision must
+not be enabled before their bounded shutdown and failure isolation are available.
 
 ## Technology decisions
 
