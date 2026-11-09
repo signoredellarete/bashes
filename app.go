@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	goruntime "runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +27,7 @@ import (
 	"github.com/signoredellarete/bashes/internal/remotessh"
 	appsettings "github.com/signoredellarete/bashes/internal/settings"
 	"github.com/signoredellarete/bashes/internal/sshauth"
+	"github.com/signoredellarete/bashes/internal/sshconnection"
 	"github.com/signoredellarete/bashes/internal/sshkeys"
 	"github.com/signoredellarete/bashes/internal/sshtunnel"
 	"github.com/signoredellarete/bashes/internal/store"
@@ -54,7 +54,7 @@ type App struct {
 	passwords        credentials.Store
 	dataPath         string
 	sshKeys          *sshkeys.Service
-	sshAuth          *sshauth.Builder
+	sshConnector     *sshconnection.Connector
 	webAppBrowsers   *webappbrowser.PreferencesService
 	sessions         *termsession.Manager
 	tunnels          *sshtunnel.Manager
@@ -77,18 +77,21 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 	}
 
 	settingsRepository := appsettings.NewRepository(filepath.Join(filepath.Dir(dataPath), "settings.json"))
+	applicationService := application.NewService(store.NewRepository(dataPath))
+	sshAuthBuilder := sshauth.NewBuilder()
 	sshKeyService := sshkeys.NewService(
 		filepath.Join(filepath.Dir(dataPath), "keys"),
 		settingsRepository,
 		listWSLSSHKeyInventory,
 	)
 	webAppBrowserService := webappbrowser.NewPreferencesService(goruntime.GOOS, getenv, settingsRepository)
+	sshConnector := sshconnection.NewConnector(sshAuthBuilder, applicationService)
 
 	return &App{
 		dataPath:         dataPath,
-		service:          application.NewService(store.NewRepository(dataPath)),
+		service:          applicationService,
 		sshKeys:          sshKeyService,
-		sshAuth:          sshauth.NewBuilder(),
+		sshConnector:     sshConnector,
 		webAppBrowsers:   webAppBrowserService,
 		passwords:        passwords,
 		sessions:         termsession.NewManager(),
@@ -1340,48 +1343,11 @@ func tunnelForwardTarget(input SSHTunnelInput, forwardAddress string) string {
 }
 
 func (a *App) dialResource(resource domain.Endpoint, input SSHSessionInput, timeout time.Duration) (*ssh.Client, error) {
-	authMethods, agentConn, err := a.sshAuth.Methods(sshAuthInput(input))
-	if err != nil {
-		return nil, err
-	}
-	if agentConn != nil {
-		defer agentConn.Close()
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	var acceptedFingerprint string
-	client, err := remotessh.Dial(ctx, remotessh.ClientOptions{
-		Target: remotessh.Target{
-			Host: sshHost(resource),
-			Port: resource.Port,
-			User: resource.User,
-		},
-		Credentials: remotessh.Credentials{
-			Password:    input.Password,
-			AuthMethods: authMethods,
-		},
-		HostKeyPolicy: hostKeyPolicy(resource, input, &acceptedFingerprint),
-	})
-	if err != nil {
-		return nil, hostKeyError(err, resource)
-	}
-	if acceptedFingerprint != "" {
-		if err := a.service.SetResourceHostKeyFingerprint(resource.ID, acceptedFingerprint); err != nil {
-			client.Close()
-			return nil, fmt.Errorf("save host key fingerprint: %w", err)
-		}
-	}
-	return client, nil
+	return a.sshConnector.Dial(resource, sshConnectionInput(input), timeout)
 }
 
 func sshHost(resource domain.Endpoint) string {
-	host := strings.TrimSpace(resource.IP)
-	if host == "" {
-		host = strings.TrimSpace(resource.Hostname)
-	}
-	return host
+	return sshconnection.Host(resource)
 }
 
 func authMethods(input SSHSessionInput) ([]ssh.AuthMethod, net.Conn, error) {
@@ -1397,6 +1363,15 @@ func sshAuthInput(input SSHSessionInput) sshauth.Input {
 	}
 }
 
+func sshConnectionInput(input SSHSessionInput) sshconnection.Input {
+	return sshconnection.Input{
+		Authentication: sshAuthInput(input),
+		TrustHostKey:   input.TrustHostKey,
+		AcceptHostKey:  input.AcceptHostKey,
+		ReplaceHostKey: input.ReplaceHostKey,
+	}
+}
+
 func parsePrivateKey(key []byte, passphrase string) (ssh.Signer, error) {
 	return sshauth.ParsePrivateKey(key, passphrase)
 }
@@ -1406,47 +1381,11 @@ func isPuttyPrivateKey(key []byte) bool {
 }
 
 func hostKeyPolicy(resource domain.Endpoint, input SSHSessionInput, acceptedFingerprint *string) remotessh.HostKeyPolicy {
-	if input.TrustHostKey {
-		return remotessh.HostKeyPolicy{InsecureIgnoreHostKey: true}
-	}
-
-	policy := remotessh.HostKeyPolicy{
-		ExpectedFingerprint:  strings.TrimSpace(resource.HostKeyFingerprint),
-		AcceptNewHostKey:     input.AcceptHostKey,
-		AcceptChangedHostKey: input.ReplaceHostKey,
-		AcceptedFingerprint:  acceptedFingerprint,
-	}
-	knownHosts := filepath.Join(userHomeDir(), ".ssh", "known_hosts")
-	if _, err := os.Stat(knownHosts); err == nil {
-		policy.KnownHostsPath = knownHosts
-	}
-	return policy
+	return sshconnection.HostKeyPolicy(resource, sshConnectionInput(input), acceptedFingerprint)
 }
 
 func hostKeyError(err error, resource domain.Endpoint) error {
-	var unknown remotessh.UnknownHostKeyError
-	if errors.As(err, &unknown) {
-		host := unknown.Host
-		if strings.TrimSpace(host) == "" {
-			host = net.JoinHostPort(sshHost(resource), strconv.Itoa(resource.Port))
-		}
-		return apperrors.New("ssh_host_key_unknown", "SSH host key is unknown", map[string]string{
-			"resource":    resource.ID,
-			"host":        host,
-			"fingerprint": unknown.Fingerprint,
-		})
-	}
-
-	var mismatch remotessh.HostKeyMismatchError
-	if errors.As(err, &mismatch) {
-		return apperrors.New("ssh_host_key_mismatch", "SSH host key does not match", map[string]string{
-			"resource": resource.ID,
-			"host":     mismatch.Host,
-			"expected": mismatch.ExpectedFingerprint,
-			"actual":   mismatch.ActualFingerprint,
-		})
-	}
-	return err
+	return sshconnection.NormalizeError(err, resource)
 }
 
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {

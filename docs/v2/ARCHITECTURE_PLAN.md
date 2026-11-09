@@ -67,6 +67,9 @@ Status on 2026-11-09 for branch `feature/v2-modular-architecture`:
 - SSH authentication method construction and OpenSSH/PEM/PPK parsing live in an
   independent builder with injectable home, filesystem, environment and agent
   socket dependencies;
+- SSH dialing, host-key policy, structured trust errors and accepted fingerprint
+  persistence are owned by a tested connector shared by sessions, tunnels,
+  transfers and Web App gateways;
 - Web App browser detection, preference validation, persistence and runtime
   resolution live in an independent tested native service;
 - Wails events, dialogs and external URL operations are isolated behind an
