@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/signoredellarete/bashes/internal/apperrors"
 	"github.com/signoredellarete/bashes/internal/domain"
 	"github.com/signoredellarete/bashes/internal/remotessh"
 	"github.com/signoredellarete/bashes/internal/webappbrowser"
@@ -543,10 +544,10 @@ func (a *App) resolveWebAppBrowser() (webappbrowser.Browser, error) {
 				return browser, nil
 			}
 		}
-		return webappbrowser.Browser{}, newAppError("webapp_browser_missing", "The selected browser is not installed", map[string]string{"browser": settings.PreferredBrowserID})
+		return webappbrowser.Browser{}, apperrors.New("webapp_browser_missing", "The selected browser is not installed", map[string]string{"browser": settings.PreferredBrowserID})
 	}
 	if len(browsers) == 0 {
-		return webappbrowser.Browser{}, newAppError("webapp_browser_missing", "No supported browser was found", nil)
+		return webappbrowser.Browser{}, apperrors.New("webapp_browser_missing", "No supported browser was found", nil)
 	}
 	return browsers[0], nil
 }

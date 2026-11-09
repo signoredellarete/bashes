@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/kayrus/putty"
+	"github.com/signoredellarete/bashes/internal/apperrors"
 	"github.com/signoredellarete/bashes/internal/application"
 	"github.com/signoredellarete/bashes/internal/credentials"
 	"github.com/signoredellarete/bashes/internal/domain"
@@ -361,20 +362,6 @@ type UpdateInfo struct {
 	ReleaseURL      string `json:"releaseUrl"`
 	RepoURL         string `json:"repoUrl"`
 	Message         string `json:"message"`
-}
-
-type appErrorPayload struct {
-	Code    string            `json:"code"`
-	Message string            `json:"message"`
-	Details map[string]string `json:"details,omitempty"`
-}
-
-func newAppError(code string, message string, details map[string]string) error {
-	payload, err := json.Marshal(appErrorPayload{Code: code, Message: message, Details: details})
-	if err != nil {
-		return errors.New(message)
-	}
-	return fmt.Errorf("BASHES_ERROR:%s", base64.RawURLEncoding.EncodeToString(payload))
 }
 
 type HostsFileImportResult struct {
@@ -2266,7 +2253,7 @@ func normalizeTunnelInput(input *SSHTunnelInput) error {
 		return errors.New("local bind address contains invalid characters")
 	}
 	if !input.AllowPublicBind && !isLoopbackBind(input.LocalHost) {
-		return newAppError("public_tunnel_bind", "public tunnel bind requires confirmation", map[string]string{
+		return apperrors.New("public_tunnel_bind", "public tunnel bind requires confirmation", map[string]string{
 			"host": input.LocalHost,
 			"type": input.Type,
 		})
@@ -2524,7 +2511,7 @@ func hostKeyError(err error, resource domain.Endpoint) error {
 		if strings.TrimSpace(host) == "" {
 			host = net.JoinHostPort(sshHost(resource), strconv.Itoa(resource.Port))
 		}
-		return newAppError("ssh_host_key_unknown", "SSH host key is unknown", map[string]string{
+		return apperrors.New("ssh_host_key_unknown", "SSH host key is unknown", map[string]string{
 			"resource":    resource.ID,
 			"host":        host,
 			"fingerprint": unknown.Fingerprint,
@@ -2533,7 +2520,7 @@ func hostKeyError(err error, resource domain.Endpoint) error {
 
 	var mismatch remotessh.HostKeyMismatchError
 	if errors.As(err, &mismatch) {
-		return newAppError("ssh_host_key_mismatch", "SSH host key does not match", map[string]string{
+		return apperrors.New("ssh_host_key_mismatch", "SSH host key does not match", map[string]string{
 			"resource": resource.ID,
 			"host":     mismatch.Host,
 			"expected": mismatch.ExpectedFingerprint,
