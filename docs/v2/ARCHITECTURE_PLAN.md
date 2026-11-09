@@ -61,6 +61,9 @@ Status on 2026-11-09 for branch `feature/v2-modular-architecture`:
 - application settings use a versioned, locked, atomic repository while keeping
   the Bashes 1.x JSON fields compatible;
 - hosts file and SSH config import logic lives in an independent tested module;
+- portable JSON export/import and hosts-file preview/import orchestration live
+  in a datastore service; `App` only performs runtime cleanup and emits desktop
+  events after replacement;
 - local SSH key inventory, settings, generation, import, reading and deletion
   live in an independent tested service; remote key installation remains facade
   orchestration because it combines resource lookup and an SSH connection;

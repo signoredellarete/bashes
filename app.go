@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,9 +17,9 @@ import (
 	"github.com/signoredellarete/bashes/internal/apperrors"
 	"github.com/signoredellarete/bashes/internal/application"
 	"github.com/signoredellarete/bashes/internal/credentials"
+	"github.com/signoredellarete/bashes/internal/database"
 	"github.com/signoredellarete/bashes/internal/desktop"
 	"github.com/signoredellarete/bashes/internal/domain"
-	"github.com/signoredellarete/bashes/internal/fsutil"
 	"github.com/signoredellarete/bashes/internal/importer"
 	"github.com/signoredellarete/bashes/internal/localterm"
 	"github.com/signoredellarete/bashes/internal/plugin"
@@ -51,6 +50,7 @@ type App struct {
 	lifecycleMu      sync.RWMutex
 	shutdownOnce     sync.Once
 	service          *application.Service
+	database         *database.Service
 	passwords        credentials.Store
 	dataPath         string
 	sshKeys          *sshkeys.Service
@@ -78,6 +78,7 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 
 	settingsRepository := appsettings.NewRepository(filepath.Join(filepath.Dir(dataPath), "settings.json"))
 	applicationService := application.NewService(store.NewRepository(dataPath))
+	databaseService := database.NewService(applicationService)
 	sshAuthBuilder := sshauth.NewBuilder()
 	sshKeyService := sshkeys.NewService(
 		filepath.Join(filepath.Dir(dataPath), "keys"),
@@ -90,6 +91,7 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 	return &App{
 		dataPath:         dataPath,
 		service:          applicationService,
+		database:         databaseService,
 		sshKeys:          sshKeyService,
 		sshConnector:     sshConnector,
 		webAppBrowsers:   webAppBrowserService,
@@ -355,21 +357,7 @@ type HostsFileImportResult = importer.HostsFileResult
 type HostsFileImportTarget = importer.HostsFileTarget
 
 func (a *App) ExportDatabase(path string) error {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return errors.New("export path is required")
-	}
-
-	data, err := a.service.StoreSnapshot()
-	if err != nil {
-		return err
-	}
-	encoded, err := json.MarshalIndent(domain.NormalizeStore(data), "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode export json: %w", err)
-	}
-	encoded = append(encoded, '\n')
-	return writeFileAtomic(path, encoded, 0o600)
+	return a.database.Export(path)
 }
 
 func (a *App) ImportFromHostsFile() (HostsFileImportResult, error) {
@@ -390,41 +378,19 @@ func (a *App) PreviewImportFromHostsFile() (HostsFileImportResult, error) {
 }
 
 func (a *App) importFromHostsFile(path string, user string, sshConfigPath string) (HostsFileImportResult, error) {
-	var result HostsFileImportResult
-	err := a.service.UpdateStore(func(data domain.Store) (domain.Store, bool, error) {
-		nextResult, nextData, err := a.prepareHostsFileImportWithStore(path, user, sshConfigPath, data)
-		result = nextResult
-		if err != nil {
-			return data, false, err
-		}
-		return nextData, result.Imported > 0, nil
-	})
-	return result, err
+	return a.database.ImportHostsFile(path, user, sshConfigPath)
 }
 
 func (a *App) prepareHostsFileImport(path string, user string, sshConfigPath string) (HostsFileImportResult, domain.Store, error) {
-	data, err := a.service.StoreSnapshot()
-	if err != nil {
-		return HostsFileImportResult{Path: path, User: user}, domain.Store{}, err
-	}
-	return a.prepareHostsFileImportWithStore(path, user, sshConfigPath, data)
+	return a.database.PreviewHostsFile(path, user, sshConfigPath)
 }
 
 func (a *App) prepareHostsFileImportWithStore(path string, user string, sshConfigPath string, data domain.Store) (HostsFileImportResult, domain.Store, error) {
-	return importer.PrepareHostsFile(path, user, sshConfigPath, data)
+	return database.PrepareHostsFile(path, user, sshConfigPath, data)
 }
 
 func (a *App) ImportDatabase(path string) error {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return errors.New("import path is required")
-	}
-
-	data, err := store.NewRepository(path).Load()
-	if err != nil {
-		return err
-	}
-	if err := a.service.ReplaceStore(data); err != nil {
+	if err := a.database.Import(path); err != nil {
 		return err
 	}
 	a.stopAllRuntimeConnections()
@@ -1386,10 +1352,6 @@ func hostKeyPolicy(resource domain.Endpoint, input SSHSessionInput, acceptedFing
 
 func hostKeyError(err error, resource domain.Endpoint) error {
 	return sshconnection.NormalizeError(err, resource)
-}
-
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	return fsutil.WriteFileAtomic(path, data, perm)
 }
 
 func writeSSHKeyPairAtomic(privatePath string, privateData []byte, publicPath string, publicData []byte) error {
