@@ -22,6 +22,7 @@ import (
 	"github.com/signoredellarete/bashes/internal/application"
 	"github.com/signoredellarete/bashes/internal/domain"
 	"github.com/signoredellarete/bashes/internal/remotessh"
+	"github.com/signoredellarete/bashes/internal/termsession"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -797,29 +798,26 @@ func TestResourceIDsForDeleteIncludesNestedSubsystems(t *testing.T) {
 
 func TestStopSessionsForResourceOnlyStopsMatchingSessions(t *testing.T) {
 	app := NewApp(filepath.Join(t.TempDir(), "hosts.json"))
-	matching := newTestSSHSession("matching", "host-1")
-	other := newTestSSHSession("other", "host-2")
-	app.sessions[matching.id] = matching
-	app.sessions[other.id] = other
+	matchingShell := registerTestTerminalSession(t, app, "matching", "host-1")
+	registerTestTerminalSession(t, app, "other", "host-2")
 
 	app.stopSessionsForResource("host-1")
-	if _, exists := app.sessions[matching.id]; exists {
+	if len(app.sessions.IDsForResource("host-1")) != 0 {
 		t.Fatal("matching session still registered")
 	}
-	if _, exists := app.sessions[other.id]; !exists {
+	if got := app.sessions.IDsForResource("host-2"); len(got) != 1 || got[0] != "other" {
 		t.Fatal("unrelated session was removed")
 	}
-	if matching.shell.(*testTerminalShell).closeCount() != 1 {
-		t.Fatalf("matching shell close count = %d, want 1", matching.shell.(*testTerminalShell).closeCount())
+	if matchingShell.closeCount() != 1 {
+		t.Fatalf("matching shell close count = %d, want 1", matchingShell.closeCount())
 	}
-	_ = app.StopSSHSession(other.id)
+	_ = app.StopSSHSession("other")
 }
 
 func TestBeforeCloseDisablesEventsBeforeStoppingSessions(t *testing.T) {
 	app := NewApp(filepath.Join(t.TempDir(), "hosts.json"))
 	app.startup(context.Background())
-	session := newTestSSHSession("closing", "host-1")
-	app.sessions[session.id] = session
+	shell := registerTestTerminalSession(t, app, "closing", "host-1")
 
 	if prevent := app.beforeClose(context.Background()); prevent {
 		t.Fatal("beforeClose() prevented application shutdown")
@@ -827,15 +825,15 @@ func TestBeforeCloseDisablesEventsBeforeStoppingSessions(t *testing.T) {
 	if ctx := app.runtimeContext(); ctx != nil {
 		t.Fatal("runtime context remains available during shutdown")
 	}
-	if _, exists := app.sessions[session.id]; exists {
+	if len(app.sessions.IDs()) != 0 {
 		t.Fatal("session remains registered after shutdown")
 	}
-	if got := session.shell.(*testTerminalShell).closeCount(); got != 1 {
+	if got := shell.closeCount(); got != 1 {
 		t.Fatalf("shell close count = %d, want 1", got)
 	}
 
 	app.shutdown(context.Background())
-	if got := session.shell.(*testTerminalShell).closeCount(); got != 1 {
+	if got := shell.closeCount(); got != 1 {
 		t.Fatalf("idempotent shutdown close count = %d, want 1", got)
 	}
 }
@@ -859,17 +857,18 @@ func (s *testTerminalShell) closeCount() int {
 	return s.closed
 }
 
-func newTestSSHSession(id, resourceID string) *sshSession {
+func registerTestTerminalSession(t *testing.T, app *App, id, resourceID string) *testTerminalShell {
+	t.Helper()
 	reader, writer := io.Pipe()
 	_ = reader.Close()
-	_, cancel := context.WithCancel(context.Background())
-	return &sshSession{
-		id:         id,
-		resourceID: resourceID,
-		shell:      &testTerminalShell{},
-		stdin:      writer,
-		cancel:     cancel,
+	shell := &testTerminalShell{}
+	if _, err := app.sessions.Register(termsession.Options{
+		ID: id, ResourceID: resourceID, Kind: termsession.KindLocal,
+		Shell: shell, Stdin: writer,
+	}); err != nil {
+		t.Fatalf("Register() error = %v", err)
 	}
+	return shell
 }
 
 func TestDataDirForOSUsesPlatformConventions(t *testing.T) {
