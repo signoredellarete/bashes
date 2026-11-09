@@ -1,6 +1,7 @@
 <script>
   import { onDestroy, onMount } from 'svelte';
 	import { Filemanager, WillowDark, getMenuOptions } from '@svar-ui/svelte-filemanager';
+	import { onRuntimeEvent, RUNTIME_EVENT } from '../api/runtime.js';
 	import { isAuthError, isCredentialStoreError, isHostKeyMismatchError, isUnknownHostKeyError } from '../ssh-errors.js';
 	import { visibleFileEntries } from './file-visibility.js';
 	import { normalizeRemoteStartId, remotePathChain } from './remote-path.js';
@@ -315,15 +316,12 @@
   }
 
   function registerJobEvents() {
-    const eventsOn = globalThis.runtime?.EventsOn;
-    if (!eventsOn) return () => {};
-    const off = eventsOn('file-transfer:job', (job) => {
+    return onRuntimeEvent(RUNTIME_EVENT.fileTransferJob, (job) => {
       if (!job || job.resourceId !== resource.id) return;
       upsertJob(job);
       handleJobRefresh(job);
       updateStatusFromJob(job);
     });
-    return typeof off === 'function' ? off : () => {};
   }
 
   async function loadJobs() {

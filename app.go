@@ -26,6 +26,7 @@ import (
 	"github.com/signoredellarete/bashes/internal/apperrors"
 	"github.com/signoredellarete/bashes/internal/application"
 	"github.com/signoredellarete/bashes/internal/credentials"
+	"github.com/signoredellarete/bashes/internal/desktop"
 	"github.com/signoredellarete/bashes/internal/domain"
 	"github.com/signoredellarete/bashes/internal/localterm"
 	"github.com/signoredellarete/bashes/internal/remotessh"
@@ -692,7 +693,7 @@ func (a *App) ImportDatabase(path string) error {
 		return err
 	}
 	a.stopAllRuntimeConnections()
-	a.emitData("database:imported", map[string]string{
+	a.emitData(desktop.EventDatabaseImported, map[string]string{
 		"message": "Database imported.",
 		"path":    a.dataPath,
 	})
@@ -1457,13 +1458,13 @@ func (a *App) StartSSHSession(input SSHSessionInput) (string, error) {
 	a.sessions[sessionID] = session
 	a.mu.Unlock()
 
-	a.emit("ssh:status", SSHEvent{
+	a.emit(desktop.EventSSHStatus, SSHEvent{
 		SessionID: sessionID,
 		Message:   fmt.Sprintf("Connected to %s@%s:%d", resource.User, sshHost(resource), resource.Port),
 	})
 	if auth := authPreferenceFromSessionInput(input); auth != nil {
 		if err := a.service.SetResourceAuth(resource.ID, *auth); err != nil {
-			a.emit("ssh:status", SSHEvent{
+			a.emit(desktop.EventSSHStatus, SSHEvent{
 				SessionID: sessionID,
 				Message:   fmt.Sprintf("Could not save SSH auth preference: %v", err),
 			})
@@ -1514,7 +1515,7 @@ func (a *App) StartLocalSession(input LocalSessionInput) (string, error) {
 	a.sessions[sessionID] = session
 	a.mu.Unlock()
 
-	a.emit("ssh:status", SSHEvent{
+	a.emit(desktop.EventSSHStatus, SSHEvent{
 		SessionID: sessionID,
 		Message:   "Local shell started",
 	})
@@ -1593,7 +1594,7 @@ func (a *App) StartSSHTunnel(input SSHTunnelInput) (SSHTunnelInfo, error) {
 
 	if auth := authPreferenceFromSessionInput(sessionInput); auth != nil {
 		if err := a.service.SetResourceAuth(resource.ID, *auth); err != nil {
-			a.emit("ssh:status", SSHEvent{SessionID: tunnelID, Message: fmt.Sprintf("Could not save SSH auth preference: %v", err)})
+			a.emit(desktop.EventSSHStatus, SSHEvent{SessionID: tunnelID, Message: fmt.Sprintf("Could not save SSH auth preference: %v", err)})
 		}
 	}
 
@@ -1685,7 +1686,7 @@ func (a *App) serveTunnel(ctx context.Context, tunnel *sshTunnel) {
 		return
 	}
 	if err != nil {
-		a.emit("ssh:tunnel-closed", SSHEvent{SessionID: tunnel.id, Message: fmt.Sprintf("Tunnel closed: %v", err)})
+		a.emit(desktop.EventSSHTunnelClosed, SSHEvent{SessionID: tunnel.id, Message: fmt.Sprintf("Tunnel closed: %v", err)})
 	}
 }
 
@@ -1704,7 +1705,7 @@ func (a *App) failTunnel(tunnel *sshTunnel, message string) {
 	tunnel.cancel()
 	tunnel.listener.Close()
 	tunnel.client.Close()
-	a.emit("ssh:tunnel-closed", SSHEvent{SessionID: tunnel.id, Message: message})
+	a.emit(desktop.EventSSHTunnelClosed, SSHEvent{SessionID: tunnel.id, Message: message})
 }
 
 func monitorSSHKeepAlive(ctx context.Context, client *ssh.Client, onFailure func(error)) {
@@ -1763,7 +1764,7 @@ func (a *App) StopSSHSession(sessionID string) error {
 	if session.client != nil {
 		session.client.Close()
 	}
-	a.emit("ssh:closed", SSHEvent{SessionID: sessionID, Message: sessionClosedMessage(session)})
+	a.emit(desktop.EventSSHClosed, SSHEvent{SessionID: sessionID, Message: sessionClosedMessage(session)})
 	return nil
 }
 
@@ -1906,10 +1907,10 @@ func (a *App) waitForShell(ctx context.Context, session *sshSession) {
 	}
 
 	if err != nil && !errors.Is(err, io.EOF) {
-		a.emit("ssh:closed", SSHEvent{SessionID: session.id, Message: err.Error()})
+		a.emit(desktop.EventSSHClosed, SSHEvent{SessionID: session.id, Message: err.Error()})
 		return
 	}
-	a.emit("ssh:closed", SSHEvent{SessionID: session.id, Message: sessionClosedMessage(session)})
+	a.emit(desktop.EventSSHClosed, SSHEvent{SessionID: session.id, Message: sessionClosedMessage(session)})
 }
 
 func sessionClosedMessage(session *sshSession) string {
@@ -2051,7 +2052,7 @@ func (a *App) exportDatabaseFromMenu() {
 		return
 	}
 	a.showInfoDialog("Export Database", fmt.Sprintf("Database exported to:\n%s", path))
-	a.emitData("database:exported", map[string]string{"message": "Database exported.", "path": path})
+	a.emitData(desktop.EventDatabaseExported, map[string]string{"message": "Database exported.", "path": path})
 }
 
 func (a *App) importDatabaseFromMenu() {
@@ -2112,31 +2113,31 @@ func (a *App) importHostsFileFromMenu() {
 		a.showErrorDialog("Import from hosts file", err)
 		return
 	}
-	a.emitData("database:hosts-file-preview", result)
+	a.emitData(desktop.EventHostsFilePreview, result)
 }
 
 func (a *App) openSettingsFromMenu() {
-	a.emitData("app:settings", map[string]bool{"open": true})
+	a.emitData(desktop.EventOpenSettings, map[string]bool{"open": true})
 }
 
 func (a *App) openSSHKeysFromMenu() {
-	a.emitData("app:ssh-keys", map[string]bool{"allowInstall": false})
+	a.emitData(desktop.EventOpenSSHKeys, map[string]bool{"allowInstall": false})
 }
 
 func (a *App) showAboutFromMenu() {
-	a.emitData("app:about", a.GetAppInfo())
+	a.emitData(desktop.EventOpenAbout, a.GetAppInfo())
 }
 
 func (a *App) checkForUpdatesFromMenu() {
 	info, err := a.CheckForUpdate()
 	if err != nil {
-		a.emitData("app:update-check", map[string]interface{}{
+		a.emitData(desktop.EventUpdateCheck, map[string]interface{}{
 			"manual": true,
 			"error":  err.Error(),
 		})
 		return
 	}
-	a.emitData("app:update-check", map[string]interface{}{
+	a.emitData(desktop.EventUpdateCheck, map[string]interface{}{
 		"manual": true,
 		"info":   info,
 	})
@@ -2185,7 +2186,7 @@ type eventWriter struct {
 
 func (w eventWriter) Write(data []byte) (int, error) {
 	if len(data) > 0 {
-		w.app.emit("ssh:output", sshOutputEvent(w.sessionID, data))
+		w.app.emit(desktop.EventSSHOutput, sshOutputEvent(w.sessionID, data))
 	}
 	return len(data), nil
 }

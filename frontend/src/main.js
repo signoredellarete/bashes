@@ -31,6 +31,13 @@ import iconPlayerPlay from '@tabler/icons/filled/player-play.svg?raw';
 import '@xterm/xterm/css/xterm.css';
 import bashesLogo from './assets/bashes.png';
 import { createBackendClient } from './api/backend.js';
+import {
+  onRuntimeEvent,
+  openRuntimeURL,
+  readClipboardText as readClipboard,
+  RUNTIME_EVENT,
+  writeClipboardText as writeClipboard,
+} from './api/runtime.js';
 import { externalHttpURL } from './external-links.js';
 import { passwordFieldValue, placeCaretAfterSavedPassword, showSavedPassword } from './password-field.js';
 import {
@@ -5277,37 +5284,14 @@ function showMessageLog() {
   });
 }
 
-async function writeClipboard(text) {
-  if (globalThis.runtime?.ClipboardSetText) {
-    const ok = await globalThis.runtime.ClipboardSetText(text);
-    if (ok !== false) return;
-  }
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-  }
-}
-
-async function readClipboard() {
-  if (globalThis.runtime?.ClipboardGetText) {
-    return await globalThis.runtime.ClipboardGetText();
-  }
-  if (navigator.clipboard?.readText) {
-    return await navigator.clipboard.readText();
-  }
-  return '';
-}
-
 function registerSSHEvents() {
-  const eventsOn = globalThis.runtime?.EventsOn;
-  if (!eventsOn) return;
-
-  eventsOn('ssh:output', (event) => {
+  onRuntimeEvent(RUNTIME_EVENT.sshOutput, (event) => {
     writeSSHOutput(event.sessionId, decodeSSHOutput(event));
   });
-  eventsOn('ssh:status', (event) => {
+  onRuntimeEvent(RUNTIME_EVENT.sshStatus, (event) => {
     if (event?.message) writeNotice(event.message);
   });
-  eventsOn('ssh:closed', (event) => {
+  onRuntimeEvent(RUNTIME_EVENT.sshClosed, (event) => {
     const session = state.sessions.get(event.sessionId);
     if (!session) {
       state.pendingSSHOutput.delete(event.sessionId);
@@ -5316,7 +5300,7 @@ function registerSSHEvents() {
     markSessionClosed(event.sessionId, event?.message);
     if (event?.message) writeNotice(event.message);
   });
-  eventsOn('ssh:tunnel-closed', (event) => {
+  onRuntimeEvent(RUNTIME_EVENT.sshTunnelClosed, (event) => {
     if (event?.sessionId) {
       state.tunnels.delete(event.sessionId);
       renderHosts(searchInput.value);
@@ -5327,10 +5311,7 @@ function registerSSHEvents() {
 }
 
 function registerAppEvents() {
-  const eventsOn = globalThis.runtime?.EventsOn;
-  if (!eventsOn) return;
-
-  eventsOn('webapp:closed', (event) => {
+  onRuntimeEvent(RUNTIME_EVENT.webAppClosed, (event) => {
     for (const [webAppID, runtime] of state.webAppRuntimes) {
       if (runtime.runtimeId === event?.runtimeId) state.webAppRuntimes.delete(webAppID);
     }
@@ -5338,7 +5319,7 @@ function registerAppEvents() {
     renderSelection();
     if (event?.message && /failed|error|closed:/i.test(event.message)) writeNotice(event.message, 'error');
   });
-  eventsOn('webapp:status', (event) => {
+  onRuntimeEvent(RUNTIME_EVENT.webAppStatus, (event) => {
     if (event?.webAppId && event?.runtimeId) {
       const current = state.webAppRuntimes.get(event.webAppId) ?? {};
       state.webAppRuntimes.set(event.webAppId, { ...current, ...event });
@@ -5348,10 +5329,10 @@ function registerAppEvents() {
     if (event?.message) writeNotice(event.message, event.error ? 'error' : undefined);
   });
 
-  eventsOn('database:exported', (event) => {
+  onRuntimeEvent(RUNTIME_EVENT.databaseExported, (event) => {
     if (event?.message) writeNotice(`${event.message} ${event.path ?? ''}`.trim());
   });
-  eventsOn('database:imported', async (event) => {
+  onRuntimeEvent(RUNTIME_EVENT.databaseImported, async (event) => {
     clearAllSessionsFromUI();
     closeAllFileTransferWorkspaces();
     state.selectedId = null;
@@ -5359,24 +5340,24 @@ function registerAppEvents() {
     await loadTunnels();
     writeNotice(event?.message ?? 'Database imported.');
   });
-  eventsOn('database:hosts-file-imported', async (event) => {
+  onRuntimeEvent(RUNTIME_EVENT.hostsFileImported, async (event) => {
     await refreshHosts();
     const imported = event?.imported ?? 0;
     const skipped = event?.skipped ?? 0;
     writeNotice(`Imported ${imported} host${imported === 1 ? '' : 's'} from hosts file. Skipped ${skipped}.`);
     restoreTerminalFocusAfterOverlay();
   });
-  eventsOn('database:hosts-file-preview', (event) => {
+  onRuntimeEvent(RUNTIME_EVENT.hostsFilePreview, (event) => {
     showHostsFileImportPreview(event);
   });
-  eventsOn('app:settings', () => {
+  onRuntimeEvent(RUNTIME_EVENT.openSettings, () => {
     openSettingsPanel();
   });
-  eventsOn('app:ssh-keys', () => {
+  onRuntimeEvent(RUNTIME_EVENT.openSSHKeys, () => {
     openKeysPanel({ allowInstall: false });
   });
-  eventsOn('app:about', (info) => showAboutModal(info));
-  eventsOn('app:update-check', (event) => {
+  onRuntimeEvent(RUNTIME_EVENT.openAbout, (info) => showAboutModal(info));
+  onRuntimeEvent(RUNTIME_EVENT.updateCheck, (event) => {
     if (event?.error) {
       showUpdateErrorModal(event.error);
       return;
@@ -5482,11 +5463,7 @@ function showUpdateErrorModal(message) {
 
 function openExternalURL(url) {
   if (!url) return;
-  if (globalThis.runtime?.BrowserOpenURL) {
-    globalThis.runtime.BrowserOpenURL(url);
-    return;
-  }
-  window.open(url, '_blank', 'noopener');
+  if (!openRuntimeURL(url)) window.open(url, '_blank', 'noopener');
 }
 
 function openTerminalLink(event, value) {

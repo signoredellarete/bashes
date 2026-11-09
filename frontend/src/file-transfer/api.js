@@ -1,3 +1,5 @@
+import { resolveRuntimeFilePaths } from '../api/runtime.js';
+
 function wailsAPI() {
   return globalThis.go?.main?.App ?? globalThis.go?.desktop?.App;
 }
@@ -96,10 +98,5 @@ function parseEntry(entry) {
 }
 
 async function resolveFilePathsWithRuntime(files) {
-  const runtime = globalThis.runtime;
-  if (!runtime?.CanResolveFilePaths || !runtime?.ResolveFilePaths) return [];
-  const canResolve = await runtime.CanResolveFilePaths();
-  if (!canResolve) return [];
-  const paths = await runtime.ResolveFilePaths(files);
-  return Array.isArray(paths) ? paths.filter(Boolean) : [];
+  return await resolveRuntimeFilePaths(files);
 }

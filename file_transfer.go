@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/pkg/sftp"
+	"github.com/signoredellarete/bashes/internal/desktop"
 	"github.com/signoredellarete/bashes/internal/remotessh"
 	"golang.org/x/crypto/ssh"
 )
@@ -628,7 +629,7 @@ func (a *App) emitFileTransferJob(job *fileTransferJob, force bool) {
 	if !force && !job.shouldEmitProgress() {
 		return
 	}
-	a.emitData("file-transfer:job", job.snapshot())
+	a.emitData(desktop.EventFileTransferJob, job.snapshot())
 }
 
 func isActiveFileTransferJob(status string) bool {

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/signoredellarete/bashes/internal/apperrors"
+	"github.com/signoredellarete/bashes/internal/desktop"
 	"github.com/signoredellarete/bashes/internal/domain"
 	"github.com/signoredellarete/bashes/internal/remotessh"
 	"github.com/signoredellarete/bashes/internal/webappbrowser"
@@ -345,7 +346,7 @@ func (a *App) emitWebAppRuntimeStatus(runtime *webAppRuntime, message string, is
 	a.mu.Unlock()
 	for _, appID := range appIDs {
 		info := webAppRuntimeInfo(runtime, appID)
-		a.emitData("webapp:status", map[string]interface{}{
+		a.emitData(desktop.EventWebAppStatus, map[string]interface{}{
 			"runtimeId": info.RuntimeID, "webAppId": info.WebAppID,
 			"browserId": info.BrowserID, "browser": info.Browser,
 			"socksPort": info.SOCKSPort, "tunnel": info.Tunnel,
@@ -394,7 +395,7 @@ func (a *App) closeWebAppRuntime(runtime *webAppRuntime, killBrowser bool, messa
 		} else {
 			_ = webappbrowser.CleanupProfile(runtime.browser.Family, runtime.profileDir, runtime.policy)
 		}
-		a.emitData("webapp:closed", map[string]string{"runtimeId": runtime.id, "message": message})
+		a.emitData(desktop.EventWebAppClosed, map[string]string{"runtimeId": runtime.id, "message": message})
 	})
 }
 

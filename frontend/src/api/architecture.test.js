@@ -8,12 +8,22 @@ const bindingAdapters = new Set([
   join('api', 'backend.js'),
   join('file-transfer', 'api.js'),
 ]);
+const runtimeAdapter = join('api', 'runtime.js');
 
 describe('frontend architecture', () => {
   it('keeps generated Go binding access inside the backend adapter', () => {
     const violations = sourceFiles(sourceRoot)
       .filter((path) => !bindingAdapters.has(relative(sourceRoot, path)))
       .filter((path) => readFileSync(path, 'utf8').includes('globalThis.go'))
+      .map((path) => relative(sourceRoot, path));
+
+    expect(violations).toEqual([]);
+  });
+
+  it('keeps Wails runtime access inside the runtime adapter', () => {
+    const violations = sourceFiles(sourceRoot)
+      .filter((path) => relative(sourceRoot, path) !== runtimeAdapter)
+      .filter((path) => readFileSync(path, 'utf8').includes('globalThis.runtime'))
       .map((path) => relative(sourceRoot, path));
 
     expect(violations).toEqual([]);
