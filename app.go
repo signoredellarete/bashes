@@ -31,6 +31,7 @@ import (
 	"github.com/signoredellarete/bashes/internal/fsutil"
 	"github.com/signoredellarete/bashes/internal/importer"
 	"github.com/signoredellarete/bashes/internal/localterm"
+	"github.com/signoredellarete/bashes/internal/plugin"
 	"github.com/signoredellarete/bashes/internal/remotessh"
 	appsettings "github.com/signoredellarete/bashes/internal/settings"
 	"github.com/signoredellarete/bashes/internal/sshtunnel"
@@ -65,6 +66,7 @@ type App struct {
 	transfers        *transfer.SessionManager[*fileTransferSession]
 	transferJobs     *transfer.Manager
 	webAppRuntimes   *webappruntime.Registry[*webAppRuntime]
+	plugins          *plugin.Supervisor
 	openFile         func(string) error
 	openFileCacheDir string
 }
@@ -88,6 +90,7 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 		transfers:        transfer.NewSessionManager[*fileTransferSession](),
 		transferJobs:     transfer.NewManager(),
 		webAppRuntimes:   webappruntime.NewRegistry[*webAppRuntime](),
+		plugins:          plugin.NewSupervisor(plugin.SupervisorOptions{HostVersion: version}),
 		openFile:         openFileWithDefaultApplication,
 		openFileCacheDir: defaultOpenFileCacheDir(dataPath),
 	}
@@ -1424,6 +1427,9 @@ func (a *App) stopAllRuntimeConnections() {
 		_ = a.CloseFileTransfer(id)
 	}
 	a.stopAllWebAppRuntimes()
+	ctx, cancel := context.WithTimeout(context.Background(), plugin.DefaultStopTimeout)
+	defer cancel()
+	_ = a.plugins.Shutdown(ctx)
 }
 
 func (a *App) resourceByID(id string) (domain.Endpoint, error) {

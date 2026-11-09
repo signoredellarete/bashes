@@ -57,8 +57,9 @@ Status on 2026-11-09 for branch `feature/v2-modular-architecture`:
   through a tested native adapter;
 - frontend application state and the hierarchical resource model are isolated
   from DOM rendering and covered by unit tests;
-- plugin manifest validation, discovery and handshake contracts exist, but no
-  external plugin process is executed yet;
+- plugin manifest validation, discovery, handshake and bounded process
+  supervision are tested; the supervisor is part of application shutdown but
+  has no user-facing installation or enablement path yet;
 - plugin package details are documented in
   [PLUGIN_MANIFEST.md](PLUGIN_MANIFEST.md).
 
