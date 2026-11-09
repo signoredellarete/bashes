@@ -53,6 +53,9 @@ Status on 2026-11-09 for branch `feature/v2-modular-architecture`:
 - terminal session lifecycle, SSH tunnel lifecycle and file transfer job state
   are owned by dedicated managers with idempotent cancellation and race-tested
   concurrent cleanup;
+- SFTP session ownership and shared Web App browser/tunnel associations use
+  dedicated registries, so `App` no longer coordinates native resources through
+  one global mutex;
 - SSH keepalive behavior is shared by sessions, tunnels and Web App gateways
   through a tested native adapter;
 - frontend application state and the hierarchical resource model are isolated
@@ -63,9 +66,10 @@ Status on 2026-11-09 for branch `feature/v2-modular-architecture`:
 - plugin package details are documented in
   [PLUGIN_MANIFEST.md](PLUGIN_MANIFEST.md).
 
-The next implementation milestone is completing backend runtime ownership for
-SFTP sessions and Web App browser/tunnel groups. Plugin process supervision must
-not be enabled before their bounded shutdown and failure isolation are available.
+The next implementation milestone is reducing the remaining Wails facade and
+continuing feature-by-feature frontend extraction. Plugin process supervision is
+available to the application shutdown path, but user-facing plugin installation
+and enablement remain blocked on explicit permission and trust policy.
 
 ## Technology decisions
 
