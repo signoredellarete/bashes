@@ -66,6 +66,9 @@ Status on 2026-11-09 for branch `feature/v2-modular-architecture`:
   orchestration because it combines resource lookup and an SSH connection;
 - Web App browser detection, preference validation, persistence and runtime
   resolution live in an independent tested native service;
+- Wails events, dialogs and external URL operations are isolated behind an
+  injectable desktop runtime adapter; facade menu workflows run in tests
+  without a WebView;
 - terminal session lifecycle, SSH tunnel lifecycle and file transfer job state
   are owned by dedicated managers with idempotent cancellation and race-tested
   concurrent cleanup;
@@ -86,8 +89,8 @@ Status on 2026-11-09 for branch `feature/v2-modular-architecture`:
   [PLUGIN_MANIFEST.md](PLUGIN_MANIFEST.md).
 
 The next implementation milestone is reducing the remaining Wails facade around
-native dialogs and connection orchestration, then continuing feature-by-feature
-frontend extraction. Plugin process supervision is available
+connection orchestration, then continuing feature-by-feature frontend
+extraction. Plugin process supervision is available
 to the application shutdown path, but user-facing plugin installation and
 enablement remain blocked on explicit permission and trust policy.
 

@@ -36,7 +36,6 @@ import (
 	"github.com/signoredellarete/bashes/internal/transfer"
 	"github.com/signoredellarete/bashes/internal/webappbrowser"
 	"github.com/signoredellarete/bashes/internal/webappruntime"
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 )
@@ -64,6 +63,7 @@ type App struct {
 	transferJobs     *transfer.Manager
 	webAppRuntimes   *webappruntime.Registry[*webAppRuntime]
 	plugins          *plugin.Supervisor
+	desktopRuntime   desktop.Runtime
 	openFile         func(string) error
 	openFileCacheDir string
 }
@@ -97,6 +97,7 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 		transferJobs:     transfer.NewManager(),
 		webAppRuntimes:   webappruntime.NewRegistry[*webAppRuntime](),
 		plugins:          plugin.NewSupervisor(plugin.SupervisorOptions{HostVersion: version}),
+		desktopRuntime:   desktop.NewWailsRuntime(),
 		openFile:         openFileWithDefaultApplication,
 		openFileCacheDir: defaultOpenFileCacheDir(dataPath),
 	}
@@ -468,7 +469,7 @@ func (a *App) ChooseSSHKeyDirectory() (string, error) {
 	if ctx == nil {
 		return "", errors.New("application window is not ready")
 	}
-	return wailsruntime.OpenDirectoryDialog(ctx, wailsruntime.OpenDialogOptions{
+	return a.desktopRuntime.OpenDirectoryDialog(ctx, desktop.OpenDialogOptions{
 		Title: "Choose SSH Keys Directory",
 	})
 }
@@ -1043,7 +1044,7 @@ func (a *App) emit(name string, event SSHEvent) {
 	if a.ctx == nil {
 		return
 	}
-	wailsruntime.EventsEmit(a.ctx, name, event)
+	a.desktopRuntime.Emit(a.ctx, name, event)
 }
 
 func (a *App) emitData(name string, data interface{}) {
@@ -1052,7 +1053,7 @@ func (a *App) emitData(name string, data interface{}) {
 	if a.ctx == nil {
 		return
 	}
-	wailsruntime.EventsEmit(a.ctx, name, data)
+	a.desktopRuntime.Emit(a.ctx, name, data)
 }
 
 func (a *App) runtimeContext() context.Context {
@@ -1066,10 +1067,10 @@ func (a *App) exportDatabaseFromMenu() {
 	if ctx == nil {
 		return
 	}
-	path, err := wailsruntime.SaveFileDialog(ctx, wailsruntime.SaveDialogOptions{
+	path, err := a.desktopRuntime.SaveFileDialog(ctx, desktop.SaveDialogOptions{
 		Title:           "Export Bashes Database",
 		DefaultFilename: fmt.Sprintf("bashes-hosts-%s.json", time.Now().Format("20060102")),
-		Filters: []wailsruntime.FileFilter{
+		Filters: []desktop.FileFilter{
 			{DisplayName: "JSON files (*.json)", Pattern: "*.json"},
 		},
 	})
@@ -1093,9 +1094,9 @@ func (a *App) importDatabaseFromMenu() {
 	if ctx == nil {
 		return
 	}
-	path, err := wailsruntime.OpenFileDialog(ctx, wailsruntime.OpenDialogOptions{
+	path, err := a.desktopRuntime.OpenFileDialog(ctx, desktop.OpenDialogOptions{
 		Title: "Import Bashes Database",
-		Filters: []wailsruntime.FileFilter{
+		Filters: []desktop.FileFilter{
 			{DisplayName: "JSON files (*.json)", Pattern: "*.json"},
 		},
 	})
@@ -1107,8 +1108,8 @@ func (a *App) importDatabaseFromMenu() {
 		return
 	}
 
-	choice, err := wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
-		Type:          wailsruntime.QuestionDialog,
+	choice, err := a.desktopRuntime.MessageDialog(ctx, desktop.MessageDialogOptions{
+		Type:          desktop.MessageQuestion,
 		Title:         "Import Database",
 		Message:       "Importing a database replaces the current hosts.json after creating hosts.json.bak. Active sessions, tunnels and file transfers will be closed.",
 		Buttons:       []string{"Import", "Cancel"},
@@ -1178,13 +1179,13 @@ func (a *App) checkForUpdatesFromMenu() {
 
 func (a *App) openReadmeFromMenu() {
 	if ctx := a.runtimeContext(); ctx != nil {
-		wailsruntime.BrowserOpenURL(ctx, readmeURL)
+		a.desktopRuntime.OpenURL(ctx, readmeURL)
 	}
 }
 
 func (a *App) openReleasesFromMenu() {
 	if ctx := a.runtimeContext(); ctx != nil {
-		wailsruntime.BrowserOpenURL(ctx, releasesURL)
+		a.desktopRuntime.OpenURL(ctx, releasesURL)
 	}
 }
 
@@ -1193,8 +1194,8 @@ func (a *App) showInfoDialog(title string, message string) {
 	if ctx == nil {
 		return
 	}
-	_, _ = wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
-		Type:    wailsruntime.InfoDialog,
+	_, _ = a.desktopRuntime.MessageDialog(ctx, desktop.MessageDialogOptions{
+		Type:    desktop.MessageInfo,
 		Title:   title,
 		Message: message,
 	})
@@ -1205,8 +1206,8 @@ func (a *App) showErrorDialog(title string, err error) {
 	if ctx == nil {
 		return
 	}
-	_, _ = wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
-		Type:    wailsruntime.ErrorDialog,
+	_, _ = a.desktopRuntime.MessageDialog(ctx, desktop.MessageDialogOptions{
+		Type:    desktop.MessageError,
 		Title:   title,
 		Message: err.Error(),
 	})
