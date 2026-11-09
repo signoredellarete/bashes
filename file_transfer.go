@@ -172,9 +172,17 @@ func (a *App) StartFileTransfer(input SSHSessionInput) (FileTransferSessionInfo,
 		sftp:       sftpClient,
 	}
 
-	a.mu.Lock()
-	a.transfers[sessionID] = session
-	a.mu.Unlock()
+	if err := a.transfers.Register(transfer.SessionOptions[*fileTransferSession]{
+		ID: sessionID, ResourceID: resource.ID, Value: session,
+		Close: func(value *fileTransferSession) {
+			_ = value.sftp.Close()
+			_ = value.client.Close()
+		},
+	}); err != nil {
+		_ = sftpClient.Close()
+		_ = client.Close()
+		return FileTransferSessionInfo{}, err
+	}
 
 	if auth := authPreferenceFromSessionInput(input); auth != nil && hasExplicitAuth(input) {
 		_ = a.service.SetResourceAuth(resource.ID, *auth)
@@ -193,17 +201,10 @@ func (a *App) CloseFileTransfer(sessionID string) error {
 		}
 	}
 
-	a.mu.Lock()
-	session := a.transfers[strings.TrimSpace(sessionID)]
-	delete(a.transfers, strings.TrimSpace(sessionID))
-	a.mu.Unlock()
-
-	if session == nil {
+	if !a.transfers.Stop(sessionID) {
 		a.deleteFileTransferJobsForSession(sessionID)
 		return nil
 	}
-	session.sftp.Close()
-	session.client.Close()
 	a.deleteFileTransferJobsForSession(sessionID)
 	return nil
 }
@@ -417,10 +418,8 @@ func (a *App) DismissFileTransferJob(input FileTransferDismissJobInput) error {
 }
 
 func (a *App) fileTransfer(sessionID string) (*fileTransferSession, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	session := a.transfers[strings.TrimSpace(sessionID)]
-	if session == nil {
+	session, found := a.transfers.Get(sessionID)
+	if !found {
 		return nil, fmt.Errorf("file transfer session %q not found", sessionID)
 	}
 	return session, nil

@@ -62,7 +62,7 @@ type App struct {
 	settings         *appsettings.Repository
 	sessions         *termsession.Manager
 	tunnels          *sshtunnel.Manager
-	transfers        map[string]*fileTransferSession
+	transfers        *transfer.SessionManager[*fileTransferSession]
 	transferJobs     *transfer.Manager
 	webAppRuntimes   map[string]*webAppRuntime
 	webAppRuntimeIDs map[string]string
@@ -86,7 +86,7 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 		passwords:        passwords,
 		sessions:         termsession.NewManager(),
 		tunnels:          sshtunnel.NewManager(),
-		transfers:        make(map[string]*fileTransferSession),
+		transfers:        transfer.NewSessionManager[*fileTransferSession](),
 		transferJobs:     transfer.NewManager(),
 		webAppRuntimes:   make(map[string]*webAppRuntime),
 		webAppRuntimeIDs: make(map[string]string),
@@ -1351,16 +1351,7 @@ func (a *App) stopSessionsForResource(resourceID string) {
 }
 
 func (a *App) closeTransfersForResource(resourceID string) {
-	var transferIDs []string
-	a.mu.Lock()
-	for id, transfer := range a.transfers {
-		if transfer.resourceID == resourceID {
-			transferIDs = append(transferIDs, id)
-		}
-	}
-	a.mu.Unlock()
-
-	for _, id := range transferIDs {
+	for _, id := range a.transfers.IDsForResource(resourceID) {
 		_ = a.CloseFileTransfer(id)
 	}
 }
@@ -1425,20 +1416,13 @@ func sessionClosedMessage(kind termsession.Kind) string {
 }
 
 func (a *App) stopAllRuntimeConnections() {
-	a.mu.Lock()
-	transferIDs := make([]string, 0, len(a.transfers))
-	for id := range a.transfers {
-		transferIDs = append(transferIDs, id)
-	}
-	a.mu.Unlock()
-
 	for _, id := range a.sessions.IDs() {
 		_ = a.StopSSHSession(id)
 	}
 	for _, id := range a.tunnels.IDs() {
 		_ = a.StopSSHTunnel(id)
 	}
-	for _, id := range transferIDs {
+	for _, id := range a.transfers.IDs() {
 		_ = a.CloseFileTransfer(id)
 	}
 	a.stopAllWebAppRuntimes()

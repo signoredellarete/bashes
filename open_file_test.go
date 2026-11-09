@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/signoredellarete/bashes/internal/transfer"
 )
 
 func TestValidateOpenableFile(t *testing.T) {
@@ -35,10 +37,15 @@ func TestStartFileTransferOpenJobOpensLocalFileDirectly(t *testing.T) {
 	}
 
 	app := NewApp(filepath.Join(t.TempDir(), "hosts.json"))
-	app.transfers["files-1"] = &fileTransferSession{
+	session := &fileTransferSession{
 		id:         "files-1",
 		resourceID: "host-1",
 		localRoot:  root,
+	}
+	if err := app.transfers.Register(transfer.SessionOptions[*fileTransferSession]{
+		ID: session.id, ResourceID: session.resourceID, Value: session, Close: func(*fileTransferSession) {},
+	}); err != nil {
+		t.Fatalf("Register() error = %v", err)
 	}
 	var opened string
 	app.openFile = func(path string) error {
@@ -67,7 +74,12 @@ func TestStartFileTransferOpenJobRejectsUnsupportedFile(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	app := NewApp(filepath.Join(t.TempDir(), "hosts.json"))
-	app.transfers["files-1"] = &fileTransferSession{id: "files-1", resourceID: "host-1", localRoot: root}
+	session := &fileTransferSession{id: "files-1", resourceID: "host-1", localRoot: root}
+	if err := app.transfers.Register(transfer.SessionOptions[*fileTransferSession]{
+		ID: session.id, ResourceID: session.resourceID, Value: session, Close: func(*fileTransferSession) {},
+	}); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
 
 	_, err := app.StartFileTransferOpenJob(FileTransferOpenInput{SessionID: "files-1", ID: "/local/script.sh"})
 	if err == nil || !strings.Contains(err.Error(), ".sh files") {
