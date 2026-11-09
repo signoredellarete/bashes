@@ -1,0 +1,371 @@
+# Bashes 2 Architecture Plan
+
+This document defines the incremental path from the current Bashes 1.x codebase
+to a modular Bashes 2. It is an implementation plan, not a promise to rewrite
+the application from scratch.
+
+## Product direction
+
+Bashes remains a fast, local-first remote operations application with a
+terminal-first interface. Version 2 must improve internal structure and
+reliability without adopting the visually dense workspace of larger remote
+administration suites.
+
+The guiding product rule is:
+
+> Rich architecture, focused interface.
+
+### Goals
+
+- Preserve the current lightweight, spacious UI and established workflows.
+- Keep Go, Wails and xterm.js as the core technology choices.
+- Separate domain logic, runtime lifecycle, native integrations and UI state.
+- Make SSH, file transfer, tunnels, Web Apps and future protocols independent
+  modules with explicit contracts.
+- Support optional out-of-process plugins without making the base installation
+  larger or less reliable.
+- Keep the portable JSON datastore and migrate existing Bashes 1.x data.
+- Improve testability, error contracts, cancellation and resource cleanup.
+
+### Non-goals
+
+- Reimplementing stable SSH or terminal protocol libraries.
+- Replacing xterm.js or SVAR solely to make the implementation look uniform.
+- Loading untrusted native libraries into the Bashes process.
+- Turning every internal function into a generic plugin extension point.
+- Redesigning the UI while architectural work is in progress.
+- Adding new end-user protocols before the modular foundation is proven.
+
+## Technology decisions
+
+### Go remains the native backend
+
+Go is a good fit for concurrent network sessions, streaming, cancellation and
+cross-platform binaries. The current maintainability problems come from module
+boundaries, not from the language. Protocol implementations remain behind Go
+interfaces so they can be tested without Wails.
+
+### Wails remains the desktop adapter
+
+Business logic must not import Wails. A small desktop adapter will expose typed
+commands and translate backend events for the frontend. This makes a future
+Wails upgrade a packaging/integration project rather than another application
+rewrite.
+
+Bashes 2 initially stays on Wails v2 because the current Linux release supports
+WebKitGTK 4.0 and 4.1. Wails v3 will be evaluated after the native boundaries are
+separated; migration requires an explicit supported-distribution decision.
+
+### xterm.js remains the terminal renderer
+
+xterm.js is a mature renderer also used by MobaRust and VS Code. It will remain
+responsible only for terminal display and input. PTY, SSH, session lifecycle and
+terminal byte streams remain native responsibilities.
+
+### Svelte becomes the frontend component boundary
+
+The existing frontend mixes a large imperative `main.js` with isolated Svelte
+components. Bashes 2 will move screens to small Svelte components incrementally,
+preserving existing markup and styling. Pure state and protocol code remains in
+framework-independent JavaScript modules. There will be no parallel permanent
+implementation of the same screen.
+
+## Target architecture
+
+```text
+Frontend
+  app shell and routing
+  feature components and stores
+  typed desktop client and event client
+                 |
+          Wails adapter only
+                 |
+Application core
+  use cases, lifecycle orchestration, policies
+                 |
+Domain model ----+---- ports/interfaces
+                      | SSH/SFTP/local PTY
+                      | JSON repository/keyring
+                      | browser/OS integration
+                      | plugin supervisor
+                 |
+Infrastructure adapters and optional plugin processes
+```
+
+Dependencies point inward. Domain and application packages must be usable by
+unit tests and command-line tools without starting Wails or a WebView.
+
+### Backend modules
+
+The intended package ownership is:
+
+| Area | Responsibility |
+| --- | --- |
+| `internal/domain` | Validated persistent models and value types only |
+| `internal/application` | Use cases operating through interfaces |
+| `internal/runtime` | Ownership of active sessions, tunnels, transfers and Web App runtimes |
+| `internal/session` | Terminal session state machine and events |
+| `internal/transfer` | Transfer jobs, conflict policy, progress, cancellation and retry |
+| `internal/sshkeys` | Key inventory, generation, import and installation workflows |
+| `internal/importer` | Database, hosts file and future import formats |
+| `internal/settings` | Versioned application settings independent of host data |
+| `internal/plugin` | Manifest validation, discovery and process supervision |
+| `internal/adapters/*` | JSON, keyring, SSH/SFTP, browser and OS implementations |
+| `internal/desktop` | Wails-facing facade and event translation |
+
+These names are targets, not a requirement to move every file immediately.
+A package is introduced only when one coherent responsibility can be moved with
+tests.
+
+### Frontend modules
+
+```text
+frontend/src/
+  app/                 bootstrap, shell, global overlays
+  api/                 desktop commands, events and error decoding
+  state/               resource, session and UI stores
+  features/
+    resources/         sidebar, tags and resource editors
+    terminal/          tabs, xterm lifecycle and focus
+    connections/       authentication and connection panels
+    transfers/         SVAR workspace and transfer queue
+    tunnels/           tunnel forms and status
+    keys/              SSH key management
+    webapps/           Web App editor and runtime controls
+    settings/          application settings
+  shared/              reusable controls, icons and small utilities
+```
+
+Feature modules communicate through explicit state/actions, not by querying
+unrelated DOM nodes. Terminal instances stay outside serializable UI state and
+are owned by a dedicated terminal registry.
+
+## Runtime ownership
+
+The application core must be the authoritative owner of native resources.
+Frontend tabs represent runtime state; they do not control its integrity.
+
+Every long-lived runtime has:
+
+- a stable ID and owning resource ID;
+- an explicit state (`starting`, `running`, `stopping`, `stopped`, `failed`);
+- a context and cancellation path;
+- idempotent stop and bounded shutdown;
+- structured progress/status events;
+- a final reason and error code;
+- cleanup triggered by resource deletion, database replacement and app exit.
+
+The runtime manager exposes snapshots plus events. It must never require the
+frontend to call several methods in the correct order to avoid a leak.
+
+## Plugin model
+
+Plugins run as separate processes. Go's native `.so` plugin mechanism is not
+suitable because it is version-sensitive and not consistently available across
+Windows, macOS and Linux.
+
+### Package layout
+
+An installed plugin is a directory containing:
+
+```text
+manifest.json
+bin/<platform-architecture executable>
+assets/                     optional static UI assets
+LICENSE
+```
+
+The manifest declares a stable plugin ID, version, Bashes API range, supported
+platforms, executable path, capabilities and requested permissions. Plugin
+configuration is namespaced by plugin ID. Secrets are never stored in the
+manifest or exported JSON.
+
+### Communication
+
+- A versioned, framed JSON protocol over stdin/stdout is the initial transport.
+- Standard error is diagnostic output with bounded retention and redaction.
+- Startup uses a `hello -> capabilities -> ready` handshake with a timeout.
+- Every request has an ID, deadline and cancellation operation.
+- Events are typed and bounded; binary or high-volume streams use a dedicated
+  local channel rather than JSON/base64 messages.
+- Unexpected exit affects only the plugin feature and produces a structured
+  diagnostic; it must not terminate Bashes.
+
+The first protocol version will remain intentionally small. It will cover
+discovery, health, lifecycle and capability invocation before supporting custom
+plugin UI.
+
+### Security boundary
+
+- Plugins are disabled until explicitly installed and enabled by the user.
+- The core validates manifests and executable paths before launch.
+- Plugins receive only declared configuration and capabilities.
+- Credentials remain in the native credential service. A plugin receives a
+  short-lived secret through an inherited pipe or scoped request only when a
+  capability requires it; secrets never appear in arguments, logs or exports.
+- Plugin UI, if introduced, uses a constrained host API and cannot call Wails
+  bindings directly.
+- Signing and repository trust are separate later milestones; the first local
+  development implementation must label unsigned plugins clearly.
+
+### Initial plugin candidates
+
+The plugin host will be proven with a small diagnostic fixture. Only after the
+contract and failure isolation are tested should X11, RDP or VNC be implemented.
+X11 server packaging is the preferred first real plugin because it is optional,
+platform-specific and adds substantial release weight.
+
+## Persistence and compatibility
+
+- Existing `hosts.json` remains importable and exportable.
+- Each schema migration is explicit, one-way in memory and covered by fixtures.
+- Runtime state, transfer history, browser cache and plugin processes are not
+  part of the portable database.
+- Plugin configuration is stored in a namespaced section with schema version;
+  secrets are represented only by opaque credential references.
+- Writes remain validated, locked, backed up and atomic.
+- Bashes 1.x must remain able to run alongside v2 during development by using a
+  separate opt-in data directory or a copied fixture database.
+
+## Lessons adopted from MobaRust
+
+Bashes should adopt the engineering patterns, not the denser interface:
+
+- explicit state machines for sessions and transfers;
+- typed native commands and events;
+- backend-owned streaming and cancellation;
+- bounded concurrency, recursion and event rates;
+- temporary transfer destinations and explicit conflict policy;
+- isolated experimental helpers with a readiness handshake;
+- protocol fixtures that do not require production credentials or hosts;
+- visible capability and transport status rather than optimistic UI state.
+
+## Delivery phases
+
+### Phase 0: Baseline and contracts
+
+- Record the supported platform/release matrix and current behavioral baseline.
+- Run existing Go, race, vet, frontend and production build checks.
+- Extract the frontend desktop API from `main.js` with no behavior change.
+- Centralize structured backend errors and desktop event names.
+- Add architecture checks that prevent core packages from importing Wails.
+
+Exit condition: existing tests pass and `main.js` no longer owns the desktop
+binding implementation.
+
+### Phase 1: Backend application boundaries
+
+- Reduce `App` to a Wails facade composed from services.
+- Extract settings, imports and SSH key workflows with existing tests moved or
+  expanded around their public contracts.
+- Introduce dependency injection for filesystem, dialogs, browser and clock
+  operations where platform behavior matters.
+
+Exit condition: resource management, imports, keys and settings are testable
+without constructing the Wails facade.
+
+### Phase 2: Runtime manager
+
+- Introduce common lifecycle state and structured runtime events.
+- Move SSH/local sessions, tunnels, transfers and Web App runtimes behind the
+  manager incrementally.
+- Add deterministic tests for concurrent start/stop, connection loss, deletion,
+  database replacement and shutdown.
+
+Exit condition: no native resource relies on frontend cleanup for correctness.
+
+### Phase 3: Frontend modularization
+
+- Introduce state stores and the terminal registry.
+- Move one complete feature at a time from `main.js` to Svelte components.
+- Preserve UI dimensions, colors, shortcuts, focus and modal behavior with
+  focused tests.
+- Split CSS by tokens, layout and feature while keeping one generated bundle.
+
+Exit condition: `main.js` is bootstrap code rather than the application.
+
+### Phase 4: Transfer reliability
+
+- Add structured SFTP errors, retry and ETA.
+- Define explicit destination conflict policies.
+- Add bounded recursive traversal and explicit symlink/special-file behavior.
+- Add rollback/preservation rules for replacement.
+- Design remote editing with revision/conflict checks before implementation.
+
+Exit condition: interrupted or conflicting transfers have deterministic,
+tested outcomes and useful diagnostics.
+
+### Phase 5: Plugin foundation
+
+- Implement manifest schema and validation.
+- Implement discovery, enable/disable and compatibility reporting.
+- Implement process handshake, health, cancellation and shutdown.
+- Ship a repository-local fixture plugin and failure-isolation tests.
+- Add a minimal plugin settings screen only after backend behavior is stable.
+
+Exit condition: a crashing or incompatible fixture is contained and explained
+without affecting SSH sessions or persisted data.
+
+### Phase 6: First optional plugin
+
+- Move the Windows X server experiment into its own plugin repository/package.
+- Keep binaries out of the core Bashes archive.
+- Verify installation, updates, process cleanup and diagnostics on Windows x64
+  and ARM64.
+
+### Phase 7: Framework and release decision
+
+- Evaluate Wails v3 against the supported Linux distribution matrix.
+- Benchmark startup, idle memory, terminal throughput and package size.
+- Produce signed/installable package plans independently from plugin packages.
+- Publish a v2 prerelease only after v1 feature parity and migration tests.
+
+## Known collision points
+
+Changes in these areas require focused regression tests:
+
+- `App` method names are the current generated Wails API contract.
+- `main.js` combines state, DOM identity, event registration and xterm ownership.
+- Session IDs connect backend maps, frontend tabs and asynchronous output events.
+- Resource deletion and database import currently stop several runtime types.
+- Authentication defaults are shared by SSH, tunnels, transfers and Web Apps.
+- File transfer has its own Svelte mount and Wails event listeners.
+- Browser profiles and Web App tunnels share lifecycle state.
+- Settings and host data use related filesystem locations but different export
+  and secrecy requirements.
+- macOS, Windows and Linux WebViews differ in clipboard, drag/drop, scrolling
+  and keyboard behavior.
+- Release packaging currently encodes platform-specific WebKit and icon work.
+
+## Quality gates
+
+Every phase must maintain:
+
+- `go test ./...`
+- `go test -race ./...`
+- `go vet ./...`
+- `npm test --prefix frontend`
+- `npm run build --prefix frontend`
+- JSON migration and round-trip fixtures when persistence changes
+- no secrets in logs, events, exports or process arguments
+- bounded goroutines/processes and idempotent shutdown
+- no visual redesign unless separately reviewed
+
+Cross-platform preview artifacts are requested only at milestones that touch
+desktop integration. Main remains the maintenance line for Bashes 1.x bug fixes;
+those fixes are merged or cherry-picked into this branch with their tests.
+
+## Definition of Bashes 2 readiness
+
+Bashes 2 is ready for prerelease when:
+
+- all Bashes 1.x supported workflows pass the platform test matrix;
+- the Wails facade and frontend bootstrap contain no business logic;
+- runtime ownership and shutdown are backend-authoritative;
+- datastore migration is reversible through backup and documented export;
+- the plugin fixture proves compatibility checks and crash isolation;
+- core packages do not depend on plugin binaries;
+- performance is no worse than Bashes 1.x for startup, idle memory and terminal
+  input/output under the agreed tolerance;
+- the UI retains the focused Bashes identity.
+
