@@ -1153,7 +1153,7 @@ func (a *App) StartSSHSession(input SSHSessionInput) (string, error) {
 		}
 	}
 
-	go monitorSSHKeepAlive(runtimeCtx, client, func(err error) {
+	go remotessh.MonitorKeepAlive(runtimeCtx, client, remotessh.KeepAliveOptions{}, func(err error) {
 		_ = shell.Close()
 		_ = client.Close()
 	})
@@ -1276,7 +1276,7 @@ func (a *App) StartSSHTunnel(input SSHTunnelInput) (SSHTunnelInfo, error) {
 		}
 	}
 
-	go monitorSSHKeepAlive(ctx, client, func(err error) {
+	go remotessh.MonitorKeepAlive(ctx, client, remotessh.KeepAliveOptions{}, func(err error) {
 		a.failTunnel(tunnel, fmt.Sprintf("Tunnel closed: SSH keepalive failed: %v", err))
 	})
 	go a.serveTunnel(ctx, tunnel)
@@ -1384,30 +1384,6 @@ func (a *App) failTunnel(tunnel *sshTunnel, message string) {
 	tunnel.listener.Close()
 	tunnel.client.Close()
 	a.emit(desktop.EventSSHTunnelClosed, SSHEvent{SessionID: tunnel.id, Message: message})
-}
-
-func monitorSSHKeepAlive(ctx context.Context, client *ssh.Client, onFailure func(error)) {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	failures := 0
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			_, _, err := client.SendRequest("keepalive@openssh.com", true, nil)
-			if err == nil {
-				failures = 0
-				continue
-			}
-			failures++
-			if failures >= 2 {
-				onFailure(err)
-				return
-			}
-		}
-	}
 }
 
 func (a *App) WriteSSHSession(sessionID string, data string) error {

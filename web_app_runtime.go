@@ -425,7 +425,7 @@ func (runtime *webAppRuntime) closeNetwork() {
 }
 
 func (a *App) monitorWebAppTunnel(ctx context.Context, runtime *webAppRuntime, client *ssh.Client) {
-	go monitorSSHKeepAlive(ctx, client, func(failure error) {
+	go remotessh.MonitorKeepAlive(ctx, client, remotessh.KeepAliveOptions{}, func(failure error) {
 		go a.reconnectWebAppTunnel(ctx, runtime, client, failure)
 	})
 }
