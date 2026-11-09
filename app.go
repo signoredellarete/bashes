@@ -33,6 +33,7 @@ import (
 	"github.com/signoredellarete/bashes/internal/localterm"
 	"github.com/signoredellarete/bashes/internal/remotessh"
 	appsettings "github.com/signoredellarete/bashes/internal/settings"
+	"github.com/signoredellarete/bashes/internal/sshtunnel"
 	"github.com/signoredellarete/bashes/internal/store"
 	"github.com/signoredellarete/bashes/internal/termsession"
 	"github.com/signoredellarete/bashes/internal/webappbrowser"
@@ -59,7 +60,7 @@ type App struct {
 	mu               sync.Mutex
 	settings         *appsettings.Repository
 	sessions         *termsession.Manager
-	tunnels          map[string]*sshTunnel
+	tunnels          *sshtunnel.Manager
 	transfers        map[string]*fileTransferSession
 	transferJobs     map[string]*fileTransferJob
 	webAppRuntimes   map[string]*webAppRuntime
@@ -83,7 +84,7 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 		settings:         appsettings.NewRepository(filepath.Join(filepath.Dir(dataPath), "settings.json")),
 		passwords:        passwords,
 		sessions:         termsession.NewManager(),
-		tunnels:          make(map[string]*sshTunnel),
+		tunnels:          sshtunnel.NewManager(),
 		transfers:        make(map[string]*fileTransferSession),
 		transferJobs:     make(map[string]*fileTransferJob),
 		webAppRuntimes:   make(map[string]*webAppRuntime),
@@ -1061,17 +1062,7 @@ type SSHTunnelInput struct {
 	AllowPublicBind      bool   `json:"allowPublicBind,omitempty"`
 }
 
-type SSHTunnelInfo struct {
-	TunnelID      string `json:"tunnelId"`
-	ResourceID    string `json:"resourceId"`
-	Type          string `json:"type"`
-	LocalHost     string `json:"localHost"`
-	LocalPort     int    `json:"localPort"`
-	LocalAddress  string `json:"localAddress"`
-	Target        string `json:"target"`
-	ForwardTarget string `json:"forwardTarget"`
-	StartedAt     string `json:"startedAt"`
-}
+type SSHTunnelInfo = sshtunnel.Info
 
 type LocalSessionInput struct {
 	Cols int `json:"cols"`
@@ -1083,15 +1074,6 @@ type SSHEvent struct {
 	Data      string `json:"data,omitempty"`
 	Bytes     string `json:"bytes,omitempty"`
 	Message   string `json:"message,omitempty"`
-}
-
-type sshTunnel struct {
-	id             string
-	client         *ssh.Client
-	listener       net.Listener
-	cancel         context.CancelFunc
-	forwardAddress string
-	info           SSHTunnelInfo
 }
 
 func (a *App) StartSSHSession(input SSHSessionInput) (string, error) {
@@ -1245,7 +1227,6 @@ func (a *App) StartSSHTunnel(input SSHTunnelInput) (SSHTunnelInfo, error) {
 	}
 
 	tunnelID := fmt.Sprintf("tunnel-%d", time.Now().UnixNano())
-	ctx, cancel := context.WithCancel(context.Background())
 	info := SSHTunnelInfo{
 		TunnelID:      tunnelID,
 		ResourceID:    resource.ID,
@@ -1257,18 +1238,27 @@ func (a *App) StartSSHTunnel(input SSHTunnelInput) (SSHTunnelInfo, error) {
 		ForwardTarget: tunnelForwardTarget(input, forwardAddress),
 		StartedAt:     time.Now().Format(time.RFC3339),
 	}
-	tunnel := &sshTunnel{
-		id:             tunnelID,
-		client:         client,
-		listener:       listener,
-		cancel:         cancel,
-		forwardAddress: forwardAddress,
-		info:           info,
+	serve := func(ctx context.Context) error {
+		switch info.Type {
+		case "socks":
+			return remotessh.ServeSOCKS5(ctx, listener, client)
+		case "local":
+			return remotessh.ServeLocalForward(ctx, listener, client, forwardAddress)
+		case "remote":
+			return remotessh.ServeRemoteForward(ctx, listener, forwardAddress)
+		default:
+			return fmt.Errorf("unsupported tunnel type %q", info.Type)
+		}
 	}
-
-	a.mu.Lock()
-	a.tunnels[tunnelID] = tunnel
-	a.mu.Unlock()
+	tunnel, err := a.tunnels.Register(sshtunnel.Options{
+		Info: info, Client: client, Listener: listener, Serve: serve,
+	})
+	if err != nil {
+		_ = listener.Close()
+		_ = client.Close()
+		return SSHTunnelInfo{}, err
+	}
+	ctx := a.tunnels.Context(tunnel)
 
 	if auth := authPreferenceFromSessionInput(sessionInput); auth != nil {
 		if err := a.service.SetResourceAuth(resource.ID, *auth); err != nil {
@@ -1277,9 +1267,11 @@ func (a *App) StartSSHTunnel(input SSHTunnelInput) (SSHTunnelInfo, error) {
 	}
 
 	go remotessh.MonitorKeepAlive(ctx, client, remotessh.KeepAliveOptions{}, func(err error) {
-		a.failTunnel(tunnel, fmt.Sprintf("Tunnel closed: SSH keepalive failed: %v", err))
+		if a.tunnels.Fail(tunnel) {
+			a.emit(desktop.EventSSHTunnelClosed, SSHEvent{SessionID: tunnelID, Message: fmt.Sprintf("Tunnel closed: SSH keepalive failed: %v", err)})
+		}
 	})
-	go a.serveTunnel(ctx, tunnel)
+	go a.waitForTunnel(tunnel)
 
 	return info, nil
 }
@@ -1310,80 +1302,22 @@ func (a *App) startTunnelListener(client *ssh.Client, input SSHTunnelInput) (net
 }
 
 func (a *App) ListSSHTunnels() []SSHTunnelInfo {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	tunnels := make([]SSHTunnelInfo, 0, len(a.tunnels))
-	for _, tunnel := range a.tunnels {
-		tunnels = append(tunnels, tunnel.info)
-	}
-	return tunnels
+	return a.tunnels.Infos()
 }
 
 func (a *App) StopSSHTunnel(tunnelID string) error {
-	a.mu.Lock()
-	tunnel := a.tunnels[strings.TrimSpace(tunnelID)]
-	delete(a.tunnels, strings.TrimSpace(tunnelID))
-	a.mu.Unlock()
-
-	if tunnel == nil {
-		return nil
-	}
-	tunnel.cancel()
-	tunnel.listener.Close()
-	tunnel.client.Close()
+	a.tunnels.Stop(tunnelID)
 	return nil
 }
 
-func (a *App) serveTunnel(ctx context.Context, tunnel *sshTunnel) {
-	var err error
-	switch tunnel.info.Type {
-	case "socks":
-		err = remotessh.ServeSOCKS5(ctx, tunnel.listener, tunnel.client)
-	case "local":
-		err = remotessh.ServeLocalForward(ctx, tunnel.listener, tunnel.client, tunnel.forwardAddress)
-	case "remote":
-		err = remotessh.ServeRemoteForward(ctx, tunnel.listener, tunnel.forwardAddress)
-	default:
-		err = fmt.Errorf("unsupported tunnel type %q", tunnel.info.Type)
-	}
-
-	a.mu.Lock()
-	current := a.tunnels[tunnel.id]
-	removed := false
-	if current == tunnel {
-		delete(a.tunnels, tunnel.id)
-		removed = true
-	}
-	a.mu.Unlock()
-
-	tunnel.cancel()
-	tunnel.client.Close()
-
-	if !removed {
+func (a *App) waitForTunnel(tunnel *sshtunnel.Tunnel) {
+	result := a.tunnels.Run(tunnel)
+	if result.Stopped || !result.Authoritative {
 		return
 	}
-	if err != nil {
-		a.emit(desktop.EventSSHTunnelClosed, SSHEvent{SessionID: tunnel.id, Message: fmt.Sprintf("Tunnel closed: %v", err)})
+	if result.Err != nil {
+		a.emit(desktop.EventSSHTunnelClosed, SSHEvent{SessionID: result.ID, Message: fmt.Sprintf("Tunnel closed: %v", result.Err)})
 	}
-}
-
-func (a *App) failTunnel(tunnel *sshTunnel, message string) {
-	a.mu.Lock()
-	current := a.tunnels[tunnel.id]
-	if current == tunnel {
-		delete(a.tunnels, tunnel.id)
-	}
-	a.mu.Unlock()
-
-	if current != tunnel {
-		return
-	}
-
-	tunnel.cancel()
-	tunnel.listener.Close()
-	tunnel.client.Close()
-	a.emit(desktop.EventSSHTunnelClosed, SSHEvent{SessionID: tunnel.id, Message: message})
 }
 
 func (a *App) WriteSSHSession(sessionID string, data string) error {
@@ -1404,16 +1338,7 @@ func (a *App) StopSSHSession(sessionID string) error {
 }
 
 func (a *App) stopTunnelsForResource(resourceID string) {
-	var tunnelIDs []string
-	a.mu.Lock()
-	for id, tunnel := range a.tunnels {
-		if tunnel.info.ResourceID == resourceID {
-			tunnelIDs = append(tunnelIDs, id)
-		}
-	}
-	a.mu.Unlock()
-
-	for _, id := range tunnelIDs {
+	for _, id := range a.tunnels.IDsForResource(resourceID) {
 		_ = a.StopSSHTunnel(id)
 	}
 }
@@ -1500,10 +1425,6 @@ func sessionClosedMessage(kind termsession.Kind) string {
 
 func (a *App) stopAllRuntimeConnections() {
 	a.mu.Lock()
-	tunnelIDs := make([]string, 0, len(a.tunnels))
-	for id := range a.tunnels {
-		tunnelIDs = append(tunnelIDs, id)
-	}
 	transferIDs := make([]string, 0, len(a.transfers))
 	for id := range a.transfers {
 		transferIDs = append(transferIDs, id)
@@ -1513,7 +1434,7 @@ func (a *App) stopAllRuntimeConnections() {
 	for _, id := range a.sessions.IDs() {
 		_ = a.StopSSHSession(id)
 	}
-	for _, id := range tunnelIDs {
+	for _, id := range a.tunnels.IDs() {
 		_ = a.StopSSHTunnel(id)
 	}
 	for _, id := range transferIDs {
