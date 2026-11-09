@@ -39,6 +39,16 @@ import {
   writeClipboardText as writeClipboard,
 } from './api/runtime.js';
 import { externalHttpURL } from './external-links.js';
+import {
+  LOCAL_RESOURCE_ID,
+  findWorkspaceResource,
+  isLocalResource,
+  localResource,
+  nestedResourceIDs,
+  resourceIDsForSelection,
+  resourceName,
+  resourceTarget,
+} from './features/resources/model.js';
 import { createAppState } from './state/app-state.js';
 import { passwordFieldValue, placeCaretAfterSavedPassword, showSavedPassword } from './password-field.js';
 import {
@@ -110,7 +120,6 @@ const dragOutlineTimers = { hosts: 0, tabs: 0 };
 const dragOutlineTargets = { hosts: null, tabs: null };
 
 const FILE_TRANSFER_ENABLED = true;
-const LOCAL_RESOURCE_ID = '__bashes_localhost__';
 const TOOLTIP_DELAY = 500;
 const DRAG_OUTLINE_DELAY = 300;
 const backend = createBackendClient({
@@ -254,19 +263,6 @@ function authFieldsMarkup(context) {
       <span>Skip host key verification for this ${context} (insecure)</span>
     </label>
   `;
-}
-
-function localResource() {
-  return {
-    id: LOCAL_RESOURCE_ID,
-    type: 'local',
-    hostname: 'localhost',
-    ip: '',
-    port: 0,
-    user: 'local',
-    subsystems: [],
-    local: true,
-  };
 }
 
 const app = document.querySelector('#app');
@@ -1780,20 +1776,6 @@ async function deleteSelectedResource() {
     if (!state.activeSessionId) state.selectedId = selected.parent?.id ?? null;
     await refreshHosts();
   });
-}
-
-function resourceIDsForSelection(selected) {
-  const ids = [selected.resource.id];
-  ids.push(...nestedResourceIDs(selected.resource.subsystems ?? []));
-  return ids;
-}
-
-function nestedResourceIDs(subsystems) {
-  const ids = [];
-  for (const subsystem of subsystems ?? []) {
-    ids.push(subsystem.id, ...nestedResourceIDs(subsystem.subsystems ?? []));
-  }
-  return ids;
 }
 
 function confirmDeleteResource(selected) {
@@ -4746,28 +4728,7 @@ function tunnelLabel(type) {
 }
 
 function findResource(id) {
-  if (state.localShellSupported && id === LOCAL_RESOURCE_ID) {
-    return { type: 'local', resource: localResource(), parent: null };
-  }
-  for (const host of state.hosts) {
-    if (host.id === id) return { type: 'host', resource: host, parent: null };
-    const found = findNestedResource(host.subsystems ?? [], id, host);
-    if (found) return found;
-  }
-  const webApp = state.webApps.find((item) => item.id === id);
-  if (webApp) return { type: 'webapp', resource: webApp, parent: null };
-  return null;
-}
-
-function findNestedResource(subsystems, id, parent) {
-  for (const subsystem of subsystems ?? []) {
-    if (subsystem.id === id) return { type: subsystem.type, resource: subsystem, parent };
-    const found = findNestedResource(subsystem.subsystems ?? [], id, subsystem);
-    if (found) {
-      return found;
-    }
-  }
-  return null;
+  return findWorkspaceResource(state, id);
 }
 
 function sessionsForResource(resourceId) {
@@ -4790,25 +4751,8 @@ function sessionTitle(hostname, ordinal) {
   return ordinal > 1 ? `${hostname} #${ordinal}` : hostname;
 }
 
-function resourceTarget(resource) {
-  if (isLocalResource(resource)) return 'Local shell';
-  if (isWebAppResource(resource)) {
-    return resource.connectionMode === 'tunnel' ? `${resource.url} via SSH` : resource.url;
-  }
-  return `${resource.user}@${resource.ip || resource.hostname}:${resource.port}`;
-}
-
-function resourceName(resource) {
-  return isWebAppResource(resource) ? resource.name : resource.hostname;
-}
-
 function terminalKindLabel(kind = 'ssh') {
   return kind === 'local' ? 'local' : 'ssh';
-}
-
-function isLocalResource(resourceOrId) {
-  const id = typeof resourceOrId === 'string' ? resourceOrId : resourceOrId?.id;
-  return id === LOCAL_RESOURCE_ID;
 }
 
 async function openInitialLocalSession() {
