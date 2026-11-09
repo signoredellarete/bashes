@@ -28,8 +28,10 @@ import (
 	"github.com/signoredellarete/bashes/internal/credentials"
 	"github.com/signoredellarete/bashes/internal/desktop"
 	"github.com/signoredellarete/bashes/internal/domain"
+	"github.com/signoredellarete/bashes/internal/fsutil"
 	"github.com/signoredellarete/bashes/internal/localterm"
 	"github.com/signoredellarete/bashes/internal/remotessh"
+	appsettings "github.com/signoredellarete/bashes/internal/settings"
 	"github.com/signoredellarete/bashes/internal/store"
 	"github.com/signoredellarete/bashes/internal/webappbrowser"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -53,7 +55,7 @@ type App struct {
 	passwords        credentials.Store
 	dataPath         string
 	mu               sync.Mutex
-	settingsMu       sync.Mutex
+	settings         *appsettings.Repository
 	sessions         map[string]*sshSession
 	tunnels          map[string]*sshTunnel
 	transfers        map[string]*fileTransferSession
@@ -76,6 +78,7 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 	return &App{
 		dataPath:         dataPath,
 		service:          application.NewService(store.NewRepository(dataPath)),
+		settings:         appsettings.NewRepository(filepath.Join(filepath.Dir(dataPath), "settings.json")),
 		passwords:        passwords,
 		sessions:         make(map[string]*sshSession),
 		tunnels:          make(map[string]*sshTunnel),
@@ -294,20 +297,9 @@ type SSHKeyInfo struct {
 	Distribution string `json:"distribution,omitempty"`
 }
 
-type SSHKeySettings struct {
-	CustomDirectory string `json:"customDirectory"`
-}
+type SSHKeySettings = appsettings.SSHKeys
 
-type WebAppBrowserSettings struct {
-	PreferredBrowserID string `json:"preferredBrowserId,omitempty"`
-	CustomBrowserPath  string `json:"customBrowserPath,omitempty"`
-}
-
-type appSettings struct {
-	CustomDirectory    string `json:"customDirectory,omitempty"`
-	PreferredBrowserID string `json:"preferredBrowserId,omitempty"`
-	CustomBrowserPath  string `json:"customBrowserPath,omitempty"`
-}
+type WebAppBrowserSettings = appsettings.WebAppBrowser
 
 type SSHKeySourceInfo struct {
 	Source       string `json:"source"`
@@ -761,10 +753,7 @@ func scanSSHKeySource(dir string, source string, label string, ignoreMissing boo
 }
 
 func (a *App) GetSSHKeySettings() (SSHKeySettings, error) {
-	a.settingsMu.Lock()
-	defer a.settingsMu.Unlock()
-
-	settings, err := a.loadSettings()
+	settings, err := a.settings.Load()
 	if err != nil {
 		return SSHKeySettings{}, err
 	}
@@ -772,13 +761,6 @@ func (a *App) GetSSHKeySettings() (SSHKeySettings, error) {
 }
 
 func (a *App) SaveSSHKeySettings(input SSHKeySettings) (SSHKeySettings, error) {
-	a.settingsMu.Lock()
-	defer a.settingsMu.Unlock()
-
-	settings, err := a.loadSettings()
-	if err != nil {
-		return SSHKeySettings{}, err
-	}
 	customDirectory := strings.TrimSpace(input.CustomDirectory)
 	if customDirectory != "" {
 		dir := expandHome(customDirectory)
@@ -791,8 +773,10 @@ func (a *App) SaveSSHKeySettings(input SSHKeySettings) (SSHKeySettings, error) {
 		}
 		customDirectory = dir
 	}
-	settings.CustomDirectory = customDirectory
-	if err := a.writeSettings(settings); err != nil {
+	if _, err := a.settings.Update(func(settings *appsettings.Data) error {
+		settings.CustomDirectory = customDirectory
+		return nil
+	}); err != nil {
 		return SSHKeySettings{}, err
 	}
 	return SSHKeySettings{CustomDirectory: customDirectory}, nil
@@ -803,10 +787,7 @@ func (a *App) ListWebAppBrowsers() []webappbrowser.Browser {
 }
 
 func (a *App) GetWebAppBrowserSettings() (WebAppBrowserSettings, error) {
-	a.settingsMu.Lock()
-	defer a.settingsMu.Unlock()
-
-	settings, err := a.loadSettings()
+	settings, err := a.settings.Load()
 	if err != nil {
 		return WebAppBrowserSettings{}, err
 	}
@@ -817,9 +798,6 @@ func (a *App) GetWebAppBrowserSettings() (WebAppBrowserSettings, error) {
 }
 
 func (a *App) SaveWebAppBrowserSettings(input WebAppBrowserSettings) (WebAppBrowserSettings, error) {
-	a.settingsMu.Lock()
-	defer a.settingsMu.Unlock()
-
 	preferredID := strings.TrimSpace(input.PreferredBrowserID)
 	customPath := expandHome(strings.TrimSpace(input.CustomBrowserPath))
 	if preferredID != "" && !validWebAppBrowserID(preferredID) {
@@ -840,13 +818,11 @@ func (a *App) SaveWebAppBrowserSettings(input WebAppBrowserSettings) (WebAppBrow
 			return WebAppBrowserSettings{}, errors.New("select the browser type for the custom executable")
 		}
 	}
-	settings, err := a.loadSettings()
-	if err != nil {
-		return WebAppBrowserSettings{}, err
-	}
-	settings.PreferredBrowserID = preferredID
-	settings.CustomBrowserPath = customPath
-	if err := a.writeSettings(settings); err != nil {
+	if _, err := a.settings.Update(func(settings *appsettings.Data) error {
+		settings.PreferredBrowserID = preferredID
+		settings.CustomBrowserPath = customPath
+		return nil
+	}); err != nil {
 		return WebAppBrowserSettings{}, err
 	}
 	return WebAppBrowserSettings{PreferredBrowserID: preferredID, CustomBrowserPath: customPath}, nil
@@ -859,35 +835,6 @@ func validWebAppBrowserID(id string) bool {
 	default:
 		return false
 	}
-}
-
-func (a *App) loadSettings() (appSettings, error) {
-	data, err := os.ReadFile(a.settingsPath())
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return appSettings{}, nil
-		}
-		return appSettings{}, fmt.Errorf("read settings: %w", err)
-	}
-	var settings appSettings
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return appSettings{}, fmt.Errorf("decode settings: %w", err)
-	}
-	settings.CustomDirectory = strings.TrimSpace(settings.CustomDirectory)
-	settings.PreferredBrowserID = strings.TrimSpace(settings.PreferredBrowserID)
-	settings.CustomBrowserPath = strings.TrimSpace(settings.CustomBrowserPath)
-	return settings, nil
-}
-
-func (a *App) writeSettings(settings appSettings) error {
-	if err := os.MkdirAll(filepath.Dir(a.settingsPath()), 0o700); err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return err
-	}
-	return writeFileAtomic(a.settingsPath(), append(data, '\n'), 0o600)
 }
 
 func (a *App) ChooseSSHKeyDirectory() (string, error) {
@@ -2532,27 +2479,7 @@ func hostKeyError(err error, resource domain.Endpoint) error {
 }
 
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("create export directory: %w", err)
-	}
-	info, err := os.Stat(path)
-	if err == nil && info.IsDir() {
-		return fmt.Errorf("export path is a directory: %s", path)
-	}
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("stat export path: %w", err)
-	}
-
-	tmpName, err := writeTempFile(dir, filepath.Base(path), data, perm)
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmpName)
-	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("replace export: %w", err)
-	}
-	return nil
+	return fsutil.WriteFileAtomic(path, data, perm)
 }
 
 func writeSSHKeyPairAtomic(privatePath string, privateData []byte, publicPath string, publicData []byte) error {
@@ -2681,7 +2608,7 @@ func (a *App) keysDir() string {
 }
 
 func (a *App) settingsPath() string {
-	return filepath.Join(filepath.Dir(a.dataPath), "settings.json")
+	return a.settings.Path()
 }
 
 func (a *App) publicKeyPath(name string) string {
