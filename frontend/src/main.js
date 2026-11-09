@@ -39,6 +39,7 @@ import {
   writeClipboardText as writeClipboard,
 } from './api/runtime.js';
 import { externalHttpURL } from './external-links.js';
+import { createAppState } from './state/app-state.js';
 import { passwordFieldValue, placeCaretAfterSavedPassword, showSavedPassword } from './password-field.js';
 import {
   errorDetail,
@@ -90,48 +91,7 @@ import './styles.css';
 
 const terminalSettings = loadTerminalSettings(localStorage);
 
-const state = {
-  hosts: [],
-  webApps: [],
-  topLevelOrder: [],
-  tags: [],
-  keys: [],
-  keySources: [],
-  keyInstallEnabled: true,
-  keySettings: { customDirectory: '' },
-  webAppBrowsers: [],
-  webAppBrowserSettings: { preferredBrowserId: '', customBrowserPath: '' },
-  webAppRuntimes: new Map(),
-  webAppAuthTarget: null,
-  tunnels: new Map(),
-  localShellSupported: false,
-  selectedId: null,
-  activeSessionId: null,
-  ...terminalSettings,
-  sidebarCollapsed: localStorage.getItem('bashes.sidebarCollapsed') === 'true',
-  busy: false,
-  connectingResourceIds: new Set(),
-  drawerMode: null,
-  drawerHostId: null,
-  editResourceId: null,
-  confirmResolver: null,
-  editContextTarget: null,
-  activeTagFilters: [],
-  tagFilterMode: 'any',
-  editingTagKey: null,
-  resourceDraftTags: [],
-  resourceTagQuery: '',
-  webAppDraftTags: [],
-  webAppTagQuery: '',
-  lastSessionByResource: new Map(),
-  sessionFocusHistory: [],
-  messageLog: [],
-  sessions: new Map(),
-  pendingSSHOutput: new Map(),
-  fileTransferWorkspaces: new Map(),
-  backgroundFileTransferResourceIds: new Set(),
-  activeFileTransferResourceId: null,
-};
+const state = createAppState({ terminalSettings, storage: localStorage });
 
 let appModalActions = {};
 let searchRenderFrame = 0;
