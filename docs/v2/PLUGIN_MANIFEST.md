@@ -62,4 +62,8 @@ bounded shutdown to process termination. This contract is not an operating
 system sandbox: installing and enabling a plugin remains an explicit trust
 decision that will be implemented before the supervisor is exposed in Bashes.
 
+`cmd/bashes-plugin-fixture` is the repository-local diagnostic implementation.
+It supports only `hello`, `diagnostic.echo` and `shutdown`; it exists to test
+the transport and lifecycle contract and is not included in desktop releases.
+
 [Back to the Bashes 2 architecture plan](ARCHITECTURE_PLAN.md)
