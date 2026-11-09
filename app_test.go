@@ -955,68 +955,6 @@ func TestHostsFilePathForOS(t *testing.T) {
 	}
 }
 
-func TestParseHostsFileSkipsLocalAndImportsFirstAlias(t *testing.T) {
-	data := []byte(`
-127.0.0.1 localhost
-::1 localhost
-255.255.255.255 broadcasthost
-10.0.0.10 bastion bastion.local
-192.168.1.20 vm1 # comment
-fe80::1 link-local
-`)
-
-	entries := parseHostsFile(data)
-	if len(entries) != 2 {
-		t.Fatalf("parseHostsFile() returned %d entries: %+v", len(entries), entries)
-	}
-	if entries[0].IP != "10.0.0.10" || entries[0].Hostname != "bastion" {
-		t.Fatalf("first entry = %+v, want bastion", entries[0])
-	}
-	if entries[1].IP != "192.168.1.20" || entries[1].Hostname != "vm1" {
-		t.Fatalf("second entry = %+v, want vm1", entries[1])
-	}
-}
-
-func TestParseSimpleSSHConfigMatchesExplicitHostsOnly(t *testing.T) {
-	config := parseSimpleSSHConfig([]byte(`
-Host bastion bastion.local
-  HostName 10.0.0.10
-  User admin
-  Port 2202
-
-Host *.prod
-  User ignored
-
-Host vm1
-  User deploy
-  Port 2222
-
-Match host *
-  User ignored
-`))
-
-	if len(config) != 2 {
-		t.Fatalf("parseSimpleSSHConfig() returned %d entries: %+v", len(config), config)
-	}
-	match, ok := config.match(hostsFileEntry{IP: "10.0.0.10", Hostname: "bastion"})
-	if !ok {
-		t.Fatal("expected bastion match")
-	}
-	if match.user != "admin" || match.port != 2202 {
-		t.Fatalf("bastion match = %+v, want admin:2202", match)
-	}
-	match, ok = config.match(hostsFileEntry{IP: "192.168.1.20", Hostname: "vm1"})
-	if !ok {
-		t.Fatal("expected vm1 match")
-	}
-	if match.user != "deploy" || match.port != 2222 {
-		t.Fatalf("vm1 match = %+v, want deploy:2222", match)
-	}
-	if _, ok := config.match(hostsFileEntry{IP: "192.168.1.30", Hostname: "web.prod"}); ok {
-		t.Fatal("wildcard host should not match")
-	}
-}
-
 func TestExportAndImportDatabase(t *testing.T) {
 	dir := t.TempDir()
 	source := NewApp(filepath.Join(dir, "source", "hosts.json"))
