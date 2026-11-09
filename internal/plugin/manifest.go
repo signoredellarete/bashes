@@ -193,6 +193,9 @@ func (m Manifest) Executable(pluginDir, goos, goarch string) (string, error) {
 	if !info.Mode().IsRegular() {
 		return "", errors.New("plugin executable is not a regular file")
 	}
+	if goos != "windows" && info.Mode().Perm()&0o111 == 0 {
+		return "", errors.New("plugin executable is not executable")
+	}
 	return path, nil
 }
 

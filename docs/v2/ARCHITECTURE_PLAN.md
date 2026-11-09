@@ -36,6 +36,29 @@ The guiding product rule is:
 - Redesigning the UI while architectural work is in progress.
 - Adding new end-user protocols before the modular foundation is proven.
 
+## Implementation status
+
+Status on 2026-11-09 for branch `feature/v2-modular-architecture`:
+
+- baseline Go, race, vet, frontend test and production frontend build checks pass;
+- the frontend desktop binding and Wails runtime APIs are isolated behind tested
+  adapters;
+- structured application errors and desktop event names have explicit backend
+  contracts;
+- architecture tests prevent core Go packages and frontend features from adding
+  direct Wails dependencies;
+- application settings use a versioned, locked, atomic repository while keeping
+  the Bashes 1.x JSON fields compatible;
+- hosts file and SSH config import logic lives in an independent tested module;
+- plugin manifest validation, discovery and handshake contracts exist, but no
+  external plugin process is executed yet;
+- plugin package details are documented in
+  [PLUGIN_MANIFEST.md](PLUGIN_MANIFEST.md).
+
+The next implementation milestone is backend runtime ownership. Plugin process
+supervision must not be enabled before bounded shutdown and failure isolation
+are available.
+
 ## Technology decisions
 
 ### Go remains the native backend
