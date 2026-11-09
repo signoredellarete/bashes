@@ -643,11 +643,12 @@ func TestGetSSHKeyInventoryKeepsOtherSourcesWhenCustomSourceFails(t *testing.T) 
 	if err := os.WriteFile(invalidDirectory, []byte("file"), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(app.settingsPath()), 0o700); err != nil {
+	settingsPath := filepath.Join(filepath.Dir(app.dataPath), "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o700); err != nil {
 		t.Fatalf("MkdirAll(settings) error = %v", err)
 	}
 	settings := fmt.Sprintf("{\"customDirectory\":%q}\n", invalidDirectory)
-	if err := os.WriteFile(app.settingsPath(), []byte(settings), 0o600); err != nil {
+	if err := os.WriteFile(settingsPath, []byte(settings), 0o600); err != nil {
 		t.Fatalf("WriteFile(settings) error = %v", err)
 	}
 

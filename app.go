@@ -56,8 +56,8 @@ type App struct {
 	service          *application.Service
 	passwords        credentials.Store
 	dataPath         string
-	settings         *appsettings.Repository
 	sshKeys          *sshkeys.Service
+	webAppBrowsers   *webappbrowser.PreferencesService
 	sessions         *termsession.Manager
 	tunnels          *sshtunnel.Manager
 	transfers        *transfer.SessionManager[*fileTransferSession]
@@ -83,12 +83,13 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 		settingsRepository,
 		listWSLSSHKeyInventory,
 	)
+	webAppBrowserService := webappbrowser.NewPreferencesService(goruntime.GOOS, getenv, settingsRepository)
 
 	return &App{
 		dataPath:         dataPath,
 		service:          application.NewService(store.NewRepository(dataPath)),
-		settings:         settingsRepository,
 		sshKeys:          sshKeyService,
+		webAppBrowsers:   webAppBrowserService,
 		passwords:        passwords,
 		sessions:         termsession.NewManager(),
 		tunnels:          sshtunnel.NewManager(),
@@ -451,58 +452,15 @@ func (a *App) SaveSSHKeySettings(input SSHKeySettings) (SSHKeySettings, error) {
 }
 
 func (a *App) ListWebAppBrowsers() []webappbrowser.Browser {
-	return webappbrowser.NewDetector(goruntime.GOOS, getenv).Detect()
+	return a.webAppBrowsers.List()
 }
 
 func (a *App) GetWebAppBrowserSettings() (WebAppBrowserSettings, error) {
-	settings, err := a.settings.Load()
-	if err != nil {
-		return WebAppBrowserSettings{}, err
-	}
-	return WebAppBrowserSettings{
-		PreferredBrowserID: settings.PreferredBrowserID,
-		CustomBrowserPath:  settings.CustomBrowserPath,
-	}, nil
+	return a.webAppBrowsers.Load()
 }
 
 func (a *App) SaveWebAppBrowserSettings(input WebAppBrowserSettings) (WebAppBrowserSettings, error) {
-	preferredID := strings.TrimSpace(input.PreferredBrowserID)
-	customPath := expandHome(strings.TrimSpace(input.CustomBrowserPath))
-	if preferredID != "" && !validWebAppBrowserID(preferredID) {
-		return WebAppBrowserSettings{}, fmt.Errorf("unsupported browser %q", preferredID)
-	}
-	if customPath != "" {
-		info, err := os.Stat(customPath)
-		if err != nil {
-			return WebAppBrowserSettings{}, fmt.Errorf("read browser executable: %w", err)
-		}
-		if info.IsDir() {
-			return WebAppBrowserSettings{}, errors.New("browser executable path points to a directory")
-		}
-		if goruntime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
-			return WebAppBrowserSettings{}, errors.New("browser executable is not executable")
-		}
-		if preferredID == "" {
-			return WebAppBrowserSettings{}, errors.New("select the browser type for the custom executable")
-		}
-	}
-	if _, err := a.settings.Update(func(settings *appsettings.Data) error {
-		settings.PreferredBrowserID = preferredID
-		settings.CustomBrowserPath = customPath
-		return nil
-	}); err != nil {
-		return WebAppBrowserSettings{}, err
-	}
-	return WebAppBrowserSettings{PreferredBrowserID: preferredID, CustomBrowserPath: customPath}, nil
-}
-
-func validWebAppBrowserID(id string) bool {
-	switch webappbrowser.ID(id) {
-	case webappbrowser.Firefox, webappbrowser.Chrome, webappbrowser.Chromium, webappbrowser.Edge:
-		return true
-	default:
-		return false
-	}
+	return a.webAppBrowsers.Save(input)
 }
 
 func (a *App) ChooseSSHKeyDirectory() (string, error) {
@@ -1648,10 +1606,6 @@ func userHomeDir() string {
 
 func (a *App) keysDir() string {
 	return a.sshKeys.ManagedDir()
-}
-
-func (a *App) settingsPath() string {
-	return a.settings.Path()
 }
 
 func sanitizeKeyName(name string) string {

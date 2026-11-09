@@ -16,7 +16,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/signoredellarete/bashes/internal/apperrors"
 	"github.com/signoredellarete/bashes/internal/desktop"
 	"github.com/signoredellarete/bashes/internal/domain"
 	"github.com/signoredellarete/bashes/internal/remotessh"
@@ -497,44 +496,7 @@ func (a *App) webAppByID(id string) (domain.WebApp, error) {
 }
 
 func (a *App) resolveWebAppBrowser() (webappbrowser.Browser, error) {
-	settings, err := a.GetWebAppBrowserSettings()
-	if err != nil {
-		return webappbrowser.Browser{}, err
-	}
-	if settings.CustomBrowserPath != "" {
-		return browserFromSettings(settings)
-	}
-	browsers := a.ListWebAppBrowsers()
-	if settings.PreferredBrowserID != "" {
-		for _, browser := range browsers {
-			if string(browser.ID) == settings.PreferredBrowserID {
-				return browser, nil
-			}
-		}
-		return webappbrowser.Browser{}, apperrors.New("webapp_browser_missing", "The selected browser is not installed", map[string]string{"browser": settings.PreferredBrowserID})
-	}
-	if len(browsers) == 0 {
-		return webappbrowser.Browser{}, apperrors.New("webapp_browser_missing", "No supported browser was found", nil)
-	}
-	return browsers[0], nil
-}
-
-func browserFromSettings(settings WebAppBrowserSettings) (webappbrowser.Browser, error) {
-	var browser webappbrowser.Browser
-	switch webappbrowser.ID(settings.PreferredBrowserID) {
-	case webappbrowser.Firefox:
-		browser = webappbrowser.Browser{ID: webappbrowser.Firefox, Name: "Firefox", Family: webappbrowser.FamilyFirefox}
-	case webappbrowser.Chrome:
-		browser = webappbrowser.Browser{ID: webappbrowser.Chrome, Name: "Google Chrome", Family: webappbrowser.FamilyChromium}
-	case webappbrowser.Chromium:
-		browser = webappbrowser.Browser{ID: webappbrowser.Chromium, Name: "Chromium", Family: webappbrowser.FamilyChromium}
-	case webappbrowser.Edge:
-		browser = webappbrowser.Browser{ID: webappbrowser.Edge, Name: "Microsoft Edge", Family: webappbrowser.FamilyChromium}
-	default:
-		return webappbrowser.Browser{}, errors.New("select the browser type for the custom executable")
-	}
-	browser.Path = settings.CustomBrowserPath
-	return browser, nil
+	return a.webAppBrowsers.Resolve()
 }
 
 func (a *App) webAppProfileDir(groupKey string, private bool) (string, bool, error) {
