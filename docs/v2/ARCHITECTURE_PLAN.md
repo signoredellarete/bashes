@@ -40,6 +40,17 @@ The guiding product rule is:
 
 Status on 2026-11-09 for branch `feature/v2-modular-architecture`:
 
+| Phase | Status | Current result |
+| --- | --- | --- |
+| 0 - Baseline and contracts | Complete | Desktop adapters, error/event contracts and architecture guards are in place. |
+| 1 - Backend application boundaries | In progress | Settings, imports and local SSH key management are independent of Wails; some facade orchestration remains. |
+| 2 - Runtime manager | In progress | Sessions, tunnels, transfers and Web App runtime ownership have dedicated managers and registries. |
+| 3 - Frontend modularization | In progress | Desktop APIs and shared application/resource state are extracted; feature UI still remains in `main.js`. |
+| 4 - Transfer reliability | Not started | Planned after the application boundaries are stable. |
+| 5 - Plugin foundation | In progress | Manifest, discovery, protocol and supervisor exist without user-facing enablement. |
+| 6 - First optional plugin | Not started | Depends on the completed plugin permission and installation model. |
+| 7 - Framework and release decision | Not started | Deferred until v1 feature parity is preserved by the modular core. |
+
 - baseline Go, race, vet, frontend test and production frontend build checks pass;
 - the frontend desktop binding and Wails runtime APIs are isolated behind tested
   adapters;
@@ -50,6 +61,9 @@ Status on 2026-11-09 for branch `feature/v2-modular-architecture`:
 - application settings use a versioned, locked, atomic repository while keeping
   the Bashes 1.x JSON fields compatible;
 - hosts file and SSH config import logic lives in an independent tested module;
+- local SSH key inventory, settings, generation, import, reading and deletion
+  live in an independent tested service; remote key installation remains facade
+  orchestration because it combines resource lookup and an SSH connection;
 - terminal session lifecycle, SSH tunnel lifecycle and file transfer job state
   are owned by dedicated managers with idempotent cancellation and race-tested
   concurrent cleanup;
@@ -66,10 +80,11 @@ Status on 2026-11-09 for branch `feature/v2-modular-architecture`:
 - plugin package details are documented in
   [PLUGIN_MANIFEST.md](PLUGIN_MANIFEST.md).
 
-The next implementation milestone is reducing the remaining Wails facade and
-continuing feature-by-feature frontend extraction. Plugin process supervision is
-available to the application shutdown path, but user-facing plugin installation
-and enablement remain blocked on explicit permission and trust policy.
+The next implementation milestone is reducing the remaining Wails facade around
+browser settings, native dialogs and connection orchestration, then continuing
+feature-by-feature frontend extraction. Plugin process supervision is available
+to the application shutdown path, but user-facing plugin installation and
+enablement remain blocked on explicit permission and trust policy.
 
 ## Technology decisions
 
