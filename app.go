@@ -36,6 +36,7 @@ import (
 	"github.com/signoredellarete/bashes/internal/sshtunnel"
 	"github.com/signoredellarete/bashes/internal/store"
 	"github.com/signoredellarete/bashes/internal/termsession"
+	"github.com/signoredellarete/bashes/internal/transfer"
 	"github.com/signoredellarete/bashes/internal/webappbrowser"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"golang.org/x/crypto/ssh"
@@ -62,7 +63,7 @@ type App struct {
 	sessions         *termsession.Manager
 	tunnels          *sshtunnel.Manager
 	transfers        map[string]*fileTransferSession
-	transferJobs     map[string]*fileTransferJob
+	transferJobs     *transfer.Manager
 	webAppRuntimes   map[string]*webAppRuntime
 	webAppRuntimeIDs map[string]string
 	openFile         func(string) error
@@ -86,7 +87,7 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 		sessions:         termsession.NewManager(),
 		tunnels:          sshtunnel.NewManager(),
 		transfers:        make(map[string]*fileTransferSession),
-		transferJobs:     make(map[string]*fileTransferJob),
+		transferJobs:     transfer.NewManager(),
 		webAppRuntimes:   make(map[string]*webAppRuntime),
 		webAppRuntimeIDs: make(map[string]string),
 		openFile:         openFileWithDefaultApplication,

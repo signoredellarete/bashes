@@ -2,12 +2,10 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestParseTransferID(t *testing.T) {
@@ -165,65 +163,5 @@ func TestAtomicFileTransferRejectsConflictWithoutChangingDestination(t *testing.
 	}
 	if string(data) != "target" {
 		t.Fatalf("target content = %q, want unchanged target", data)
-	}
-}
-
-func TestReserveFileTransferJobIsAtomicPerResource(t *testing.T) {
-	app := NewApp(filepath.Join(t.TempDir(), "hosts.json"))
-	first := &fileTransferJob{
-		info: FileTransferJobInfo{JobID: "one", ResourceID: "host-1", Status: "running"},
-		done: make(chan struct{}),
-	}
-	second := &fileTransferJob{
-		info: FileTransferJobInfo{JobID: "two", ResourceID: "host-1", Status: "queued"},
-		done: make(chan struct{}),
-	}
-	if err := app.reserveFileTransferJob(first); err != nil {
-		t.Fatalf("reserve first job error = %v", err)
-	}
-	if err := app.reserveFileTransferJob(second); err == nil {
-		t.Fatal("reserve second job error = nil, want active resource conflict")
-	}
-}
-
-func TestDismissFileTransferJobOnlyRemovesFinishedJobs(t *testing.T) {
-	app := NewApp(filepath.Join(t.TempDir(), "hosts.json"))
-	job := &fileTransferJob{
-		info: FileTransferJobInfo{JobID: "job-1", ResourceID: "host-1", Status: "running"},
-		done: make(chan struct{}),
-	}
-	app.transferJobs[job.info.JobID] = job
-	if err := app.DismissFileTransferJob(FileTransferDismissJobInput{JobID: job.info.JobID}); err == nil {
-		t.Fatal("DismissFileTransferJob(active) error = nil")
-	}
-	job.update(func(info *FileTransferJobInfo) {
-		info.Status = "completed"
-		info.FinishedAt = time.Now().Format(time.RFC3339)
-	})
-	if err := app.DismissFileTransferJob(FileTransferDismissJobInput{JobID: job.info.JobID}); err != nil {
-		t.Fatalf("DismissFileTransferJob(completed) error = %v", err)
-	}
-	if _, exists := app.transferJobs[job.info.JobID]; exists {
-		t.Fatal("completed job still retained after dismiss")
-	}
-}
-
-func TestPruneFinishedFileTransferJobsBoundsRetention(t *testing.T) {
-	app := NewApp(filepath.Join(t.TempDir(), "hosts.json"))
-	for index := 0; index < 5; index++ {
-		id := fmt.Sprintf("job-%d", index)
-		app.transferJobs[id] = &fileTransferJob{
-			info: FileTransferJobInfo{
-				JobID:      id,
-				ResourceID: "host-1",
-				Status:     "completed",
-				FinishedAt: time.Unix(int64(index), 0).Format(time.RFC3339),
-			},
-			done: make(chan struct{}),
-		}
-	}
-	app.pruneFinishedFileTransferJobs("host-1", 2)
-	if len(app.transferJobs) != 2 {
-		t.Fatalf("retained jobs = %d, want 2", len(app.transferJobs))
 	}
 }
