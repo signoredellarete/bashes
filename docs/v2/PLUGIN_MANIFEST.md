@@ -1,7 +1,7 @@
 # Plugin Manifest
 
-This document records the initial Bashes 2 plugin package contract. Process
-execution and third-party installation are not enabled yet.
+This document records the initial Bashes 2 plugin package contract. Third-party
+installation and user-facing plugin enablement are not enabled yet.
 
 Each plugin is stored in its own directory and contains a `manifest.json` plus
 one or more platform executables:
@@ -45,13 +45,21 @@ Initial permissions are:
 - `process.launch`
 - `runtime-data.write`
 
-Declaring a permission does not grant it. A later plugin supervisor milestone
-will enforce enablement and user approval before exposing capabilities.
+Declaring a permission does not grant it. A later plugin enablement milestone
+will enforce user approval before exposing capabilities.
 
 Discovery reads plugin directories without executing them. Invalid manifests,
 unsupported platforms and incompatible API versions remain visible as
 unavailable candidates with an explanatory error. Before a process can become
 ready it must answer a versioned `hello` request with the same plugin ID,
 version, API version and a subset of the capabilities declared here.
+
+The native supervisor now has a repository-tested process boundary. It starts
+only previously validated candidates, passes a reduced environment without SSH
+agent or arbitrary application variables, limits JSON frames and retained
+diagnostics, requires a bounded handshake, serializes requests and escalates a
+bounded shutdown to process termination. This contract is not an operating
+system sandbox: installing and enabling a plugin remains an explicit trust
+decision that will be implemented before the supervisor is exposed in Bashes.
 
 [Back to the Bashes 2 architecture plan](ARCHITECTURE_PLAN.md)
