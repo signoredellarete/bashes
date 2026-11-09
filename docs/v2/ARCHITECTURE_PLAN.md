@@ -64,6 +64,9 @@ Status on 2026-11-09 for branch `feature/v2-modular-architecture`:
 - local SSH key inventory, settings, generation, import, reading and deletion
   live in an independent tested service; remote key installation remains facade
   orchestration because it combines resource lookup and an SSH connection;
+- SSH authentication method construction and OpenSSH/PEM/PPK parsing live in an
+  independent builder with injectable home, filesystem, environment and agent
+  socket dependencies;
 - Web App browser detection, preference validation, persistence and runtime
   resolution live in an independent tested native service;
 - Wails events, dialogs and external URL operations are isolated behind an
@@ -300,23 +303,25 @@ Bashes should adopt the engineering patterns, not the denser interface:
 
 ## Delivery phases
 
+Checklist legend: `[x]` complete, `[-]` in progress, `[ ]` pending.
+
 ### Phase 0: Baseline and contracts
 
-- Record the supported platform/release matrix and current behavioral baseline.
-- Run existing Go, race, vet, frontend and production build checks.
-- Extract the frontend desktop API from `main.js` with no behavior change.
-- Centralize structured backend errors and desktop event names.
-- Add architecture checks that prevent core packages from importing Wails.
+- [x] Record the supported platform/release matrix and current behavioral baseline.
+- [x] Run existing Go, race, vet, frontend and production build checks.
+- [x] Extract the frontend desktop API from `main.js` with no behavior change.
+- [x] Centralize structured backend errors and desktop event names.
+- [x] Add architecture checks that prevent core packages from importing Wails.
 
 Exit condition: existing tests pass and `main.js` no longer owns the desktop
 binding implementation.
 
 ### Phase 1: Backend application boundaries
 
-- Reduce `App` to a Wails facade composed from services.
-- Extract settings, imports and SSH key workflows with existing tests moved or
+- [-] Reduce `App` to a Wails facade composed from services.
+- [-] Extract settings, imports and SSH key workflows with existing tests moved or
   expanded around their public contracts.
-- Introduce dependency injection for filesystem, dialogs, browser and clock
+- [-] Introduce dependency injection for filesystem, dialogs, browser and clock
   operations where platform behavior matters.
 
 Exit condition: resource management, imports, keys and settings are testable
@@ -324,59 +329,59 @@ without constructing the Wails facade.
 
 ### Phase 2: Runtime manager
 
-- Introduce common lifecycle state and structured runtime events.
-- Move SSH/local sessions, tunnels, transfers and Web App runtimes behind the
+- [-] Introduce common lifecycle state and structured runtime events.
+- [x] Move SSH/local sessions, tunnels, transfers and Web App runtimes behind the
   manager incrementally.
-- Add deterministic tests for concurrent start/stop, connection loss, deletion,
+- [-] Add deterministic tests for concurrent start/stop, connection loss, deletion,
   database replacement and shutdown.
 
 Exit condition: no native resource relies on frontend cleanup for correctness.
 
 ### Phase 3: Frontend modularization
 
-- Introduce state stores and the terminal registry.
-- Move one complete feature at a time from `main.js` to Svelte components.
-- Preserve UI dimensions, colors, shortcuts, focus and modal behavior with
+- [x] Introduce state stores and the terminal registry.
+- [-] Move one complete feature at a time from `main.js` to Svelte components.
+- [-] Preserve UI dimensions, colors, shortcuts, focus and modal behavior with
   focused tests.
-- Split CSS by tokens, layout and feature while keeping one generated bundle.
+- [ ] Split CSS by tokens, layout and feature while keeping one generated bundle.
 
 Exit condition: `main.js` is bootstrap code rather than the application.
 
 ### Phase 4: Transfer reliability
 
-- Add structured SFTP errors, retry and ETA.
-- Define explicit destination conflict policies.
-- Add bounded recursive traversal and explicit symlink/special-file behavior.
-- Add rollback/preservation rules for replacement.
-- Design remote editing with revision/conflict checks before implementation.
+- [ ] Add structured SFTP errors, retry and ETA.
+- [ ] Define explicit destination conflict policies.
+- [ ] Add bounded recursive traversal and explicit symlink/special-file behavior.
+- [ ] Add rollback/preservation rules for replacement.
+- [ ] Design remote editing with revision/conflict checks before implementation.
 
 Exit condition: interrupted or conflicting transfers have deterministic,
 tested outcomes and useful diagnostics.
 
 ### Phase 5: Plugin foundation
 
-- Implement manifest schema and validation.
-- Implement discovery, enable/disable and compatibility reporting.
-- Implement process handshake, health, cancellation and shutdown.
-- Ship a repository-local fixture plugin and failure-isolation tests.
-- Add a minimal plugin settings screen only after backend behavior is stable.
+- [x] Implement manifest schema and validation.
+- [-] Implement discovery, enable/disable and compatibility reporting.
+- [x] Implement process handshake, health, cancellation and shutdown.
+- [x] Ship a repository-local fixture plugin and failure-isolation tests.
+- [ ] Add a minimal plugin settings screen only after backend behavior is stable.
 
 Exit condition: a crashing or incompatible fixture is contained and explained
 without affecting SSH sessions or persisted data.
 
 ### Phase 6: First optional plugin
 
-- Move the Windows X server experiment into its own plugin repository/package.
-- Keep binaries out of the core Bashes archive.
-- Verify installation, updates, process cleanup and diagnostics on Windows x64
+- [ ] Move the Windows X server experiment into its own plugin repository/package.
+- [ ] Keep binaries out of the core Bashes archive.
+- [ ] Verify installation, updates, process cleanup and diagnostics on Windows x64
   and ARM64.
 
 ### Phase 7: Framework and release decision
 
-- Evaluate Wails v3 against the supported Linux distribution matrix.
-- Benchmark startup, idle memory, terminal throughput and package size.
-- Produce signed/installable package plans independently from plugin packages.
-- Publish a v2 prerelease only after v1 feature parity and migration tests.
+- [ ] Evaluate Wails v3 against the supported Linux distribution matrix.
+- [ ] Benchmark startup, idle memory, terminal throughput and package size.
+- [ ] Produce signed/installable package plans independently from plugin packages.
+- [ ] Publish a v2 prerelease only after v1 feature parity and migration tests.
 
 ## Known collision points
 

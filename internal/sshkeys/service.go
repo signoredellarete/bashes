@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kayrus/putty"
 	appsettings "github.com/signoredellarete/bashes/internal/settings"
+	"github.com/signoredellarete/bashes/internal/sshauth"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -479,34 +479,7 @@ func validatePair(privateData, publicData []byte) error {
 }
 
 func publicKeyFromPrivateData(privateData []byte) (ssh.PublicKey, bool, error) {
-	if isPuttyPrivateKey(privateData) {
-		key, err := putty.New(privateData)
-		if err != nil {
-			return nil, false, fmt.Errorf("parse PuTTY PPK private key: %w", err)
-		}
-		rawPublicKey, err := key.ParseRawPublicKey()
-		if err != nil {
-			return nil, false, fmt.Errorf("parse PuTTY PPK public key: %w", err)
-		}
-		publicKey, err := ssh.NewPublicKey(rawPublicKey)
-		if err != nil {
-			return nil, false, fmt.Errorf("create public key from PuTTY PPK: %w", err)
-		}
-		return publicKey, true, nil
-	}
-
-	signer, err := ssh.ParsePrivateKey(privateData)
-	if err == nil {
-		return signer.PublicKey(), true, nil
-	}
-	var passphraseMissing *ssh.PassphraseMissingError
-	if errors.As(err, &passphraseMissing) {
-		if passphraseMissing.PublicKey != nil {
-			return passphraseMissing.PublicKey, true, nil
-		}
-		return nil, false, nil
-	}
-	return nil, false, fmt.Errorf("parse private key: %w", err)
+	return sshauth.PublicKeyFromPrivateData(privateData)
 }
 
 func dedupe(keys []Key) []Key {
@@ -560,11 +533,6 @@ func appendTrailingNewline(data []byte) []byte {
 		return nil
 	}
 	return append(data, '\n')
-}
-
-func isPuttyPrivateKey(key []byte) bool {
-	normalized := bytes.TrimSpace(bytes.TrimPrefix(key, []byte{0xef, 0xbb, 0xbf}))
-	return bytes.HasPrefix(normalized, []byte("PuTTY-User-Key-File-"))
 }
 
 func fileExists(path string) bool {

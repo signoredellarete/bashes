@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -17,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kayrus/putty"
 	"github.com/signoredellarete/bashes/internal/apperrors"
 	"github.com/signoredellarete/bashes/internal/application"
 	"github.com/signoredellarete/bashes/internal/credentials"
@@ -29,6 +27,7 @@ import (
 	"github.com/signoredellarete/bashes/internal/plugin"
 	"github.com/signoredellarete/bashes/internal/remotessh"
 	appsettings "github.com/signoredellarete/bashes/internal/settings"
+	"github.com/signoredellarete/bashes/internal/sshauth"
 	"github.com/signoredellarete/bashes/internal/sshkeys"
 	"github.com/signoredellarete/bashes/internal/sshtunnel"
 	"github.com/signoredellarete/bashes/internal/store"
@@ -37,7 +36,6 @@ import (
 	"github.com/signoredellarete/bashes/internal/webappbrowser"
 	"github.com/signoredellarete/bashes/internal/webappruntime"
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/agent"
 )
 
 var version = "dev"
@@ -56,6 +54,7 @@ type App struct {
 	passwords        credentials.Store
 	dataPath         string
 	sshKeys          *sshkeys.Service
+	sshAuth          *sshauth.Builder
 	webAppBrowsers   *webappbrowser.PreferencesService
 	sessions         *termsession.Manager
 	tunnels          *sshtunnel.Manager
@@ -89,6 +88,7 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 		dataPath:         dataPath,
 		service:          application.NewService(store.NewRepository(dataPath)),
 		sshKeys:          sshKeyService,
+		sshAuth:          sshauth.NewBuilder(),
 		webAppBrowsers:   webAppBrowserService,
 		passwords:        passwords,
 		sessions:         termsession.NewManager(),
@@ -1340,7 +1340,7 @@ func tunnelForwardTarget(input SSHTunnelInput, forwardAddress string) string {
 }
 
 func (a *App) dialResource(resource domain.Endpoint, input SSHSessionInput, timeout time.Duration) (*ssh.Client, error) {
-	authMethods, agentConn, err := authMethods(input)
+	authMethods, agentConn, err := a.sshAuth.Methods(sshAuthInput(input))
 	if err != nil {
 		return nil, err
 	}
@@ -1385,140 +1385,24 @@ func sshHost(resource domain.Endpoint) string {
 }
 
 func authMethods(input SSHSessionInput) ([]ssh.AuthMethod, net.Conn, error) {
-	var methods []ssh.AuthMethod
-
-	keyPath := strings.TrimSpace(input.PrivateKeyPath)
-	if keyPath == "" && strings.TrimSpace(input.KeyName) != "" {
-		return nil, nil, fmt.Errorf("ssh key %q was not resolved to a private key path", sanitizeKeyName(input.KeyName))
-	}
-
-	if keyPath != "" {
-		method, err := privateKeyAuth(keyPath, input.PrivateKeyPassphrase)
-		if err != nil {
-			return nil, nil, err
-		}
-		methods = append(methods, method)
-	} else {
-		methods = append(methods, defaultPrivateKeyAuthMethods(input.PrivateKeyPassphrase)...)
-	}
-
-	agentMethod, agentConn := sshAgentAuthMethod()
-	if agentMethod != nil {
-		methods = append(methods, agentMethod)
-	}
-
-	if strings.TrimSpace(input.Password) == "" && len(methods) == 0 {
-		return nil, nil, errors.New("no SSH authentication method available: enter a password or configure SSH agent/private keys")
-	}
-
-	return methods, agentConn, nil
+	return sshauth.NewBuilder().Methods(sshAuthInput(input))
 }
 
-func privateKeyAuth(path string, passphrase string) (ssh.AuthMethod, error) {
-	key, err := os.ReadFile(expandHome(path))
-	if err != nil {
-		return nil, fmt.Errorf("read private key: %w", err)
+func sshAuthInput(input SSHSessionInput) sshauth.Input {
+	return sshauth.Input{
+		Password:       input.Password,
+		PrivateKeyPath: input.PrivateKeyPath,
+		KeyName:        input.KeyName,
+		Passphrase:     input.PrivateKeyPassphrase,
 	}
-	signer, err := parsePrivateKey(key, passphrase)
-	if err != nil {
-		return nil, err
-	}
-	return ssh.PublicKeys(signer), nil
-}
-
-func defaultPrivateKeyAuthMethods(passphrase string) []ssh.AuthMethod {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-
-	var signers []ssh.Signer
-	for _, name := range []string{"id_ed25519", "id_ecdsa", "id_rsa"} {
-		key, err := os.ReadFile(filepath.Join(home, ".ssh", name))
-		if err != nil {
-			continue
-		}
-		signer, err := parsePrivateKey(key, passphrase)
-		if err == nil {
-			signers = append(signers, signer)
-		}
-	}
-	if len(signers) == 0 {
-		return nil
-	}
-	return []ssh.AuthMethod{ssh.PublicKeys(signers...)}
 }
 
 func parsePrivateKey(key []byte, passphrase string) (ssh.Signer, error) {
-	if isPuttyPrivateKey(key) {
-		return parsePuttyPrivateKey(key, passphrase)
-	}
-	if isSSHPublicKey(key) {
-		return nil, errors.New("parse private key: the selected file is an SSH public key; choose the matching private key file without the .pub extension")
-	}
-
-	if strings.TrimSpace(passphrase) != "" {
-		signer, err := ssh.ParsePrivateKeyWithPassphrase(key, []byte(passphrase))
-		if err != nil {
-			return nil, fmt.Errorf("parse encrypted private key: %w. Choose an OpenSSH/PEM private key or PuTTY PPK private key, not the .pub file", err)
-		}
-		return signer, nil
-	}
-
-	signer, err := ssh.ParsePrivateKey(key)
-	if err != nil {
-		return nil, fmt.Errorf("parse private key: %w. Choose an OpenSSH/PEM private key or PuTTY PPK private key, not the .pub file", err)
-	}
-	return signer, nil
+	return sshauth.ParsePrivateKey(key, passphrase)
 }
 
 func isPuttyPrivateKey(key []byte) bool {
-	normalized := bytes.TrimSpace(bytes.TrimPrefix(key, []byte{0xef, 0xbb, 0xbf}))
-	return bytes.HasPrefix(normalized, []byte("PuTTY-User-Key-File-"))
-}
-
-func isSSHPublicKey(key []byte) bool {
-	normalized := strings.TrimSpace(string(bytes.TrimPrefix(key, []byte{0xef, 0xbb, 0xbf})))
-	return strings.HasPrefix(normalized, "ssh-rsa ") ||
-		strings.HasPrefix(normalized, "ssh-ed25519 ") ||
-		strings.HasPrefix(normalized, "ecdsa-sha2-") ||
-		strings.HasPrefix(normalized, "sk-ssh-ed25519@openssh.com ") ||
-		strings.HasPrefix(normalized, "sk-ecdsa-sha2-nistp256@openssh.com ")
-}
-
-func parsePuttyPrivateKey(key []byte, passphrase string) (ssh.Signer, error) {
-	puttyKey, err := putty.New(key)
-	if err != nil {
-		return nil, fmt.Errorf("parse PuTTY PPK private key: %w", err)
-	}
-
-	rawKey, err := puttyKey.ParseRawPrivateKey([]byte(passphrase))
-	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "expecting password") {
-			return nil, errors.New("parse PuTTY PPK private key: key is encrypted; enter the key passphrase")
-		}
-		return nil, fmt.Errorf("parse PuTTY PPK private key: %w", err)
-	}
-
-	signer, err := ssh.NewSignerFromKey(rawKey)
-	if err != nil {
-		return nil, fmt.Errorf("create signer from PuTTY PPK private key: %w", err)
-	}
-	return signer, nil
-}
-
-func sshAgentAuthMethod() (ssh.AuthMethod, net.Conn) {
-	socket := strings.TrimSpace(os.Getenv("SSH_AUTH_SOCK"))
-	if socket == "" {
-		return nil, nil
-	}
-
-	conn, err := net.Dial("unix", socket)
-	if err != nil {
-		return nil, nil
-	}
-
-	return ssh.PublicKeysCallback(agent.NewClient(conn).Signers), conn
+	return sshauth.IsPuttyPrivateKey(key)
 }
 
 func hostKeyPolicy(resource domain.Endpoint, input SSHSessionInput, acceptedFingerprint *string) remotessh.HostKeyPolicy {
