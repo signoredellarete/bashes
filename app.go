@@ -38,6 +38,7 @@ import (
 	"github.com/signoredellarete/bashes/internal/termsession"
 	"github.com/signoredellarete/bashes/internal/transfer"
 	"github.com/signoredellarete/bashes/internal/webappbrowser"
+	"github.com/signoredellarete/bashes/internal/webappruntime"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
@@ -58,14 +59,12 @@ type App struct {
 	service          *application.Service
 	passwords        credentials.Store
 	dataPath         string
-	mu               sync.Mutex
 	settings         *appsettings.Repository
 	sessions         *termsession.Manager
 	tunnels          *sshtunnel.Manager
 	transfers        *transfer.SessionManager[*fileTransferSession]
 	transferJobs     *transfer.Manager
-	webAppRuntimes   map[string]*webAppRuntime
-	webAppRuntimeIDs map[string]string
+	webAppRuntimes   *webappruntime.Registry[*webAppRuntime]
 	openFile         func(string) error
 	openFileCacheDir string
 }
@@ -88,8 +87,7 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 		tunnels:          sshtunnel.NewManager(),
 		transfers:        transfer.NewSessionManager[*fileTransferSession](),
 		transferJobs:     transfer.NewManager(),
-		webAppRuntimes:   make(map[string]*webAppRuntime),
-		webAppRuntimeIDs: make(map[string]string),
+		webAppRuntimes:   webappruntime.NewRegistry[*webAppRuntime](),
 		openFile:         openFileWithDefaultApplication,
 		openFileCacheDir: defaultOpenFileCacheDir(dataPath),
 	}

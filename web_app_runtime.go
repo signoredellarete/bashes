@@ -21,6 +21,7 @@ import (
 	"github.com/signoredellarete/bashes/internal/domain"
 	"github.com/signoredellarete/bashes/internal/remotessh"
 	"github.com/signoredellarete/bashes/internal/webappbrowser"
+	"github.com/signoredellarete/bashes/internal/webappruntime"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -68,7 +69,6 @@ type webAppRuntime struct {
 	reconnectMu  sync.Mutex
 	tunnelActive atomic.Bool
 	tunnelPaused atomic.Bool
-	apps         map[string]struct{}
 	info         WebAppRuntimeInfo
 	stopOnce     sync.Once
 }
@@ -84,25 +84,21 @@ func (a *App) LaunchWebApp(input WebAppLaunchInput) (WebAppRuntimeInfo, error) {
 	}
 	groupKey := webAppGroupKey(app, browser)
 
-	a.mu.Lock()
-	for _, runtime := range a.webAppRuntimes {
-		if runtime.groupKey == groupKey {
-			runtime.apps[app.ID] = struct{}{}
-			a.webAppRuntimeIDs[app.ID] = runtime.id
-			info := webAppRuntimeInfo(runtime, app.ID)
-			a.mu.Unlock()
-			if info.Tunnel && !info.TunnelActive {
-				if info, err = a.StartWebAppTunnel(app.ID); err != nil {
-					return WebAppRuntimeInfo{}, err
-				}
-			}
-			if err := a.openWebAppTab(runtime, app.URL); err != nil {
+	if runtime, found := a.webAppRuntimes.FindByGroup(groupKey); found {
+		if err := a.webAppRuntimes.Attach(runtime.id, app.ID); err != nil {
+			return WebAppRuntimeInfo{}, err
+		}
+		info := webAppRuntimeInfo(runtime, app.ID)
+		if info.Tunnel && !info.TunnelActive {
+			if info, err = a.StartWebAppTunnel(app.ID); err != nil {
 				return WebAppRuntimeInfo{}, err
 			}
-			return info, nil
 		}
+		if err := a.openWebAppTab(runtime, app.URL); err != nil {
+			return WebAppRuntimeInfo{}, err
+		}
+		return info, nil
 	}
-	a.mu.Unlock()
 
 	runtime, err := a.startWebAppRuntime(app, browser, input, groupKey)
 	if err != nil {
@@ -112,14 +108,10 @@ func (a *App) LaunchWebApp(input WebAppLaunchInput) (WebAppRuntimeInfo, error) {
 }
 
 func (a *App) ListWebAppRuntimes() []WebAppRuntimeInfo {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	result := make([]WebAppRuntimeInfo, 0, len(a.webAppRuntimeIDs))
-	for appID, runtimeID := range a.webAppRuntimeIDs {
-		if runtime := a.webAppRuntimes[runtimeID]; runtime != nil {
-			result = append(result, webAppRuntimeInfo(runtime, appID))
-		}
+	bindings := a.webAppRuntimes.Bindings()
+	result := make([]WebAppRuntimeInfo, 0, len(bindings))
+	for _, binding := range bindings {
+		result = append(result, webAppRuntimeInfo(binding.Value, binding.AppID))
 	}
 	return result
 }
@@ -188,10 +180,8 @@ func (a *App) StartWebAppTunnel(webAppID string) (WebAppRuntimeInfo, error) {
 }
 
 func (a *App) StopWebAppRuntime(runtimeID string) error {
-	a.mu.Lock()
-	runtime := a.webAppRuntimes[strings.TrimSpace(runtimeID)]
-	a.mu.Unlock()
-	if runtime == nil {
+	runtime, found := a.webAppRuntimes.Get(runtimeID)
+	if !found {
 		return nil
 	}
 	a.closeWebAppRuntime(runtime, true, "Web App browser closed")
@@ -282,7 +272,7 @@ func (a *App) startWebAppRuntime(app domain.WebApp, browser webappbrowser.Browse
 	runtime := &webAppRuntime{
 		id: runtimeID, groupKey: groupKey, browser: browser, profileDir: profileDir,
 		private: privateProfile, policy: policy, process: command, client: client,
-		listener: listener, ctx: ctx, cancel: cancel, apps: map[string]struct{}{app.ID: {}},
+		listener: listener, ctx: ctx, cancel: cancel,
 		gateway: gateway, sshInput: sessionInput,
 		info: WebAppRuntimeInfo{
 			RuntimeID: runtimeID, WebAppID: app.ID, BrowserID: string(browser.ID), Browser: browser.Name,
@@ -290,10 +280,19 @@ func (a *App) startWebAppRuntime(app domain.WebApp, browser webappbrowser.Browse
 		},
 	}
 	runtime.tunnelActive.Store(listener != nil)
-	a.mu.Lock()
-	a.webAppRuntimes[runtimeID] = runtime
-	a.webAppRuntimeIDs[app.ID] = runtimeID
-	a.mu.Unlock()
+	if err := a.webAppRuntimes.Register(webappruntime.Options[*webAppRuntime]{
+		RuntimeID: runtimeID, GroupKey: groupKey, AppID: app.ID, Value: runtime,
+	}); err != nil {
+		cancel()
+		closeWebAppNetwork(listener, client)
+		if command.Process != nil {
+			_ = command.Process.Kill()
+		}
+		if privateProfile {
+			_ = os.RemoveAll(profileDir)
+		}
+		return nil, err
+	}
 
 	if listener != nil {
 		go func() {
@@ -327,24 +326,15 @@ func webAppRuntimeInfo(runtime *webAppRuntime, webAppID string) WebAppRuntimeInf
 }
 
 func (a *App) webAppRuntimeByAppID(webAppID string) (*webAppRuntime, error) {
-	webAppID = strings.TrimSpace(webAppID)
-	a.mu.Lock()
-	runtime := a.webAppRuntimes[a.webAppRuntimeIDs[webAppID]]
-	a.mu.Unlock()
-	if runtime == nil {
+	runtime, found := a.webAppRuntimes.ForApp(webAppID)
+	if !found {
 		return nil, errors.New("Web App runtime is not active")
 	}
 	return runtime, nil
 }
 
 func (a *App) emitWebAppRuntimeStatus(runtime *webAppRuntime, message string, isError bool) {
-	a.mu.Lock()
-	appIDs := make([]string, 0, len(runtime.apps))
-	for appID := range runtime.apps {
-		appIDs = append(appIDs, appID)
-	}
-	a.mu.Unlock()
-	for _, appID := range appIDs {
+	for _, appID := range a.webAppRuntimes.AppIDs(runtime.id) {
 		info := webAppRuntimeInfo(runtime, appID)
 		a.emitData(desktop.EventWebAppStatus, map[string]interface{}{
 			"runtimeId": info.RuntimeID, "webAppId": info.WebAppID,
@@ -374,16 +364,7 @@ func (a *App) openWebAppTab(runtime *webAppRuntime, url string) error {
 
 func (a *App) closeWebAppRuntime(runtime *webAppRuntime, killBrowser bool, message string) {
 	runtime.stopOnce.Do(func() {
-		a.mu.Lock()
-		if a.webAppRuntimes[runtime.id] == runtime {
-			delete(a.webAppRuntimes, runtime.id)
-		}
-		for appID := range runtime.apps {
-			if a.webAppRuntimeIDs[appID] == runtime.id {
-				delete(a.webAppRuntimeIDs, appID)
-			}
-		}
-		a.mu.Unlock()
+		a.webAppRuntimes.Remove(runtime.id, runtime)
 
 		runtime.cancel()
 		runtime.closeNetwork()
@@ -490,29 +471,14 @@ func (a *App) reconnectWebAppTunnel(ctx context.Context, runtime *webAppRuntime,
 }
 
 func (a *App) stopWebAppForID(appID string) {
-	appID = strings.TrimSpace(appID)
-	a.mu.Lock()
-	runtimeID := a.webAppRuntimeIDs[appID]
-	runtime := a.webAppRuntimes[runtimeID]
-	if runtime != nil {
-		delete(runtime.apps, appID)
-		delete(a.webAppRuntimeIDs, appID)
-	}
-	remaining := runtime != nil && len(runtime.apps) > 0
-	a.mu.Unlock()
-	if runtime != nil && !remaining {
+	runtime, remaining, found := a.webAppRuntimes.DetachApp(appID)
+	if found && remaining == 0 {
 		a.closeWebAppRuntime(runtime, true, "Web App configuration closed")
 	}
 }
 
 func (a *App) stopAllWebAppRuntimes() {
-	a.mu.Lock()
-	runtimes := make([]*webAppRuntime, 0, len(a.webAppRuntimes))
-	for _, runtime := range a.webAppRuntimes {
-		runtimes = append(runtimes, runtime)
-	}
-	a.mu.Unlock()
-	for _, runtime := range runtimes {
+	for _, runtime := range a.webAppRuntimes.Values() {
 		a.closeWebAppRuntime(runtime, true, "Bashes is closing")
 	}
 }

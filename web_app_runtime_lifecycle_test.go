@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/signoredellarete/bashes/internal/webappruntime"
 )
 
 func TestBrowserLauncherDetachedOnlyForQuickSuccessfulExit(t *testing.T) {
@@ -37,7 +39,6 @@ func TestStopWebAppTunnelKeepsRuntimeAndListener(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	runtime := &webAppRuntime{
 		id: "runtime-1", listener: listener, ctx: ctx, cancel: cancel,
-		apps: map[string]struct{}{"app-1": {}},
 		info: WebAppRuntimeInfo{
 			RuntimeID: "runtime-1", WebAppID: "app-1", Tunnel: true,
 			SOCKSPort: listenerPort(listener),
@@ -45,8 +46,11 @@ func TestStopWebAppTunnelKeepsRuntimeAndListener(t *testing.T) {
 	}
 	runtime.tunnelActive.Store(true)
 	app := NewApp(filepath.Join(t.TempDir(), "hosts.json"))
-	app.webAppRuntimes[runtime.id] = runtime
-	app.webAppRuntimeIDs["app-1"] = runtime.id
+	if err := app.webAppRuntimes.Register(webappruntime.Options[*webAppRuntime]{
+		RuntimeID: runtime.id, GroupKey: "test-group", AppID: "app-1", Value: runtime,
+	}); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
 	t.Cleanup(func() { app.closeWebAppRuntime(runtime, false, "test cleanup") })
 
 	info, err := app.StopWebAppTunnel("app-1")
