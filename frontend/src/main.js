@@ -30,6 +30,7 @@ import iconX from '@tabler/icons/outline/x.svg?raw';
 import iconPlayerPlay from '@tabler/icons/filled/player-play.svg?raw';
 import '@xterm/xterm/css/xterm.css';
 import bashesLogo from './assets/bashes.png';
+import { createBackendClient } from './api/backend.js';
 import { externalHttpURL } from './external-links.js';
 import { passwordFieldValue, placeCaretAfterSavedPassword, showSavedPassword } from './password-field.js';
 import {
@@ -81,25 +82,6 @@ import './terminal-fonts.css';
 import './styles.css';
 
 const terminalSettings = loadTerminalSettings(localStorage);
-
-const demoStore = {
-  tags: ['Production', 'Development'],
-  hosts: [
-    {
-      id: 'demo-host',
-      hostname: 'demo-host',
-      ip: '127.0.0.1',
-      port: 22,
-      user: 'demo',
-      subsystems: [
-        { id: 'demo-vm', type: 'vm', hostname: 'demo-vm', ip: '127.0.0.2', port: 22, user: 'demo' },
-      ],
-    },
-  ],
-  keys: [],
-  webApps: [],
-  topLevelOrder: ['demo-host'],
-};
 
 const state = {
   hosts: [],
@@ -161,10 +143,64 @@ const dragOutlineTimers = { hosts: 0, tabs: 0 };
 const dragOutlineTargets = { hosts: null, tabs: null };
 
 const FILE_TRANSFER_ENABLED = true;
-const DEMO_MODE = import.meta.env.DEV && globalThis.__BASHES_DEMO__ === true;
 const LOCAL_RESOURCE_ID = '__bashes_localhost__';
 const TOOLTIP_DELAY = 500;
 const DRAG_OUTLINE_DELAY = 300;
+const backend = createBackendClient({
+  demoMode: import.meta.env.DEV && globalThis.__BASHES_DEMO__ === true,
+  getSessionTerminal: (sessionID) => state.sessions.get(sessionID)?.terminal,
+  getWebAppRuntime: (webAppID) => state.webAppRuntimes.get(webAppID),
+  listWebAppRuntimes: () => state.webAppRuntimes.values(),
+});
+const {
+  addHost: apiAddHost,
+  addSubsystem: apiAddSubsystem,
+  addWebApp: apiAddWebApp,
+  checkForUpdate: apiCheckForUpdate,
+  chooseSSHKeyDirectory: apiChooseSSHKeyDirectory,
+  createTag: apiCreateTag,
+  deleteResource: apiDeleteResource,
+  deleteSSHKey: apiDeleteSSHKey,
+  deleteTag: apiDeleteTag,
+  deleteWebApp: apiDeleteWebApp,
+  generateSSHKey: apiGenerateSSHKey,
+  getAppInfo: apiGetAppInfo,
+  getSSHKeyInventory: apiGetSSHKeyInventory,
+  getSSHKeySettings: apiGetSSHKeySettings,
+  getWebAppBrowserSettings: apiGetWebAppBrowserSettings,
+  hasSavedPassword: apiHasSavedPassword,
+  importFromHostsFile: apiImportFromHostsFile,
+  importSSHKeyPair: apiImportSSHKeyPair,
+  installSSHKey: apiInstallSSHKey,
+  launchWebApp: apiLaunchWebApp,
+  listSSHTunnels: apiListSSHTunnels,
+  listTags: apiListTags,
+  listWebAppBrowsers: apiListWebAppBrowsers,
+  listWebAppRuntimes: apiListWebAppRuntimes,
+  listWorkspace: apiListWorkspace,
+  readSSHPrivateKey: apiReadSSHPrivateKey,
+  readSSHPrivateKeyPath: apiReadSSHPrivateKeyPath,
+  readSSHPublicKey: apiReadSSHPublicKey,
+  readSSHPublicKeyPath: apiReadSSHPublicKeyPath,
+  renameTag: apiRenameTag,
+  reorderHosts: apiReorderHosts,
+  reorderTopLevel: apiReorderTopLevel,
+  resizeSSHSession: apiResizeSSHSession,
+  saveSSHKeySettings: apiSaveSSHKeySettings,
+  saveWebAppBrowserSettings: apiSaveWebAppBrowserSettings,
+  setResourceTags: apiSetResourceTags,
+  startLocalSession: apiStartLocalSession,
+  startSSHSession: apiStartSSHSession,
+  startSSHTunnel: apiStartSSHTunnel,
+  startWebAppTunnel: apiStartWebAppTunnel,
+  stopSSHSession: apiStopSSHSession,
+  stopSSHTunnel: apiStopSSHTunnel,
+  stopWebAppTunnel: apiStopWebAppTunnel,
+  supportsLocalShell: apiSupportsLocalShell,
+  updateResource: apiUpdateResource,
+  updateWebApp: apiUpdateWebApp,
+  writeSSHSession: apiWriteSSHSession,
+} = backend;
 const customKeyPathHelp = [
   'Select the private key file, not the .pub file.',
   'Linux/macOS: ~/.ssh/id_ed25519',
@@ -5515,489 +5551,4 @@ function trimPendingSSHOutput(chunks) {
   const start = first.length - limit;
   chunks[0] = typeof first === 'string' ? first.slice(start) : first.slice(start);
   return chunks;
-}
-
-function wailsAPI() {
-	const api = globalThis.go?.main?.App ?? globalThis.go?.desktop?.App;
-	if (!api && !DEMO_MODE) {
-		throw new Error('Bashes desktop bindings are unavailable. Demo mode must be enabled explicitly for browser development.');
-	}
-	return api;
-}
-
-async function apiListHosts() {
-  const api = wailsAPI();
-  if (api?.ListHosts) return (await api.ListHosts()) ?? [];
-  return clone(demoStore.hosts);
-}
-
-async function apiListWorkspace() {
-  const api = wailsAPI();
-  if (api?.ListWorkspace) return await api.ListWorkspace();
-  return clone({ hosts: demoStore.hosts, webApps: demoStore.webApps, topLevelOrder: demoStore.topLevelOrder });
-}
-
-async function apiListTags() {
-  const api = wailsAPI();
-  if (api?.ListTags) return (await api.ListTags()) ?? [];
-  return mergeTagCatalog(demoStore.tags, [...demoStore.hosts, ...demoStore.webApps]).map((tag) => tag.name);
-}
-
-async function apiCreateTag(name) {
-  const api = wailsAPI();
-  if (api?.CreateTag) return await api.CreateTag(name);
-  name = String(name ?? '').trim();
-  if (!name) throw new Error('Tag name is required');
-  if (demoStore.tags.some((tag) => canonicalTag(tag) === canonicalTag(name))) {
-    throw new Error(`Tag ${name} already exists`);
-  }
-  demoStore.tags.push(name);
-  return name;
-}
-
-async function apiSetResourceTags(id, tags) {
-  const api = wailsAPI();
-  if (api?.SetResourceTags) return await api.SetResourceTags(id, tags);
-  const resource = findDemoResource(id);
-  if (!resource) throw new Error(`Resource ${id} not found`);
-  resource.tags = [...tags];
-}
-
-async function apiRenameTag(currentName, newName) {
-  const api = wailsAPI();
-  if (api?.RenameTag) return await api.RenameTag(currentName, newName);
-  const currentKey = canonicalTag(currentName);
-  const index = demoStore.tags.findIndex((tag) => canonicalTag(tag) === currentKey);
-  if (index < 0) throw new Error(`Tag ${currentName} not found`);
-  const duplicate = demoStore.tags.findIndex((tag) => canonicalTag(tag) === canonicalTag(newName));
-  if (duplicate >= 0 && duplicate !== index) throw new Error(`Tag ${newName} already exists`);
-  demoStore.tags[index] = newName;
-  visitDemoResources((resource) => {
-    resource.tags = (resource.tags ?? []).map((tag) => canonicalTag(tag) === currentKey ? newName : tag);
-  });
-}
-
-async function apiDeleteTag(name) {
-  const api = wailsAPI();
-  if (api?.DeleteTag) return await api.DeleteTag(name);
-  const key = canonicalTag(name);
-  demoStore.tags = demoStore.tags.filter((tag) => canonicalTag(tag) !== key);
-  visitDemoResources((resource) => {
-    resource.tags = (resource.tags ?? []).filter((tag) => canonicalTag(tag) !== key);
-  });
-}
-
-async function apiGetAppInfo() {
-  const api = wailsAPI();
-  if (api?.GetAppInfo) return await api.GetAppInfo();
-  return {
-    name: 'Bashes',
-    version: 'dev',
-    platform: 'browser',
-    arch: 'demo',
-    dataPath: 'demo',
-    repoUrl: 'https://github.com/signoredellarete/bashes',
-    readmeUrl: 'https://github.com/signoredellarete/bashes#readme',
-    releasesUrl: 'https://github.com/signoredellarete/bashes/releases',
-  };
-}
-
-async function apiCheckForUpdate() {
-  const api = wailsAPI();
-  if (api?.CheckForUpdate) return await api.CheckForUpdate();
-  return {
-    currentVersion: 'dev',
-    latestVersion: 'dev',
-    updateAvailable: false,
-    releaseUrl: 'https://github.com/signoredellarete/bashes/releases',
-    repoUrl: 'https://github.com/signoredellarete/bashes',
-    message: 'Update check is available only in the desktop app.',
-  };
-}
-
-async function apiSupportsLocalShell() {
-  const api = wailsAPI();
-  if (api?.SupportsLocalShell) return Boolean(await api.SupportsLocalShell());
-  return false;
-}
-
-async function apiAddHost(input) {
-  const api = wailsAPI();
-  if (api?.AddHost) return await api.AddHost(input);
-  const host = { id: `host-${Date.now()}`, hostname: input.hostname, ip: input.ip, port: input.port, user: input.user, tags: input.tags ?? [], subsystems: [] };
-  demoStore.hosts.push(host);
-  demoStore.topLevelOrder.push(host.id);
-  return clone(host);
-}
-
-async function apiAddWebApp(input) {
-  const api = wailsAPI();
-  if (api?.AddWebApp) return await api.AddWebApp(input);
-  const webApp = { id: `webapp-${Date.now()}`, ...input };
-  demoStore.webApps.push(webApp);
-  demoStore.topLevelOrder.push(webApp.id);
-  return clone(webApp);
-}
-
-async function apiUpdateWebApp(id, input) {
-  const api = wailsAPI();
-  if (api?.UpdateWebApp) return await api.UpdateWebApp(id, input);
-  const index = demoStore.webApps.findIndex((webApp) => webApp.id === id);
-  if (index < 0) throw new Error(`Web App ${id} not found`);
-  demoStore.webApps[index] = { id, ...input };
-}
-
-async function apiDeleteWebApp(id) {
-  const api = wailsAPI();
-  if (api?.DeleteWebApp) return await api.DeleteWebApp(id);
-  const index = demoStore.webApps.findIndex((webApp) => webApp.id === id);
-  if (index < 0) throw new Error(`Web App ${id} not found`);
-  demoStore.webApps.splice(index, 1);
-  demoStore.topLevelOrder = demoStore.topLevelOrder.filter((item) => item !== id);
-}
-
-async function apiAddSubsystem(hostID, input) {
-  const api = wailsAPI();
-  if (api?.AddSubsystem) return await api.AddSubsystem(hostID, input);
-  const parent = findDemoResource(hostID);
-  if (!parent) throw new Error(`Resource ${hostID} not found`);
-  if (!parent.subsystems) parent.subsystems = [];
-  const subsystem = { id: `${input.type}-${Date.now()}`, type: input.type, hostname: input.hostname, ip: input.ip, port: input.port, user: input.user, tags: input.tags ?? [], subsystems: [] };
-  parent.subsystems.push(subsystem);
-  return clone(subsystem);
-}
-
-async function apiUpdateResource(id, input) {
-  const api = wailsAPI();
-  if (api?.UpdateResource) return await api.UpdateResource(id, input);
-  for (const host of demoStore.hosts) {
-    if (host.id === id) {
-      host.hostname = input.hostname;
-      host.ip = input.ip;
-      host.port = input.port;
-      host.user = input.user;
-      host.tags = input.tags ?? host.tags ?? [];
-      return;
-    }
-    const resource = findDemoNestedResource(host.subsystems ?? [], id);
-    if (resource) {
-      resource.type = input.type;
-      resource.hostname = input.hostname;
-      resource.ip = input.ip;
-      resource.port = input.port;
-      resource.user = input.user;
-      resource.tags = input.tags ?? resource.tags ?? [];
-      return;
-    }
-  }
-  throw new Error(`Resource ${id} not found`);
-}
-
-async function apiReorderHosts(order) {
-  const api = wailsAPI();
-  if (api?.ReorderHosts) return await api.ReorderHosts(order);
-  if (order.length !== demoStore.hosts.length) throw new Error('Invalid host order');
-  const byID = new Map(demoStore.hosts.map((host) => [host.id, host]));
-  demoStore.hosts = order.map((id) => {
-    const host = byID.get(id);
-    if (!host) throw new Error(`Host ${id} not found`);
-    return host;
-  });
-}
-
-async function apiReorderTopLevel(order) {
-  const api = wailsAPI();
-  if (api?.ReorderTopLevel) return await api.ReorderTopLevel(order);
-  if (order.length !== demoStore.topLevelOrder.length) throw new Error('Invalid connection order');
-  demoStore.topLevelOrder = [...order];
-}
-
-async function apiDeleteResource(id) {
-  const api = wailsAPI();
-  if (api?.DeleteResource) return await api.DeleteResource(id);
-  const hostIndex = demoStore.hosts.findIndex((host) => host.id === id);
-  if (hostIndex >= 0) {
-    demoStore.topLevelOrder = demoStore.topLevelOrder.filter((item) => item !== id);
-    demoStore.hosts.splice(hostIndex, 1);
-    return;
-  }
-  for (const host of demoStore.hosts) {
-    if (deleteDemoNestedResource(host.subsystems ?? [], id)) {
-      return;
-    }
-  }
-  throw new Error(`Resource ${id} not found`);
-}
-
-function findDemoResource(id) {
-  for (const host of demoStore.hosts) {
-    if (host.id === id) return host;
-    const subsystem = findDemoNestedResource(host.subsystems ?? [], id);
-    if (subsystem) return subsystem;
-  }
-  return demoStore.webApps.find((webApp) => webApp.id === id) ?? null;
-}
-
-function findDemoNestedResource(subsystems, id) {
-  for (const subsystem of subsystems ?? []) {
-    if (subsystem.id === id) return subsystem;
-    const child = findDemoNestedResource(subsystem.subsystems ?? [], id);
-    if (child) return child;
-  }
-  return null;
-}
-
-function deleteDemoNestedResource(subsystems, id) {
-  for (let index = 0; index < subsystems.length; index += 1) {
-    if (subsystems[index].id === id) {
-      subsystems.splice(index, 1);
-      return true;
-    }
-    if (deleteDemoNestedResource(subsystems[index].subsystems ?? [], id)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function visitDemoResources(visitor) {
-  const visit = (resource) => {
-    visitor(resource);
-    for (const child of resource.subsystems ?? []) visit(child);
-  };
-  for (const host of demoStore.hosts) visit(host);
-  for (const webApp of demoStore.webApps) visitor(webApp);
-}
-
-async function apiStartSSHSession(input) {
-  const api = wailsAPI();
-  if (api?.StartSSHSession) return await api.StartSSHSession(input);
-  return `demo-session-${Date.now()}`;
-}
-
-async function apiHasSavedPassword(resourceID) {
-  const api = wailsAPI();
-  if (api?.HasSavedPassword) return await api.HasSavedPassword(resourceID);
-  return false;
-}
-
-async function apiStartLocalSession(input) {
-  const api = wailsAPI();
-  if (api?.StartLocalSession) return await api.StartLocalSession(input);
-  throw new Error('Local shell is available only in the desktop app.');
-}
-
-async function apiWriteSSHSession(sessionID, data) {
-  const api = wailsAPI();
-  if (api?.WriteSSHSession) return await api.WriteSSHSession(sessionID, data);
-  state.sessions.get(sessionID)?.terminal.write(data);
-}
-
-async function apiResizeSSHSession(sessionID, cols, rows) {
-  const api = wailsAPI();
-  if (api?.ResizeSSHSession) return await api.ResizeSSHSession(sessionID, cols, rows);
-}
-
-async function apiStopSSHSession(sessionID) {
-  const api = wailsAPI();
-  if (api?.StopSSHSession) return await api.StopSSHSession(sessionID);
-}
-
-async function apiListSSHTunnels() {
-  const api = wailsAPI();
-  if (api?.ListSSHTunnels) return (await api.ListSSHTunnels()) ?? [];
-  return [];
-}
-
-async function apiStartSSHTunnel(input) {
-  const api = wailsAPI();
-  if (api?.StartSSHTunnel) return await api.StartSSHTunnel(input);
-  return {
-    tunnelId: `demo-tunnel-${Date.now()}`,
-    resourceId: input.resourceId,
-    type: input.type,
-    localHost: input.localHost,
-    localPort: input.localPort,
-    remoteHost: input.remoteHost,
-    remotePort: input.remotePort,
-    localAddress: `${input.localHost}:${input.localPort}`,
-    target: 'demo tunnel',
-    forwardTarget: input.type === 'socks' ? 'dynamic' : `${input.remoteHost}:${input.remotePort}`,
-    startedAt: new Date().toISOString(),
-  };
-}
-
-async function apiStopSSHTunnel(tunnelID) {
-  const api = wailsAPI();
-  if (api?.StopSSHTunnel) return await api.StopSSHTunnel(tunnelID);
-}
-
-async function apiListWebAppBrowsers() {
-  const api = wailsAPI();
-  if (api?.ListWebAppBrowsers) return (await api.ListWebAppBrowsers()) ?? [];
-  return [{ id: 'firefox', name: 'Firefox', path: '/usr/bin/firefox', family: 'firefox' }];
-}
-
-async function apiGetWebAppBrowserSettings() {
-  const api = wailsAPI();
-  if (api?.GetWebAppBrowserSettings) return await api.GetWebAppBrowserSettings();
-  return {
-    preferredBrowserId: localStorage.getItem('bashes.webapps.browser') || '',
-    customBrowserPath: localStorage.getItem('bashes.webapps.browserPath') || '',
-  };
-}
-
-async function apiSaveWebAppBrowserSettings(input) {
-  const api = wailsAPI();
-  if (api?.SaveWebAppBrowserSettings) return await api.SaveWebAppBrowserSettings(input);
-  localStorage.setItem('bashes.webapps.browser', input.preferredBrowserId || '');
-  localStorage.setItem('bashes.webapps.browserPath', input.customBrowserPath || '');
-  return input;
-}
-
-async function apiLaunchWebApp(input) {
-  const api = wailsAPI();
-  if (api?.LaunchWebApp) return await api.LaunchWebApp(input);
-  const webApp = demoStore.webApps.find((item) => item.id === input.webAppId);
-  return {
-    runtimeId: `demo-webapp-${Date.now()}`,
-    webAppId: input.webAppId,
-    browserId: 'firefox',
-    browser: 'Firefox',
-    socksPort: webApp?.connectionMode === 'tunnel' ? 49100 : 0,
-    tunnel: webApp?.connectionMode === 'tunnel',
-    tunnelActive: webApp?.connectionMode === 'tunnel',
-    startedAt: new Date().toISOString(),
-  };
-}
-
-async function apiStopWebAppTunnel(webAppID) {
-  const api = wailsAPI();
-  if (api?.StopWebAppTunnel) return await api.StopWebAppTunnel(webAppID);
-  const runtime = state.webAppRuntimes.get(webAppID);
-  if (!runtime?.tunnel) throw new Error('Web App does not use an SSH tunnel');
-  return { ...runtime, tunnelActive: false };
-}
-
-async function apiStartWebAppTunnel(webAppID) {
-  const api = wailsAPI();
-  if (api?.StartWebAppTunnel) return await api.StartWebAppTunnel(webAppID);
-  const runtime = state.webAppRuntimes.get(webAppID);
-  if (!runtime?.tunnel) throw new Error('Web App does not use an SSH tunnel');
-  return { ...runtime, tunnelActive: true };
-}
-
-async function apiListWebAppRuntimes() {
-  const api = wailsAPI();
-  if (api?.ListWebAppRuntimes) return (await api.ListWebAppRuntimes()) ?? [];
-  return [...state.webAppRuntimes.values()];
-}
-
-async function apiListSSHKeys() {
-  const api = wailsAPI();
-  if (api?.ListSSHKeys) return (await api.ListSSHKeys()) ?? [];
-  return clone(demoStore.keys);
-}
-
-async function apiGetSSHKeyInventory() {
-  const api = wailsAPI();
-  if (api?.GetSSHKeyInventory) {
-    return await api.GetSSHKeyInventory();
-  }
-  const keys = await apiListSSHKeys();
-  return {
-    keys,
-    sources: ['bashes', 'system', 'custom'].map((source) => ({
-      source,
-      label: source === 'bashes' ? 'Managed by Bashes' : source === 'system' ? 'System SSH directory' : 'Custom directory',
-      path: source === 'custom' ? localStorage.getItem('bashes.keys.customDirectory') || '' : '',
-      count: keys.filter((key) => keySource(key) === source).length,
-    })),
-  };
-}
-
-async function apiGetSSHKeySettings() {
-  const api = wailsAPI();
-  if (api?.GetSSHKeySettings) return await api.GetSSHKeySettings();
-  return { customDirectory: localStorage.getItem('bashes.keys.customDirectory') || '' };
-}
-
-async function apiSaveSSHKeySettings(input) {
-  const api = wailsAPI();
-  if (api?.SaveSSHKeySettings) return await api.SaveSSHKeySettings(input);
-  localStorage.setItem('bashes.keys.customDirectory', input.customDirectory || '');
-  return { customDirectory: input.customDirectory || '' };
-}
-
-async function apiChooseSSHKeyDirectory() {
-  const api = wailsAPI();
-  if (api?.ChooseSSHKeyDirectory) return await api.ChooseSSHKeyDirectory();
-  return '';
-}
-
-async function apiImportFromHostsFile() {
-  const api = wailsAPI();
-  if (api?.ImportFromHostsFile) return await api.ImportFromHostsFile();
-  return { imported: 0, skipped: 0, hosts: [], hostnames: [] };
-}
-
-async function apiGenerateSSHKey(input) {
-  const api = wailsAPI();
-  if (api?.GenerateSSHKey) return await api.GenerateSSHKey(input);
-  const key = { name: input.name || `bashes-${Date.now()}`, privateKey: '', publicKey: '', source: 'bashes' };
-  demoStore.keys.push(key);
-  return clone(key);
-}
-
-async function apiImportSSHKeyPair(input) {
-  const api = wailsAPI();
-  if (api?.ImportSSHKeyPair) return await api.ImportSSHKeyPair(input);
-  const key = {
-    name: input.name || `imported-key-${Date.now()}`,
-    privateKey: '',
-    publicKey: '',
-    source: 'bashes',
-  };
-  demoStore.keys.push(key);
-  return clone(key);
-}
-
-async function apiDeleteSSHKey(name) {
-  const api = wailsAPI();
-  if (api?.DeleteSSHKey) return await api.DeleteSSHKey(name);
-  const index = demoStore.keys.findIndex((key) => keySource(key) === 'bashes' && key.name === name);
-  if (index >= 0) demoStore.keys.splice(index, 1);
-}
-
-async function apiReadSSHPublicKey(name) {
-  const api = wailsAPI();
-  if (api?.ReadSSHPublicKey) return await api.ReadSSHPublicKey(name);
-  return `ssh-ed25519 demo ${name}`;
-}
-
-async function apiReadSSHPublicKeyPath(path) {
-  const api = wailsAPI();
-  if (api?.ReadSSHPublicKeyPath) return await api.ReadSSHPublicKeyPath(path);
-  return `ssh-ed25519 demo ${path}`;
-}
-
-async function apiReadSSHPrivateKey(name) {
-  const api = wailsAPI();
-  if (api?.ReadSSHPrivateKey) return await api.ReadSSHPrivateKey(name);
-  return `-----BEGIN OPENSSH PRIVATE KEY-----\ndemo-${name}\n-----END OPENSSH PRIVATE KEY-----`;
-}
-
-async function apiReadSSHPrivateKeyPath(path) {
-  const api = wailsAPI();
-  if (api?.ReadSSHPrivateKeyPath) return await api.ReadSSHPrivateKeyPath(path);
-  return `-----BEGIN OPENSSH PRIVATE KEY-----\ndemo-${path}\n-----END OPENSSH PRIVATE KEY-----`;
-}
-
-async function apiInstallSSHKey(input) {
-  const api = wailsAPI();
-  if (api?.InstallSSHKey) return await api.InstallSSHKey(input);
-}
-
-function clone(value) {
-  return JSON.parse(JSON.stringify(value));
 }
