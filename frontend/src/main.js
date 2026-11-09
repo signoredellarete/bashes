@@ -50,6 +50,8 @@ import {
   resourceTarget,
 } from './features/resources/model.js';
 import { createAppState } from './state/app-state.js';
+import { mountSettingsPanel } from './settings/mount.js';
+import { settingsPanelData as createSettingsPanelData } from './settings/model.js';
 import { passwordFieldValue, placeCaretAfterSavedPassword, showSavedPassword } from './password-field.js';
 import {
   errorDetail,
@@ -618,61 +620,7 @@ app.innerHTML = `
     </form>
   </section>
 
-  <section id="settings-panel" class="slide-panel" hidden>
-    <div class="panel-scrim" data-close-settings></div>
-    <form id="settings-form" class="panel-card">
-      <header class="panel-header">
-        <div>
-          <p class="eyebrow">Bashes</p>
-          <h3>Settings</h3>
-        </div>
-        <button class="close-panel" type="button" data-close-settings title="Close">${ICON_CLOSE}</button>
-      </header>
-
-      <fieldset class="settings-group">
-        <legend>Terminal Appearance</legend>
-        <div class="form-grid">
-          <label>
-            <span>Terminal Font Size</span>
-            <input name="terminalFontSize" type="number" min="${MIN_TERMINAL_FONT_SIZE}" max="${MAX_TERMINAL_FONT_SIZE}" step="1" />
-          </label>
-          <label>
-            <span>Terminal Font Family</span>
-            <select name="terminalFontFamily"></select>
-          </label>
-        </div>
-      </fieldset>
-
-      <fieldset class="settings-group">
-        <legend>Terminal Behavior</legend>
-        <label>
-          <span>Scrollback Lines</span>
-          <input name="terminalScrollback" type="number" min="1000" max="500000" step="1000" />
-        </label>
-        <label class="checkbox-row">
-          <input name="terminalCopyOnSelect" type="checkbox" />
-          <span>Copy selected terminal text to clipboard</span>
-        </label>
-      </fieldset>
-
-      <fieldset class="settings-group">
-        <legend>Web App Browser</legend>
-        <label>
-          <span>Preferred Browser</span>
-          <select name="webAppBrowser"></select>
-        </label>
-        <label>
-          <span>Custom Browser Executable</span>
-          <input name="customBrowserPath" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Optional executable path" />
-        </label>
-      </fieldset>
-
-      <footer class="panel-actions">
-        <button class="secondary" type="button" data-close-settings>Cancel</button>
-        <button type="submit">Save Settings</button>
-      </footer>
-    </form>
-  </section>
+  <div id="settings-root"></div>
 
   <section id="file-transfer-modal" class="file-transfer-modal" hidden>
     <div class="file-transfer-scrim"></div>
@@ -908,6 +856,12 @@ app.innerHTML = `
   </div>
 `;
 
+const settingsPanel = mountSettingsPanel(document.querySelector('#settings-root'), {
+  onpreview: (values) => previewTerminalAppearance(values),
+  onsave: (values) => submitSettings(values),
+  onrequestclose: () => closeSettingsPanel(),
+});
+
 const stack = document.querySelector('#terminal-stack');
 const hostsScroll = document.querySelector('#hosts-scroll');
 
@@ -990,10 +944,6 @@ document.querySelector('#tag-create-form').elements.name.addEventListener('input
 document.querySelector('#tag-panel-clear').addEventListener('click', () => clearTagPanelSelection());
 document.querySelector('#connect-form').addEventListener('submit', (event) => submitConnect(event));
 document.querySelector('#tunnel-form').addEventListener('submit', (event) => submitTunnel(event));
-const settingsForm = document.querySelector('#settings-form');
-settingsForm.addEventListener('submit', (event) => submitSettings(event));
-settingsForm.elements.terminalFontSize.addEventListener('input', () => previewTerminalAppearance());
-settingsForm.elements.terminalFontFamily.addEventListener('change', () => previewTerminalAppearance());
 document.querySelector('#tunnel-form').addEventListener('input', () => updateTunnelSummary());
 document.querySelector('#tunnel-form').elements.type.addEventListener('change', () => updateTunnelMode());
 registerAuthChoiceSync(document.querySelector('#connect-form'));
@@ -1034,9 +984,6 @@ document.querySelectorAll('[data-close-connect]').forEach((element) => {
 });
 document.querySelectorAll('[data-close-tunnel]').forEach((element) => {
   element.addEventListener('click', () => closeTunnelPanel());
-});
-document.querySelectorAll('[data-close-settings]').forEach((element) => {
-  element.addEventListener('click', () => closeSettingsPanel());
 });
 document.querySelectorAll('[data-close-keys]').forEach((element) => {
   element.addEventListener('click', () => closeKeysPanel());
@@ -4891,80 +4838,57 @@ async function openSettingsPanel() {
   } catch (error) {
     writeNotice(`Could not detect Web App browsers: ${errorDetail(error)}`, 'error');
   }
-  renderSettingsForm();
-  const panel = document.querySelector('#settings-panel');
-  panel.hidden = false;
-  requestAnimationFrame(() => panel.classList.add('open'));
-  window.setTimeout(() => {
-    document.querySelector('#settings-form').elements.terminalFontSize.focus();
-  }, 0);
+  await settingsPanel.open(settingsPanelData());
 }
 
 function closeSettingsPanel({ restoreTerminalSettings = true } = {}) {
   if (restoreTerminalSettings) applyTerminalSettings(state, { focus: false });
-  const panel = document.querySelector('#settings-panel');
-  panel.classList.remove('open');
-  panel.hidden = true;
+  settingsPanel.close();
   restoreTerminalFocusAfterOverlay();
 }
 
 function renderSettingsForm() {
-  const form = document.querySelector('#settings-form');
-  form.elements.terminalFontSize.value = String(state.terminalFontSize);
-  form.elements.terminalScrollback.value = String(state.terminalScrollback);
-  const fontOptions = TERMINAL_FONT_FAMILY_OPTIONS.map(({ label, value }) => new Option(label, value));
-  if (!TERMINAL_FONT_FAMILY_OPTIONS.some(({ value }) => value === state.terminalFontFamily)) {
-    fontOptions.push(new Option('Previously configured font', state.terminalFontFamily));
-  }
-  form.elements.terminalFontFamily.replaceChildren(...fontOptions);
-  form.elements.terminalFontFamily.value = state.terminalFontFamily;
-  form.elements.terminalCopyOnSelect.checked = state.terminalCopyOnSelect;
-  const detected = new Map(state.webAppBrowsers.map((browser) => [browser.id, browser]));
-  const browserNames = new Map([
-    ['firefox', 'Firefox'], ['chrome', 'Google Chrome'], ['chromium', 'Chromium'], ['edge', 'Microsoft Edge'],
-  ]);
-  const options = [new Option('Automatic (Firefox preferred)', '')];
-  for (const [id, name] of browserNames) {
-    options.push(new Option(`${name}${detected.has(id) ? '' : ' (not detected)'}`, id));
-  }
-  form.elements.webAppBrowser.replaceChildren(...options);
-  form.elements.webAppBrowser.value = state.webAppBrowserSettings.preferredBrowserId || '';
-  form.elements.customBrowserPath.value = state.webAppBrowserSettings.customBrowserPath || '';
+  settingsPanel.update(settingsPanelData());
 }
 
-async function submitSettings(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
+function settingsPanelData() {
+  return createSettingsPanelData(state, TERMINAL_FONT_FAMILY_OPTIONS, {
+    min: MIN_TERMINAL_FONT_SIZE,
+    max: MAX_TERMINAL_FONT_SIZE,
+  });
+}
+
+async function submitSettings(values) {
   state.terminalFontSize = clampNumber(
-    form.elements.terminalFontSize.value,
+    values.terminalFontSize,
     MIN_TERMINAL_FONT_SIZE,
     MAX_TERMINAL_FONT_SIZE,
     DEFAULT_TERMINAL_FONT_SIZE,
   );
-  state.terminalScrollback = clampNumber(form.elements.terminalScrollback.value, 1000, 500000, DEFAULT_TERMINAL_SCROLLBACK);
-  state.terminalFontFamily = form.elements.terminalFontFamily.value || DEFAULT_TERMINAL_FONT_FAMILY;
-  state.terminalCopyOnSelect = form.elements.terminalCopyOnSelect.checked;
+  state.terminalScrollback = clampNumber(values.terminalScrollback, 1000, 500000, DEFAULT_TERMINAL_SCROLLBACK);
+  state.terminalFontFamily = values.terminalFontFamily || DEFAULT_TERMINAL_FONT_FAMILY;
+  state.terminalCopyOnSelect = values.terminalCopyOnSelect;
   try {
     state.webAppBrowserSettings = await apiSaveWebAppBrowserSettings({
-      preferredBrowserId: form.elements.webAppBrowser.value,
-      customBrowserPath: form.elements.customBrowserPath.value.trim(),
+      preferredBrowserId: values.webAppBrowser,
+      customBrowserPath: values.customBrowserPath.trim(),
     });
   } catch (error) {
     writeNotice(`Could not save browser settings: ${errorDetail(error)}`, 'error');
-    return;
+    return false;
   }
   saveTerminalSettings();
   applyTerminalSettings();
   writeNotice('Settings saved.');
   closeSettingsPanel({ restoreTerminalSettings: false });
+  return true;
 }
 
-function previewTerminalAppearance() {
-  const form = document.querySelector('#settings-form');
+function previewTerminalAppearance(values) {
   const preview = terminalAppearancePreview(
     state,
-    form.elements.terminalFontSize.value,
-    form.elements.terminalFontFamily.value,
+    values.terminalFontSize,
+    values.terminalFontFamily,
   );
   applyTerminalSettings(preview, { focus: false });
 }
@@ -4993,7 +4917,7 @@ function adjustTerminalFontSize(delta) {
   );
   saveTerminalSettings();
   applyTerminalSettings();
-  if (!document.querySelector('#settings-panel').hidden) renderSettingsForm();
+  if (settingsPanel.isOpen()) renderSettingsForm();
 }
 
 function focusActiveTerminal() {

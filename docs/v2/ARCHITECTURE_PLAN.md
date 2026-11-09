@@ -76,6 +76,9 @@ Status on 2026-11-09 for branch `feature/v2-modular-architecture`:
   through a tested native adapter;
 - frontend application state and the hierarchical resource model are isolated
   from DOM rendering and covered by unit tests;
+- the complete Settings panel is mounted as a Svelte feature with a tested pure
+  model; terminal preview, cancel rollback and browser preferences keep their
+  existing application contracts;
 - plugin manifest validation, discovery, handshake and bounded process
   supervision are tested; the supervisor is part of application shutdown but
   has no user-facing installation or enablement path yet;

@@ -1400,6 +1400,16 @@ html.sorting-tags * {
   overflow-y: auto;
 }
 
+#settings-root {
+  display: contents;
+}
+
+#settings-panel .panel-scrim {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+}
+
 .settings-group {
   display: grid;
   min-width: 0;
