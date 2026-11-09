@@ -48,4 +48,10 @@ Initial permissions are:
 Declaring a permission does not grant it. A later plugin supervisor milestone
 will enforce enablement and user approval before exposing capabilities.
 
+Discovery reads plugin directories without executing them. Invalid manifests,
+unsupported platforms and incompatible API versions remain visible as
+unavailable candidates with an explanatory error. Before a process can become
+ready it must answer a versioned `hello` request with the same plugin ID,
+version, API version and a subset of the capabilities declared here.
+
 [Back to the Bashes 2 architecture plan](ARCHITECTURE_PLAN.md)
