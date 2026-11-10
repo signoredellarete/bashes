@@ -16,6 +16,7 @@ import (
 
 	"github.com/signoredellarete/bashes/internal/apperrors"
 	"github.com/signoredellarete/bashes/internal/application"
+	"github.com/signoredellarete/bashes/internal/connectionauth"
 	"github.com/signoredellarete/bashes/internal/credentials"
 	"github.com/signoredellarete/bashes/internal/database"
 	"github.com/signoredellarete/bashes/internal/desktop"
@@ -52,7 +53,7 @@ type App struct {
 	shutdownOnce     sync.Once
 	service          *application.Service
 	database         *database.Service
-	passwords        credentials.Store
+	authPreferences  *connectionauth.Service
 	dataPath         string
 	sshKeys          *sshkeys.Service
 	sshConnector     *sshconnection.Connector
@@ -90,6 +91,7 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 	webAppBrowserService := webappbrowser.NewPreferencesService(goruntime.GOOS, getenv, settingsRepository)
 	sshConnector := sshconnection.NewConnector(sshAuthBuilder, applicationService)
 	sshKeyInstaller := sshkeyinstall.NewService(applicationService, sshKeyService, sshConnector)
+	authPreferences := connectionauth.NewService(passwords)
 
 	return &App{
 		dataPath:         dataPath,
@@ -99,7 +101,7 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 		sshConnector:     sshConnector,
 		sshKeyInstaller:  sshKeyInstaller,
 		webAppBrowsers:   webAppBrowserService,
-		passwords:        passwords,
+		authPreferences:  authPreferences,
 		sessions:         termsession.NewManager(),
 		tunnels:          sshtunnel.NewManager(),
 		transfers:        transfer.NewSessionManager[*fileTransferSession](),
@@ -305,7 +307,7 @@ func (a *App) DeleteResource(id string) error {
 		return err
 	}
 	for _, resourceID := range resourceIDs {
-		_ = a.passwords.DeletePassword(resourceID)
+		_ = a.authPreferences.ForgetPassword(resourceID)
 	}
 	return nil
 }
@@ -1117,42 +1119,15 @@ func sshOutputEvent(sessionID string, data []byte) SSHEvent {
 }
 
 func applyAuthPreference(resource domain.Endpoint, input SSHSessionInput) SSHSessionInput {
-	if hasExplicitAuth(input) || resource.Auth == nil {
-		return input
-	}
-
-	auth := resource.Auth
-	switch auth.Method {
-	case domain.AuthMethodKey:
-		input.KeyName = auth.KeyName
-	case domain.AuthMethodPath:
-		input.PrivateKeyPath = auth.PrivateKeyPath
-	case domain.AuthMethodPassword, domain.AuthMethodAgent:
-	}
-	return input
+	return sshSessionInput(connectionauth.ApplyPreference(resource, connectionAuthInput(input)), input)
 }
 
 func hasExplicitAuth(input SSHSessionInput) bool {
-	return strings.TrimSpace(input.Password) != "" ||
-		strings.TrimSpace(input.KeyName) != "" ||
-		strings.TrimSpace(input.PrivateKeyPath) != ""
+	return connectionauth.HasExplicitAuthentication(connectionAuthInput(input))
 }
 
 func authPreferenceFromSessionInput(input SSHSessionInput) *domain.Auth {
-	auth := domain.Auth{}
-	switch {
-	case strings.TrimSpace(input.PrivateKeyPath) != "":
-		auth.Method = domain.AuthMethodPath
-		auth.PrivateKeyPath = strings.TrimSpace(input.PrivateKeyPath)
-	case strings.TrimSpace(input.KeyName) != "":
-		auth.Method = domain.AuthMethodKey
-		auth.KeyName = sanitizeKeyName(input.KeyName)
-	case strings.TrimSpace(input.Password) != "":
-		auth.Method = domain.AuthMethodPassword
-	default:
-		auth.Method = domain.AuthMethodAgent
-	}
-	return &auth
+	return connectionauth.Preference(connectionAuthInput(input))
 }
 
 func normalizeTunnelInput(input *SSHTunnelInput) error {

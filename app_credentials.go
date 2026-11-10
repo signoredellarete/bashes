@@ -1,8 +1,7 @@
 package main
 
 import (
-	"fmt"
-
+	"github.com/signoredellarete/bashes/internal/connectionauth"
 	"github.com/signoredellarete/bashes/internal/domain"
 )
 
@@ -11,41 +10,36 @@ func (a *App) HasSavedPassword(resourceID string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	_, found, err := a.passwords.Password(resource.ID)
-	if err != nil {
-		return false, fmt.Errorf("check saved SSH password: %w", err)
-	}
-	return found, nil
+	return a.authPreferences.HasSavedPassword(resource.ID)
 }
 
 func (a *App) prepareSessionInput(resource domain.Endpoint, input SSHSessionInput) (SSHSessionInput, error) {
-	input = applyAuthPreference(resource, input)
-	if hasExplicitAuth(input) || resource.Auth == nil || resource.Auth.Method != domain.AuthMethodPassword {
-		return input, nil
-	}
-
-	password, found, err := a.passwords.Password(resource.ID)
+	prepared, err := a.authPreferences.Prepare(resource, connectionAuthInput(input))
 	if err != nil {
-		return input, fmt.Errorf("read saved SSH password: %w", err)
+		return input, err
 	}
-	if found {
-		input.Password = password
-	}
-	return input, nil
+	return sshSessionInput(prepared, input), nil
 }
 
 func (a *App) persistPasswordChoice(resourceID string, input SSHSessionInput) error {
-	if !input.ManagePassword {
-		return nil
+	return a.authPreferences.PersistPasswordChoice(resourceID, connectionAuthInput(input))
+}
+
+func connectionAuthInput(input SSHSessionInput) connectionauth.Input {
+	return connectionauth.Input{
+		Password:       input.Password,
+		PrivateKeyPath: input.PrivateKeyPath,
+		KeyName:        input.KeyName,
+		ManagePassword: input.ManagePassword,
+		SavePassword:   input.SavePassword,
 	}
-	if input.SavePassword {
-		if err := a.passwords.SavePassword(resourceID, input.Password); err != nil {
-			return fmt.Errorf("save SSH password: %w", err)
-		}
-		return nil
-	}
-	if err := a.passwords.DeletePassword(resourceID); err != nil {
-		return fmt.Errorf("remove saved SSH password: %w", err)
-	}
-	return nil
+}
+
+func sshSessionInput(auth connectionauth.Input, input SSHSessionInput) SSHSessionInput {
+	input.Password = auth.Password
+	input.PrivateKeyPath = auth.PrivateKeyPath
+	input.KeyName = auth.KeyName
+	input.ManagePassword = auth.ManagePassword
+	input.SavePassword = auth.SavePassword
+	return input
 }

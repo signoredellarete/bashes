@@ -70,6 +70,8 @@ Status on 2026-11-09 for branch `feature/v2-modular-architecture`:
 - SSH authentication method construction and OpenSSH/PEM/PPK parsing live in an
   independent builder with injectable home, filesystem, environment and agent
   socket dependencies;
+- saved-password lifecycle and resource authentication preferences are owned by
+  one tested service shared by SSH sessions, tunnels, transfers and Web Apps;
 - SSH dialing, host-key policy, structured trust errors and accepted fingerprint
   persistence are owned by a tested connector shared by sessions, tunnels,
   transfers and Web App gateways;
