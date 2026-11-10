@@ -106,6 +106,7 @@ type fileTransferSession struct {
 	remoteHome string
 	client     *ssh.Client
 	sftp       *sftp.Client
+	now        func() time.Time
 	mu         sync.Mutex
 }
 
@@ -160,7 +161,8 @@ func (a *App) StartFileTransfer(input SSHSessionInput) (FileTransferSessionInfo,
 		remoteHome = remoteRoot
 	}
 
-	sessionID := fmt.Sprintf("files-%d", time.Now().UnixNano())
+	now := a.now()
+	sessionID := fmt.Sprintf("files-%d", now.UnixNano())
 	session := &fileTransferSession{
 		id:         sessionID,
 		resourceID: resource.ID,
@@ -170,6 +172,7 @@ func (a *App) StartFileTransfer(input SSHSessionInput) (FileTransferSessionInfo,
 		remoteHome: remoteHome,
 		client:     client,
 		sftp:       sftpClient,
+		now:        a.now,
 	}
 
 	if err := a.transfers.Register(transfer.SessionOptions[*fileTransferSession]{
@@ -270,16 +273,17 @@ func (a *App) StartFileTransferCopyJob(input FileTransferCopyInput) (FileTransfe
 	if strings.TrimSpace(input.TargetID) == "" {
 		return FileTransferJobInfo{}, errors.New("transfer target is required")
 	}
+	now := a.now()
 	job, ctx, err := a.transferJobs.Start(transfer.JobOptions{
 		Info: FileTransferJobInfo{
-			JobID:      fmt.Sprintf("file-job-%d", time.Now().UnixNano()),
+			JobID:      fmt.Sprintf("file-job-%d", now.UnixNano()),
 			SessionID:  session.id,
 			ResourceID: session.resourceID,
 			SourceIDs:  append([]string(nil), input.IDs...),
 			TargetID:   input.TargetID,
 			Move:       input.Move,
 			Status:     "queued",
-			StartedAt:  time.Now().Format(time.RFC3339),
+			StartedAt:  now.Format(time.RFC3339),
 		},
 	})
 	if err != nil {
@@ -322,16 +326,17 @@ func (a *App) StartFileTransferUploadJob(input FileTransferUploadInput) (FileTra
 		return FileTransferJobInfo{}, errors.New("no valid local files selected for upload")
 	}
 
+	now := a.now()
 	job, ctx, err := a.transferJobs.Start(transfer.JobOptions{
 		Info: FileTransferJobInfo{
-			JobID:       fmt.Sprintf("file-job-%d", time.Now().UnixNano()),
+			JobID:       fmt.Sprintf("file-job-%d", now.UnixNano()),
 			SessionID:   session.id,
 			ResourceID:  session.resourceID,
 			SourcePaths: paths,
 			TargetID:    input.TargetID,
 			Move:        input.Move,
 			Status:      "queued",
-			StartedAt:   time.Now().Format(time.RFC3339),
+			StartedAt:   now.Format(time.RFC3339),
 		},
 	})
 	if err != nil {
@@ -380,7 +385,8 @@ func (a *App) StartFileTransferOpenJob(input FileTransferOpenInput) (FileTransfe
 		return FileTransferJobInfo{Operation: "open", Status: "completed", Current: input.ID}, nil
 	}
 
-	jobID := fmt.Sprintf("file-open-%d", time.Now().UnixNano())
+	now := a.now()
+	jobID := fmt.Sprintf("file-open-%d", now.UnixNano())
 	openPath := filepath.Join(a.openFileCacheDir, jobID, cacheFileName(rel))
 	job, ctx, err := a.transferJobs.Start(transfer.JobOptions{
 		OpenPath: openPath,
@@ -391,7 +397,7 @@ func (a *App) StartFileTransferOpenJob(input FileTransferOpenInput) (FileTransfe
 			SourceIDs:  []string{input.ID},
 			Status:     "queued",
 			Operation:  "open",
-			StartedAt:  time.Now().Format(time.RFC3339),
+			StartedAt:  now.Format(time.RFC3339),
 		},
 	})
 	if err != nil {
@@ -867,9 +873,13 @@ func (s *fileTransferSession) withAtomicDestination(scope, targetRel string, wri
 		return fmt.Errorf("destination already exists: %s", transferID(scope, targetRel))
 	}
 
+	now := s.now
+	if now == nil {
+		now = time.Now
+	}
 	tempRel := path.Join(
 		path.Dir(targetRel),
-		fmt.Sprintf(".%s.bashes-partial-%d", path.Base(targetRel), time.Now().UnixNano()),
+		fmt.Sprintf(".%s.bashes-partial-%d", path.Base(targetRel), now().UnixNano()),
 	)
 	committed := false
 	defer func() {

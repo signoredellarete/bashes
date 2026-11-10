@@ -72,6 +72,21 @@ type webAppRuntime struct {
 	stopOnce     sync.Once
 }
 
+type webAppBrowserRuntime interface {
+	Start(webappbrowser.Browser, webappbrowser.LaunchOptions) (*exec.Cmd, error)
+	CleanupProfile(webappbrowser.Family, string, webappbrowser.RetentionPolicy) error
+}
+
+type nativeWebAppBrowserRuntime struct{}
+
+func (nativeWebAppBrowserRuntime) Start(browser webappbrowser.Browser, options webappbrowser.LaunchOptions) (*exec.Cmd, error) {
+	return webappbrowser.Start(browser, options)
+}
+
+func (nativeWebAppBrowserRuntime) CleanupProfile(family webappbrowser.Family, profileDir string, policy webappbrowser.RetentionPolicy) error {
+	return webappbrowser.CleanupProfile(family, profileDir, policy)
+}
+
 func (a *App) LaunchWebApp(input WebAppLaunchInput) (WebAppRuntimeInfo, error) {
 	app, err := a.webAppByID(input.WebAppID)
 	if err != nil {
@@ -242,7 +257,7 @@ func (a *App) startWebAppRuntime(app domain.WebApp, browser webappbrowser.Browse
 		RestoreSession: app.RestoreSession, ClearCacheOnClose: app.ClearCacheOnClose,
 	}
 	if !privateProfile {
-		_ = webappbrowser.CleanupProfile(browser.Family, profileDir, policy)
+		_ = a.browserRuntime.CleanupProfile(browser.Family, profileDir, policy)
 	}
 	socksPort := listenerPort(listener)
 	if browser.Family == webappbrowser.FamilyFirefox {
@@ -254,7 +269,7 @@ func (a *App) startWebAppRuntime(app domain.WebApp, browser webappbrowser.Browse
 			return nil, err
 		}
 	}
-	command, err := webappbrowser.Start(browser, webappbrowser.LaunchOptions{
+	command, err := a.browserRuntime.Start(browser, webappbrowser.LaunchOptions{
 		URL: app.URL, ProfileDir: profileDir, Private: privateProfile, SOCKSPort: socksPort,
 	})
 	if err != nil {
@@ -266,8 +281,8 @@ func (a *App) startWebAppRuntime(app domain.WebApp, browser webappbrowser.Browse
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	processStartedAt := time.Now()
-	runtimeID := fmt.Sprintf("webapp-%d", time.Now().UnixNano())
+	processStartedAt := a.now()
+	runtimeID := fmt.Sprintf("webapp-%d", processStartedAt.UnixNano())
 	runtime := &webAppRuntime{
 		id: runtimeID, groupKey: groupKey, browser: browser, profileDir: profileDir,
 		private: privateProfile, policy: policy, process: command, client: client,
@@ -275,7 +290,7 @@ func (a *App) startWebAppRuntime(app domain.WebApp, browser webappbrowser.Browse
 		gateway: gateway, sshInput: sessionInput,
 		info: WebAppRuntimeInfo{
 			RuntimeID: runtimeID, WebAppID: app.ID, BrowserID: string(browser.ID), Browser: browser.Name,
-			SOCKSPort: socksPort, Tunnel: listener != nil, StartedAt: time.Now().Format(time.RFC3339),
+			SOCKSPort: socksPort, Tunnel: listener != nil, StartedAt: processStartedAt.Format(time.RFC3339),
 		},
 	}
 	runtime.tunnelActive.Store(listener != nil)
@@ -303,7 +318,7 @@ func (a *App) startWebAppRuntime(app domain.WebApp, browser webappbrowser.Browse
 	}
 	go func() {
 		err := command.Wait()
-		if browserLauncherDetached(err, time.Since(processStartedAt)) {
+		if browserLauncherDetached(err, a.now().Sub(processStartedAt)) {
 			a.emitWebAppRuntimeStatus(runtime, "Web App browser launcher handed off to the browser process", false)
 			return
 		}
@@ -352,7 +367,7 @@ func browserLauncherDetached(waitErr error, lifetime time.Duration) bool {
 }
 
 func (a *App) openWebAppTab(runtime *webAppRuntime, url string) error {
-	command, err := webappbrowser.Start(runtime.browser, webappbrowser.LaunchOptions{
+	command, err := a.browserRuntime.Start(runtime.browser, webappbrowser.LaunchOptions{
 		URL: url, ProfileDir: runtime.profileDir, Private: runtime.private,
 		SOCKSPort: runtime.info.SOCKSPort, NewTab: true,
 	})
@@ -387,7 +402,7 @@ func (a *App) finishWebAppRuntime(runtime *webAppRuntime, killBrowser bool, mess
 		if runtime.private {
 			_ = os.RemoveAll(runtime.profileDir)
 		} else {
-			_ = webappbrowser.CleanupProfile(runtime.browser.Family, runtime.profileDir, runtime.policy)
+			_ = a.browserRuntime.CleanupProfile(runtime.browser.Family, runtime.profileDir, runtime.policy)
 		}
 		a.emitData(desktop.EventWebAppClosed, map[string]string{"runtimeId": runtime.id, "message": message})
 	})

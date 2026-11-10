@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/signoredellarete/bashes/internal/desktop"
 )
@@ -21,6 +22,7 @@ type fakeDesktopRuntime struct {
 	events        []recordedDesktopEvent
 	messages      []desktop.MessageDialogOptions
 	urls          []string
+	saveOptions   []desktop.SaveDialogOptions
 }
 
 func (runtime *fakeDesktopRuntime) Emit(_ context.Context, name string, data any) {
@@ -35,7 +37,8 @@ func (*fakeDesktopRuntime) OpenFileDialog(context.Context, desktop.OpenDialogOpt
 	return "", nil
 }
 
-func (runtime *fakeDesktopRuntime) SaveFileDialog(context.Context, desktop.SaveDialogOptions) (string, error) {
+func (runtime *fakeDesktopRuntime) SaveFileDialog(_ context.Context, options desktop.SaveDialogOptions) (string, error) {
+	runtime.saveOptions = append(runtime.saveOptions, options)
 	return runtime.savePath, nil
 }
 
@@ -56,6 +59,7 @@ func TestAppDesktopRuntimeHandlesDialogsEventsAndURLsWithoutWails(t *testing.T) 
 		savePath:      exportPath,
 	}
 	app := NewApp(filepath.Join(root, "data", "hosts.json"))
+	app.now = func() time.Time { return time.Date(2026, time.November, 10, 12, 0, 0, 0, time.UTC) }
 	app.desktopRuntime = runtime
 	app.startup(context.Background())
 
@@ -76,6 +80,9 @@ func TestAppDesktopRuntimeHandlesDialogsEventsAndURLsWithoutWails(t *testing.T) 
 	}
 	if len(runtime.events) != 1 || runtime.events[0].name != desktop.EventDatabaseExported {
 		t.Fatalf("events = %+v, want database exported event", runtime.events)
+	}
+	if len(runtime.saveOptions) != 1 || runtime.saveOptions[0].DefaultFilename != "bashes-hosts-20261110.json" {
+		t.Fatalf("save options = %+v", runtime.saveOptions)
 	}
 
 	app.openReadmeFromMenu()

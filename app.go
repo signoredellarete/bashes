@@ -68,6 +68,8 @@ type App struct {
 	desktopRuntime   desktop.Runtime
 	openFile         func(string) error
 	openFileCacheDir string
+	now              func() time.Time
+	browserRuntime   webAppBrowserRuntime
 }
 
 func NewApp(dataPath string) *App {
@@ -112,6 +114,8 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 		desktopRuntime:   desktop.NewWailsRuntime(),
 		openFile:         openFileWithDefaultApplication,
 		openFileCacheDir: defaultOpenFileCacheDir(dataPath),
+		now:              time.Now,
+		browserRuntime:   nativeWebAppBrowserRuntime{},
 	}
 	app.terminalSessions = terminalruntime.NewService(
 		applicationService, authPreferences, sshKeyService, sshConnector, sessionManager, app.handleTerminalEvent,
@@ -635,7 +639,8 @@ func (a *App) StartSSHTunnel(input SSHTunnelInput) (SSHTunnelInfo, error) {
 		return SSHTunnelInfo{}, err
 	}
 
-	tunnelID := fmt.Sprintf("tunnel-%d", time.Now().UnixNano())
+	now := a.now()
+	tunnelID := fmt.Sprintf("tunnel-%d", now.UnixNano())
 	info := SSHTunnelInfo{
 		TunnelID:      tunnelID,
 		ResourceID:    resource.ID,
@@ -645,7 +650,7 @@ func (a *App) StartSSHTunnel(input SSHTunnelInput) (SSHTunnelInfo, error) {
 		LocalAddress:  listener.Addr().String(),
 		Target:        fmt.Sprintf("%s@%s:%d", resource.User, sshHost(resource), resource.Port),
 		ForwardTarget: tunnelForwardTarget(input, forwardAddress),
-		StartedAt:     time.Now().Format(time.RFC3339),
+		StartedAt:     now.Format(time.RFC3339),
 	}
 	serve := func(ctx context.Context) error {
 		switch info.Type {
@@ -847,7 +852,7 @@ func (a *App) exportDatabaseFromMenu() {
 	}
 	path, err := a.desktopRuntime.SaveFileDialog(ctx, desktop.SaveDialogOptions{
 		Title:           "Export Bashes Database",
-		DefaultFilename: fmt.Sprintf("bashes-hosts-%s.json", time.Now().Format("20060102")),
+		DefaultFilename: fmt.Sprintf("bashes-hosts-%s.json", a.now().Format("20060102")),
 		Filters: []desktop.FileFilter{
 			{DisplayName: "JSON files (*.json)", Pattern: "*.json"},
 		},

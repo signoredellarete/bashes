@@ -43,7 +43,7 @@ Status on 2026-11-10 for branch `feature/v2-modular-architecture`:
 | Phase | Status | Current result |
 | --- | --- | --- |
 | 0 - Baseline and contracts | Complete | Desktop adapters, error/event contracts and architecture guards are in place. |
-| 1 - Backend application boundaries | In progress | Settings, imports and SSH key workflows are independent of Wails; some facade orchestration remains. |
+| 1 - Backend application boundaries | In progress | Data workflows are independent of Wails; tunnel, transfer and Web App orchestration still need extraction. |
 | 2 - Runtime manager | Complete | Native runtimes have backend ownership, common lifecycle state and deterministic cleanup tests. |
 | 3 - Frontend modularization | In progress | Desktop APIs and shared application/resource state are extracted; feature UI still remains in `main.js`. |
 | 4 - Transfer reliability | Not started | Planned after the application boundaries are stable. |
@@ -82,6 +82,9 @@ Status on 2026-11-10 for branch `feature/v2-modular-architecture`:
 - Wails events, dialogs and external URL operations are isolated behind an
   injectable desktop runtime adapter; facade menu workflows run in tests
   without a WebView;
+- runtime timestamps and Web App browser launch/cleanup operations use
+  injectable adapters; deterministic tests cover clock-dependent filenames and
+  transfer staging paths;
 - terminal session lifecycle, SSH tunnel lifecycle and file transfer job state
   are owned by dedicated managers with idempotent cancellation and race-tested
   concurrent cleanup;
@@ -104,9 +107,9 @@ Status on 2026-11-10 for branch `feature/v2-modular-architecture`:
 - plugin package details are documented in
   [PLUGIN_MANIFEST.md](PLUGIN_MANIFEST.md).
 
-The next implementation milestone is completing the remaining backend
-application boundaries in Phase 1 before continuing feature-by-feature frontend
-extraction. Plugin process supervision is available
+The next implementation milestone is completing the remaining runtime service
+extractions in Phase 1 before returning to frontend modularization. Plugin
+process supervision is available
 to the application shutdown path, but user-facing plugin installation and
 enablement remain blocked on explicit permission and trust policy.
 
@@ -334,7 +337,7 @@ binding implementation.
 - [-] Reduce `App` to a Wails facade composed from services.
 - [x] Extract settings, imports and SSH key workflows with existing tests moved or
   expanded around their public contracts.
-- [-] Introduce dependency injection for filesystem, dialogs, browser and clock
+- [x] Introduce dependency injection for filesystem, dialogs, browser and clock
   operations where platform behavior matters.
 
 Exit condition: resource management, imports, keys and settings are testable

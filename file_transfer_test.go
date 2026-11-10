@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseTransferID(t *testing.T) {
@@ -105,6 +106,29 @@ func TestValidateCopyDestinationAllowsSiblingAndDifferentScope(t *testing.T) {
 				t.Fatalf("validateCopyDestination() error = %v", err)
 			}
 		})
+	}
+}
+
+func TestAtomicDestinationUsesInjectedClock(t *testing.T) {
+	root := t.TempDir()
+	session := &fileTransferSession{
+		localRoot: root,
+		now:       func() time.Time { return time.Unix(0, 1234) },
+	}
+	var temporaryPath string
+	err := session.withAtomicDestination("local", "result.txt", func(relative string) error {
+		temporaryPath = relative
+		path, pathErr := session.localPath(relative)
+		if pathErr != nil {
+			return pathErr
+		}
+		return os.WriteFile(path, []byte("result"), 0o600)
+	})
+	if err != nil {
+		t.Fatalf("withAtomicDestination() error = %v", err)
+	}
+	if !strings.Contains(temporaryPath, ".result.txt.bashes-partial-1234") {
+		t.Fatalf("temporary path = %q", temporaryPath)
 	}
 }
 
