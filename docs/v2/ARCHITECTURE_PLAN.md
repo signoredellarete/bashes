@@ -105,7 +105,8 @@ Status on 2026-11-10 for branch `feature/v2-modular-architecture`:
   existing application contracts;
 - shared confirmation and application-message overlays are mounted as one
   Svelte feature while preserving focus restoration, Escape handling and the
-  existing modal call sites;
+  existing modal call sites; error notifications and their lifecycle now use
+  the same feature, with overlay styles isolated in one feature stylesheet;
 - the Tag Manager panel owns its rendering and local edit state in Svelte;
   backend tag mutations and global filtering remain explicit application
   callbacks backed by a tested panel model;

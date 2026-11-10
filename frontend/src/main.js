@@ -103,6 +103,7 @@ import {
 import { isWebAppResource, webAppMatchesFilters } from './web-apps/model.js';
 import './terminal-fonts.css';
 import './styles.css';
+import './app/overlays/overlays.css';
 
 const terminalSettings = loadTerminalSettings(localStorage);
 
@@ -374,8 +375,6 @@ app.innerHTML = `
       </div>
     </footer>
   </main>
-
-  <div id="toast-stack" class="toast-stack" aria-live="polite" aria-relevant="additions"></div>
 
   <section id="resource-panel" class="slide-panel" hidden>
     <div class="panel-scrim" data-close-panel></div>
@@ -4830,21 +4829,7 @@ function recordNotice(message, level) {
 }
 
 function notify(message, level = 'info') {
-  if (level !== 'error') return;
-  const stack = document.querySelector('#toast-stack');
-  if (!stack) return;
-  const toast = document.createElement('article');
-  toast.className = `toast toast-${level}`;
-  const text = document.createElement('p');
-  text.textContent = message;
-  const close = document.createElement('button');
-  close.type = 'button';
-  close.append(iconElement('x'));
-  close.title = 'Dismiss';
-  close.addEventListener('click', () => toast.remove());
-  toast.append(text, close);
-  stack.prepend(toast);
-  window.setTimeout(() => toast.remove(), 10000);
+  appOverlays.notify(message, level);
 }
 
 function showMessageLog() {

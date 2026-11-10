@@ -12,6 +12,7 @@ export function mountAppOverlays(target, callbacks) {
     resolveConfirm: (confirmed) => controller?.resolveConfirm(confirmed),
     show: (options) => controller?.show(options),
     closeApp: () => controller?.closeApp(),
+    notify: (message, level) => controller?.notify(message, level),
     isConfirmOpen: () => controller?.isConfirmOpen() ?? false,
     isAppOpen: () => controller?.isAppOpen() ?? false,
   };

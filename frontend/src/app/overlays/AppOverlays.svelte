@@ -1,5 +1,5 @@
 <script>
-  import { onMount, tick } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
   import iconX from '@tabler/icons/outline/x.svg?raw';
 
   let { onready, onclosed } = $props();
@@ -23,6 +23,9 @@
   let appSecondaryLabel = $state('');
   let appPrimaryAction = null;
   let appSecondaryAction = null;
+  let toastSequence = 0;
+  let toasts = $state([]);
+  const toastTimers = new Map();
 
   async function confirm(options = {}) {
     if (confirmResolver) confirmResolver(false);
@@ -84,14 +87,33 @@
     action?.();
   }
 
+  function notify(message, level = 'info') {
+    if (level !== 'error') return;
+    const id = ++toastSequence;
+    toasts = [{ id, message: String(message ?? ''), level }, ...toasts];
+    toastTimers.set(id, window.setTimeout(() => dismissToast(id), 10000));
+  }
+
+  function dismissToast(id) {
+    const timer = toastTimers.get(id);
+    if (timer) window.clearTimeout(timer);
+    toastTimers.delete(id);
+    toasts = toasts.filter((toast) => toast.id !== id);
+  }
+
   onMount(() => onready?.({
     confirm,
     resolveConfirm,
     show,
     closeApp,
+    notify,
     isConfirmOpen: () => confirmVisible,
     isAppOpen: () => appVisible,
   }));
+
+  onDestroy(() => {
+    for (const timer of toastTimers.values()) window.clearTimeout(timer);
+  });
 </script>
 
 <section id="confirm-modal" class:open={confirmOpened} class="confirm-modal" hidden={!confirmVisible}>
@@ -108,6 +130,15 @@
     </footer>
   </div>
 </section>
+
+<div id="toast-stack" class="toast-stack" aria-live="polite" aria-relevant="additions">
+  {#each toasts as toast (toast.id)}
+    <article class={`toast toast-${toast.level}`}>
+      <p>{toast.message}</p>
+      <button type="button" title="Dismiss" aria-label="Dismiss" onclick={() => dismissToast(toast.id)}>{@html iconX}</button>
+    </article>
+  {/each}
+</div>
 
 <section id="app-modal" class:open={appOpened} class="app-modal" hidden={!appVisible}>
   <button class="app-modal-scrim" type="button" aria-label="Close" onclick={closeApp}></button>
