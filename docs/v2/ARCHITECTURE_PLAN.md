@@ -103,6 +103,9 @@ Status on 2026-11-10 for branch `feature/v2-modular-architecture`:
 - the complete Settings panel is mounted as a Svelte feature with a tested pure
   model; terminal preview, cancel rollback and browser preferences keep their
   existing application contracts;
+- shared confirmation and application-message overlays are mounted as one
+  Svelte feature while preserving focus restoration, Escape handling and the
+  existing modal call sites;
 - plugin manifest validation, discovery, handshake and bounded process
   supervision are tested; the supervisor is part of application shutdown but
   has no user-facing installation or enablement path yet;

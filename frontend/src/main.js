@@ -50,6 +50,7 @@ import {
   resourceTarget,
 } from './features/resources/model.js';
 import { createAppState } from './state/app-state.js';
+import { mountAppOverlays } from './app/overlays/mount.js';
 import { mountSettingsPanel } from './settings/mount.js';
 import { settingsPanelData as createSettingsPanelData } from './settings/model.js';
 import { passwordFieldValue, placeCaretAfterSavedPassword, showSavedPassword } from './password-field.js';
@@ -105,7 +106,6 @@ const terminalSettings = loadTerminalSettings(localStorage);
 
 const state = createAppState({ terminalSettings, storage: localStorage });
 
-let appModalActions = {};
 let searchRenderFrame = 0;
 let terminalFitFrame = 0;
 let tooltipTimer = 0;
@@ -621,6 +621,7 @@ app.innerHTML = `
   </section>
 
   <div id="settings-root"></div>
+  <div id="app-overlays-root"></div>
 
   <section id="file-transfer-modal" class="file-transfer-modal" hidden>
     <div class="file-transfer-scrim"></div>
@@ -814,40 +815,6 @@ app.innerHTML = `
     </section>
   </section>
 
-  <section id="confirm-modal" class="confirm-modal" hidden>
-    <div class="confirm-scrim" data-confirm-cancel></div>
-    <section class="confirm-card" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
-      <header>
-        <p class="eyebrow" id="confirm-kicker">Confirm</p>
-        <h3 id="confirm-title">Delete resource</h3>
-      </header>
-      <p id="confirm-message"></p>
-      <footer class="confirm-actions">
-        <button id="confirm-cancel" class="secondary" type="button" data-confirm-cancel>Cancel</button>
-        <button id="confirm-accept" class="danger" type="button">Delete</button>
-      </footer>
-    </section>
-  </section>
-
-  <section id="app-modal" class="app-modal" hidden>
-    <div class="app-modal-scrim" data-close-app-modal></div>
-    <section class="app-modal-card" role="dialog" aria-modal="true" aria-labelledby="app-modal-title" aria-describedby="app-modal-message">
-      <header class="app-modal-header">
-        <div>
-          <p class="eyebrow" id="app-modal-kicker">Bashes</p>
-          <h3 id="app-modal-title">Bashes</h3>
-        </div>
-        <button class="close-panel" type="button" data-close-app-modal title="Close">${ICON_CLOSE}</button>
-      </header>
-      <p id="app-modal-message"></p>
-      <dl id="app-modal-details"></dl>
-      <footer class="app-modal-actions">
-        <button id="app-modal-secondary" class="secondary" type="button" hidden></button>
-        <button id="app-modal-primary" type="button">OK</button>
-      </footer>
-    </section>
-  </section>
-
   <div id="app-tooltip" class="app-tooltip" role="tooltip" hidden></div>
   <div id="edit-context-menu" class="edit-context-menu" hidden>
     <button type="button" data-edit-command="cut">Cut</button>
@@ -860,6 +827,9 @@ const settingsPanel = mountSettingsPanel(document.querySelector('#settings-root'
   onpreview: (values) => previewTerminalAppearance(values),
   onsave: (values) => submitSettings(values),
   onrequestclose: () => closeSettingsPanel(),
+});
+const appOverlays = mountAppOverlays(document.querySelector('#app-overlays-root'), {
+  onclosed: () => restoreTerminalFocusAfterOverlay(),
 });
 
 const stack = document.querySelector('#terminal-stack');
@@ -997,13 +967,6 @@ document.querySelectorAll('[data-close-file-transfer]').forEach((element) => {
 document.querySelector('#file-transfer-background').addEventListener('click', () => backgroundFileTransferModal());
 registerFileTransferModalResize();
 registerFileTransferModalDrag();
-document.querySelectorAll('[data-confirm-cancel]').forEach((element) => {
-  element.addEventListener('click', () => resolveConfirmModal(false));
-});
-document.querySelector('#confirm-accept').addEventListener('click', () => resolveConfirmModal(true));
-document.querySelectorAll('[data-close-app-modal]').forEach((element) => {
-  element.addEventListener('click', () => closeAppModal());
-});
 document.querySelectorAll('.field-help-trigger').forEach((button) => {
   button.addEventListener('click', (event) => toggleFieldHelp(event));
   button.addEventListener('keydown', (event) => {
@@ -1012,8 +975,6 @@ document.querySelectorAll('.field-help-trigger').forEach((button) => {
     }
   });
 });
-document.querySelector('#app-modal-primary').addEventListener('click', () => runAppModalAction('primary'));
-document.querySelector('#app-modal-secondary').addEventListener('click', () => runAppModalAction('secondary'));
 document.querySelector('#edit-context-menu').addEventListener('click', (event) => runEditContextCommand(event));
 document.addEventListener('contextmenu', (event) => openEditContextMenu(event));
 document.addEventListener('pointerdown', (event) => {
@@ -1026,9 +987,9 @@ window.addEventListener('pointerup', () => clearAllDragOutlines());
 window.addEventListener('pointercancel', () => clearAllDragOutlines());
 window.addEventListener('blur', () => clearAllDragOutlines());
 window.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && !document.querySelector('#confirm-modal').hidden) {
+  if (event.key === 'Escape' && appOverlays.isConfirmOpen()) {
     resolveConfirmModal(false);
-  } else if (event.key === 'Escape' && !document.querySelector('#app-modal').hidden) {
+  } else if (event.key === 'Escape' && appOverlays.isAppOpen()) {
     closeAppModal();
   } else if (event.key === 'Escape' && !document.querySelector('#settings-panel').hidden) {
     closeSettingsPanel();
@@ -1747,85 +1708,19 @@ function confirmDeleteResource(selected) {
 }
 
 function openConfirmModal({ kicker = 'Confirm', title, message, confirmLabel = 'Confirm' }) {
-  const modal = document.querySelector('#confirm-modal');
-  const cancel = document.querySelector('#confirm-cancel');
-  document.querySelector('#confirm-kicker').textContent = kicker;
-  document.querySelector('#confirm-title').textContent = title;
-  document.querySelector('#confirm-message').textContent = message;
-  document.querySelector('#confirm-accept').textContent = confirmLabel;
-
-  if (state.confirmResolver) {
-    state.confirmResolver(false);
-  }
-
-  modal.hidden = false;
-  requestAnimationFrame(() => modal.classList.add('open'));
-  requestAnimationFrame(() => cancel.focus());
-
-  return new Promise((resolve) => {
-    state.confirmResolver = resolve;
-  });
+  return appOverlays.confirm({ kicker, title, message, confirmLabel });
 }
 
 function resolveConfirmModal(confirmed) {
-  const modal = document.querySelector('#confirm-modal');
-  if (!modal || modal.hidden) return;
-
-  modal.classList.remove('open');
-  modal.hidden = true;
-  restoreTerminalFocusAfterOverlay();
-
-  const resolve = state.confirmResolver;
-  state.confirmResolver = null;
-  if (resolve) resolve(confirmed);
+  appOverlays.resolveConfirm(confirmed);
 }
 
 function showAppModal(options) {
-  const modal = document.querySelector('#app-modal');
-  document.querySelector('#app-modal-kicker').textContent = options.kicker ?? 'Bashes';
-  document.querySelector('#app-modal-title').textContent = options.title ?? 'Bashes';
-  document.querySelector('#app-modal-message').textContent = options.message ?? '';
-
-  const details = document.querySelector('#app-modal-details');
-  const entries = options.details ?? [];
-  details.replaceChildren(...entries.flatMap(([label, value]) => {
-    const term = document.createElement('dt');
-    term.textContent = label;
-    const description = document.createElement('dd');
-    description.textContent = value;
-    return [term, description];
-  }));
-  details.hidden = entries.length === 0;
-
-  appModalActions = {};
-  configureAppModalButton('primary', options.primaryLabel ?? 'OK', options.primaryAction);
-  configureAppModalButton('secondary', options.secondaryLabel, options.secondaryAction);
-
-  modal.hidden = false;
-  requestAnimationFrame(() => modal.classList.add('open'));
-}
-
-function configureAppModalButton(name, label, action) {
-  const button = document.querySelector(`#app-modal-${name}`);
-  button.hidden = !label;
-  if (!label) return;
-  button.textContent = label;
-  appModalActions[name] = action;
-}
-
-function runAppModalAction(name) {
-  const action = appModalActions[name];
-  closeAppModal();
-  if (typeof action === 'function') action();
+  appOverlays.show(options);
 }
 
 function closeAppModal() {
-  const modal = document.querySelector('#app-modal');
-  if (!modal || modal.hidden) return;
-  modal.classList.remove('open');
-  modal.hidden = true;
-  appModalActions = {};
-  restoreTerminalFocusAfterOverlay();
+  appOverlays.closeApp();
 }
 
 async function stopSelectedTunnel() {

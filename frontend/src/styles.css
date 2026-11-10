@@ -2239,7 +2239,9 @@ html.sorting-tags * {
 .confirm-scrim {
   position: fixed;
   inset: 0;
+  border: 0;
   background: rgba(16, 20, 24, 0.42);
+  padding: 0;
 }
 
 .confirm-card {
@@ -2336,7 +2338,9 @@ html.sorting-tags * {
 .app-modal-scrim {
   position: fixed;
   inset: 0;
+  border: 0;
   background: rgba(16, 20, 24, 0.42);
+  padding: 0;
 }
 
 .app-modal-card {

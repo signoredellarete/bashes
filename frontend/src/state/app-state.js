@@ -23,7 +23,6 @@ export function createAppState({ terminalSettings, storage = globalThis.localSto
     drawerMode: null,
     drawerHostId: null,
     editResourceId: null,
-    confirmResolver: null,
     editContextTarget: null,
     activeTagFilters: [],
     tagFilterMode: 'any',

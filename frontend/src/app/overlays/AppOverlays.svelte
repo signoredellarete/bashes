@@ -1,0 +1,145 @@
+<script>
+  import { onMount, tick } from 'svelte';
+  import iconX from '@tabler/icons/outline/x.svg?raw';
+
+  let { onready, onclosed } = $props();
+
+  let confirmVisible = $state(false);
+  let confirmOpened = $state(false);
+  let confirmKicker = $state('Confirm');
+  let confirmTitle = $state('');
+  let confirmMessage = $state('');
+  let confirmLabel = $state('Confirm');
+  let confirmResolver = null;
+  let confirmCancelButton;
+
+  let appVisible = $state(false);
+  let appOpened = $state(false);
+  let appKicker = $state('Bashes');
+  let appTitle = $state('Bashes');
+  let appMessage = $state('');
+  let appDetails = $state([]);
+  let appPrimaryLabel = $state('OK');
+  let appSecondaryLabel = $state('');
+  let appPrimaryAction = null;
+  let appSecondaryAction = null;
+
+  async function confirm(options = {}) {
+    if (confirmResolver) confirmResolver(false);
+
+    confirmKicker = options.kicker ?? 'Confirm';
+    confirmTitle = options.title ?? '';
+    confirmMessage = options.message ?? '';
+    confirmLabel = options.confirmLabel ?? 'Confirm';
+    confirmVisible = true;
+    await tick();
+    requestAnimationFrame(() => {
+      confirmOpened = true;
+      confirmCancelButton?.focus();
+    });
+
+    return new Promise((resolve) => {
+      confirmResolver = resolve;
+    });
+  }
+
+  function resolveConfirm(confirmed) {
+    if (!confirmVisible) return;
+    confirmOpened = false;
+    confirmVisible = false;
+    onclosed?.();
+
+    const resolve = confirmResolver;
+    confirmResolver = null;
+    resolve?.(confirmed);
+  }
+
+  async function show(options = {}) {
+    appKicker = options.kicker ?? 'Bashes';
+    appTitle = options.title ?? 'Bashes';
+    appMessage = options.message ?? '';
+    appDetails = options.details ?? [];
+    appPrimaryLabel = options.primaryLabel ?? 'OK';
+    appSecondaryLabel = options.secondaryLabel ?? '';
+    appPrimaryAction = options.primaryAction;
+    appSecondaryAction = options.secondaryAction;
+    appVisible = true;
+    await tick();
+    requestAnimationFrame(() => {
+      appOpened = true;
+    });
+  }
+
+  function closeApp() {
+    if (!appVisible) return;
+    appOpened = false;
+    appVisible = false;
+    appPrimaryAction = null;
+    appSecondaryAction = null;
+    onclosed?.();
+  }
+
+  function runAppAction(action) {
+    closeApp();
+    action?.();
+  }
+
+  onMount(() => onready?.({
+    confirm,
+    resolveConfirm,
+    show,
+    closeApp,
+    isConfirmOpen: () => confirmVisible,
+    isAppOpen: () => appVisible,
+  }));
+</script>
+
+<section id="confirm-modal" class:open={confirmOpened} class="confirm-modal" hidden={!confirmVisible}>
+  <button class="confirm-scrim" type="button" aria-label="Cancel" onclick={() => resolveConfirm(false)}></button>
+  <div class="confirm-card" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+    <header>
+      <p class="eyebrow" id="confirm-kicker">{confirmKicker}</p>
+      <h3 id="confirm-title">{confirmTitle}</h3>
+    </header>
+    <p id="confirm-message">{confirmMessage}</p>
+    <footer class="confirm-actions">
+      <button bind:this={confirmCancelButton} id="confirm-cancel" class="secondary" type="button" onclick={() => resolveConfirm(false)}>Cancel</button>
+      <button id="confirm-accept" class="danger" type="button" onclick={() => resolveConfirm(true)}>{confirmLabel}</button>
+    </footer>
+  </div>
+</section>
+
+<section id="app-modal" class:open={appOpened} class="app-modal" hidden={!appVisible}>
+  <button class="app-modal-scrim" type="button" aria-label="Close" onclick={closeApp}></button>
+  <div class="app-modal-card" role="dialog" aria-modal="true" aria-labelledby="app-modal-title" aria-describedby="app-modal-message">
+    <header class="app-modal-header">
+      <div>
+        <p class="eyebrow" id="app-modal-kicker">{appKicker}</p>
+        <h3 id="app-modal-title">{appTitle}</h3>
+      </div>
+      <button class="close-panel" type="button" title="Close" aria-label="Close" onclick={closeApp}>{@html iconX}</button>
+    </header>
+    <p id="app-modal-message">{appMessage}</p>
+    <dl id="app-modal-details" hidden={appDetails.length === 0}>
+      {#each appDetails as detail}
+        <dt>{detail[0]}</dt>
+        <dd>{detail[1]}</dd>
+      {/each}
+    </dl>
+    <footer class="app-modal-actions">
+      <button
+        id="app-modal-secondary"
+        class="secondary"
+        type="button"
+        hidden={!appSecondaryLabel}
+        onclick={() => runAppAction(appSecondaryAction)}
+      >{appSecondaryLabel}</button>
+      <button
+        id="app-modal-primary"
+        type="button"
+        hidden={!appPrimaryLabel}
+        onclick={() => runAppAction(appPrimaryAction)}
+      >{appPrimaryLabel}</button>
+    </footer>
+  </div>
+</section>
