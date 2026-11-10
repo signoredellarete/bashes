@@ -79,6 +79,40 @@ func (s *Service) ListWorkspace() (Workspace, error) {
 	}, nil
 }
 
+func (s *Service) Endpoint(id string) (domain.Endpoint, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return domain.Endpoint{}, errors.New("resource id is required")
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	data, err := s.store.Load()
+	if err != nil {
+		return domain.Endpoint{}, err
+	}
+	for _, host := range data.Hosts {
+		if host.ID == id {
+			return domain.Endpoint{
+				ID:                 host.ID,
+				Type:               domain.ResourceHost,
+				Hostname:           host.Hostname,
+				IP:                 host.IP,
+				Port:               host.Port,
+				User:               host.User,
+				Tags:               append([]string(nil), host.Tags...),
+				HostKeyFingerprint: host.HostKeyFingerprint,
+				Auth:               host.Auth,
+			}, nil
+		}
+	}
+	if subsystem := findSubsystemByID(data.Hosts, id); subsystem != nil {
+		return *subsystem, nil
+	}
+	return domain.Endpoint{}, fmt.Errorf("resource %q not found", id)
+}
+
 func (s *Service) ListTags() ([]string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

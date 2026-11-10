@@ -367,6 +367,10 @@ func ReadPublicPath(path string) (string, error) {
 	return string(ssh.MarshalAuthorizedKey(publicKey)), nil
 }
 
+func ExpandPath(path string) string {
+	return expandHome(path, userHomeDir())
+}
+
 func SanitizeName(name string) string {
 	name = strings.TrimSpace(name)
 	name = regexp.MustCompile(`[^A-Za-z0-9_.-]+`).ReplaceAllString(name, "-")

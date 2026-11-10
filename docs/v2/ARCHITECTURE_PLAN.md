@@ -43,7 +43,7 @@ Status on 2026-11-09 for branch `feature/v2-modular-architecture`:
 | Phase | Status | Current result |
 | --- | --- | --- |
 | 0 - Baseline and contracts | Complete | Desktop adapters, error/event contracts and architecture guards are in place. |
-| 1 - Backend application boundaries | In progress | Settings, imports and local SSH key management are independent of Wails; some facade orchestration remains. |
+| 1 - Backend application boundaries | In progress | Settings, imports and SSH key workflows are independent of Wails; some facade orchestration remains. |
 | 2 - Runtime manager | In progress | Sessions, tunnels, transfers and Web App runtime ownership have dedicated managers and registries. |
 | 3 - Frontend modularization | In progress | Desktop APIs and shared application/resource state are extracted; feature UI still remains in `main.js`. |
 | 4 - Transfer reliability | Not started | Planned after the application boundaries are stable. |
@@ -65,8 +65,8 @@ Status on 2026-11-09 for branch `feature/v2-modular-architecture`:
   in a datastore service; `App` only performs runtime cleanup and emits desktop
   events after replacement;
 - local SSH key inventory, settings, generation, import, reading and deletion
-  live in an independent tested service; remote key installation remains facade
-  orchestration because it combines resource lookup and an SSH connection;
+  live in an independent tested service; remote key installation has a separate
+  service for resource lookup, SSH execution and authentication persistence;
 - SSH authentication method construction and OpenSSH/PEM/PPK parsing live in an
   independent builder with injectable home, filesystem, environment and agent
   socket dependencies;
@@ -325,7 +325,7 @@ binding implementation.
 ### Phase 1: Backend application boundaries
 
 - [-] Reduce `App` to a Wails facade composed from services.
-- [-] Extract settings, imports and SSH key workflows with existing tests moved or
+- [x] Extract settings, imports and SSH key workflows with existing tests moved or
   expanded around their public contracts.
 - [-] Introduce dependency injection for filesystem, dialogs, browser and clock
   operations where platform behavior matters.

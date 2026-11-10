@@ -54,6 +54,46 @@ func TestServiceAddsHostAndSubsystem(t *testing.T) {
 	}
 }
 
+func TestServiceResolvesHostAndNestedEndpointByID(t *testing.T) {
+	service := NewService(newMemoryStore())
+	host, err := service.AddHost(EndpointInput{
+		Hostname: "server", IP: "192.0.2.10", Port: 22, User: "root", Tags: []string{"prod"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vm, err := service.AddSubsystem(host.ID, EndpointInput{
+		Type: domain.ResourceVM, Hostname: "vm", IP: "192.0.2.11", Port: 2222, User: "deploy",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lxc, err := service.AddSubsystem(vm.ID, EndpointInput{
+		Type: domain.ResourceLXC, Hostname: "lxc", IP: "192.0.2.12", Port: 22, User: "ops",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hostEndpoint, err := service.Endpoint(host.ID)
+	if err != nil {
+		t.Fatalf("Endpoint(host) error = %v", err)
+	}
+	if hostEndpoint.Type != domain.ResourceHost || hostEndpoint.Hostname != host.Hostname || len(hostEndpoint.Tags) != 1 {
+		t.Fatalf("host endpoint = %+v", hostEndpoint)
+	}
+	nestedEndpoint, err := service.Endpoint(lxc.ID)
+	if err != nil {
+		t.Fatalf("Endpoint(nested) error = %v", err)
+	}
+	if nestedEndpoint.ID != lxc.ID || nestedEndpoint.Type != domain.ResourceLXC {
+		t.Fatalf("nested endpoint = %+v", nestedEndpoint)
+	}
+	if _, err := service.Endpoint("missing"); err == nil {
+		t.Fatal("Endpoint(missing) error = nil")
+	}
+}
+
 func TestServicePersistsAndUpdatesResourceTags(t *testing.T) {
 	store := newMemoryStore()
 	service := NewService(store)

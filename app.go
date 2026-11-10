@@ -27,6 +27,7 @@ import (
 	appsettings "github.com/signoredellarete/bashes/internal/settings"
 	"github.com/signoredellarete/bashes/internal/sshauth"
 	"github.com/signoredellarete/bashes/internal/sshconnection"
+	"github.com/signoredellarete/bashes/internal/sshkeyinstall"
 	"github.com/signoredellarete/bashes/internal/sshkeys"
 	"github.com/signoredellarete/bashes/internal/sshtunnel"
 	"github.com/signoredellarete/bashes/internal/store"
@@ -55,6 +56,7 @@ type App struct {
 	dataPath         string
 	sshKeys          *sshkeys.Service
 	sshConnector     *sshconnection.Connector
+	sshKeyInstaller  *sshkeyinstall.Service
 	webAppBrowsers   *webappbrowser.PreferencesService
 	sessions         *termsession.Manager
 	tunnels          *sshtunnel.Manager
@@ -87,6 +89,7 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 	)
 	webAppBrowserService := webappbrowser.NewPreferencesService(goruntime.GOOS, getenv, settingsRepository)
 	sshConnector := sshconnection.NewConnector(sshAuthBuilder, applicationService)
+	sshKeyInstaller := sshkeyinstall.NewService(applicationService, sshKeyService, sshConnector)
 
 	return &App{
 		dataPath:         dataPath,
@@ -94,6 +97,7 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 		database:         databaseService,
 		sshKeys:          sshKeyService,
 		sshConnector:     sshConnector,
+		sshKeyInstaller:  sshKeyInstaller,
 		webAppBrowsers:   webAppBrowserService,
 		passwords:        passwords,
 		sessions:         termsession.NewManager(),
@@ -491,73 +495,25 @@ func (a *App) resolveSessionKeyPath(input SSHSessionInput) SSHSessionInput {
 }
 
 func (a *App) InstallSSHKey(input InstallSSHKeyInput) error {
-	publicKey, err := a.installablePublicKey(input)
-	if err != nil {
-		return err
-	}
+	return a.sshKeyInstaller.Install(sshKeyInstallInput(input))
+}
 
-	resource, err := a.resourceByID(input.ResourceID)
-	if err != nil {
-		return err
-	}
+func installSSHKeyCommand(authorizedKey string) string {
+	return sshkeyinstall.Command(authorizedKey)
+}
 
-	client, err := a.dialResource(resource, SSHSessionInput{
+func sshKeyInstallInput(input InstallSSHKeyInput) sshkeyinstall.Input {
+	return sshkeyinstall.Input{
+		ResourceID:           input.ResourceID,
+		KeyName:              input.KeyName,
+		PublicKeyPath:        input.PublicKeyPath,
 		Password:             input.Password,
 		PrivateKeyPath:       input.PrivateKeyPath,
 		PrivateKeyPassphrase: input.PrivateKeyPassphrase,
 		TrustHostKey:         input.TrustHostKey,
 		AcceptHostKey:        input.AcceptHostKey,
 		ReplaceHostKey:       input.ReplaceHostKey,
-	}, remotessh.DefaultTimeout)
-	if err != nil {
-		return err
 	}
-	defer client.Close()
-
-	session, err := client.NewSession()
-	if err != nil {
-		return fmt.Errorf("create ssh session: %w", err)
-	}
-	defer session.Close()
-
-	authorizedKey := strings.TrimSpace(publicKey)
-	command := installSSHKeyCommand(authorizedKey)
-	output, err := session.CombinedOutput(command)
-	if err != nil {
-		return fmt.Errorf("install ssh key: %w: %s", err, strings.TrimSpace(string(output)))
-	}
-	if strings.TrimSpace(input.PrivateKeyPath) != "" {
-		return a.service.SetResourceAuth(input.ResourceID, domain.Auth{
-			Method:         domain.AuthMethodPath,
-			PrivateKeyPath: expandHome(input.PrivateKeyPath),
-		})
-	}
-	return a.service.SetResourceAuth(input.ResourceID, domain.Auth{
-		Method:  domain.AuthMethodKey,
-		KeyName: sanitizeKeyName(input.KeyName),
-	})
-}
-
-func installSSHKeyCommand(authorizedKey string) string {
-	quotedKey := shellQuote(authorizedKey)
-	return fmt.Sprintf(
-		"mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && { grep -qxF %s ~/.ssh/authorized_keys || printf '%%s\\n' %s >> ~/.ssh/authorized_keys; }",
-		quotedKey,
-		quotedKey,
-	)
-}
-
-func (a *App) installablePublicKey(input InstallSSHKeyInput) (string, error) {
-	if strings.TrimSpace(input.PublicKeyPath) != "" {
-		return sshkeys.ReadPublicPath(input.PublicKeyPath)
-	}
-	if strings.TrimSpace(input.PrivateKeyPath) != "" {
-		return sshkeys.ReadPublicPath(input.PrivateKeyPath)
-	}
-	if strings.TrimSpace(input.KeyName) != "" {
-		return a.ReadSSHPublicKey(input.KeyName)
-	}
-	return "", errors.New("select or generate an SSH key before installing it")
 }
 
 type SSHSessionInput struct {
@@ -963,48 +919,7 @@ func (a *App) stopAllRuntimeConnections() {
 }
 
 func (a *App) resourceByID(id string) (domain.Endpoint, error) {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return domain.Endpoint{}, errors.New("resource id is required")
-	}
-
-	hosts, err := a.service.ListHosts()
-	if err != nil {
-		return domain.Endpoint{}, err
-	}
-
-	for _, host := range hosts {
-		if host.ID == id {
-			return domain.Endpoint{
-				ID:                 host.ID,
-				Type:               domain.ResourceHost,
-				Hostname:           host.Hostname,
-				IP:                 host.IP,
-				Port:               host.Port,
-				User:               host.User,
-				Tags:               host.Tags,
-				HostKeyFingerprint: host.HostKeyFingerprint,
-				Auth:               host.Auth,
-			}, nil
-		}
-		if subsystem, ok := nestedResourceByID(host.Subsystems, id); ok {
-			return subsystem, nil
-		}
-	}
-
-	return domain.Endpoint{}, fmt.Errorf("resource %q not found", id)
-}
-
-func nestedResourceByID(subsystems []domain.Endpoint, id string) (domain.Endpoint, bool) {
-	for _, subsystem := range subsystems {
-		if subsystem.ID == id {
-			return subsystem, true
-		}
-		if child, ok := nestedResourceByID(subsystem.Subsystems, id); ok {
-			return child, true
-		}
-	}
-	return domain.Endpoint{}, false
+	return a.service.Endpoint(id)
 }
 
 func (a *App) emit(name string, event SSHEvent) {
@@ -1399,5 +1314,5 @@ func sanitizeKeyName(name string) string {
 }
 
 func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+	return sshkeyinstall.ShellQuote(value)
 }
