@@ -92,7 +92,7 @@ import {
 import { repeatedKeyData } from './terminal-keyboard.js';
 import { createOrderedWriter } from './ordered-writer.js';
 import { pasteIntoTerminal } from './terminal-paste.js';
-import { sidebarListInset } from './sidebar-scroll.js';
+import { revealSidebarResource, sidebarListInset } from './sidebar-scroll.js';
 import { loadTunnelPreference, saveTunnelPreference } from './tunnel-preferences.js';
 import {
   canonicalTag,
@@ -1087,7 +1087,10 @@ async function submitResource(event) {
     closeResourcePanel();
     await refreshHosts();
     const createdResource = createdResourceID ? findResource(createdResourceID)?.resource : null;
-    if (createdResource) selectResource(createdResource);
+    if (createdResource) {
+      selectResource(createdResource);
+      revealSidebarResource(hostsScroll, createdResource.id);
+    }
     renderTabs();
   });
 }
@@ -1116,7 +1119,10 @@ async function submitWebApp(event) {
     closeWebAppPanel();
     await refreshHosts();
     const createdWebApp = createdWebAppID ? findResource(createdWebAppID)?.resource : null;
-    if (createdWebApp) selectResource(createdWebApp);
+    if (createdWebApp) {
+      selectResource(createdWebApp);
+      revealSidebarResource(hostsScroll, createdWebApp.id);
+    }
     renderTabs();
   });
 }

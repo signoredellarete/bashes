@@ -116,7 +116,7 @@ Status on 2026-11-10 for branch `feature/v2-modular-architecture`:
   model; browser launch and tunnel operations remain application callbacks;
 - newly created hosts, nested systems and Web Apps enter the same selected and
   pending-tab state as a direct card click, while edits preserve the current
-  selection;
+  selection; the sidebar minimally scrolls the new card into view;
 - plugin manifest validation, discovery, handshake and bounded process
   supervision are tested; the supervisor is part of application shutdown but
   has no user-facing installation or enablement path yet;
