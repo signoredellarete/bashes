@@ -5,6 +5,8 @@ import (
 	"errors"
 	"sync"
 	"testing"
+
+	runtimestate "github.com/signoredellarete/bashes/internal/runtime"
 )
 
 func TestManagerStopsTunnelAndClosesResourcesOnce(t *testing.T) {
@@ -80,10 +82,10 @@ func TestManagerFailOnlyClosesAuthoritativeTunnel(t *testing.T) {
 		t.Fatalf("Register() error = %v", err)
 	}
 
-	if !manager.Fail(tunnel) {
+	if !manager.Fail(tunnel, errors.New("keepalive failed")) {
 		t.Fatal("first Fail() = false")
 	}
-	if manager.Fail(tunnel) {
+	if manager.Fail(tunnel, errors.New("keepalive failed")) {
 		t.Fatal("second Fail() = true")
 	}
 	if client.count() != 1 || listener.count() != 1 {
@@ -110,6 +112,30 @@ func TestManagerListsTunnelIDsByResource(t *testing.T) {
 	}
 	if got := manager.IDsForResource("host-1"); len(got) != 1 || got[0] != "tunnel-2" {
 		t.Fatalf("IDsForResource() = %v", got)
+	}
+}
+
+func TestManagerFailureEmitsFailedLifecycle(t *testing.T) {
+	events := make([]runtimestate.Event, 0)
+	manager := NewManagerWithObserver(func(event runtimestate.Event) { events = append(events, event) })
+	want := errors.New("connection lost")
+	tunnel, err := manager.Register(Options{
+		Info:   Info{TunnelID: "tunnel-1", ResourceID: "host-1", Type: "socks"},
+		Client: &fakeCloser{}, Listener: &fakeCloser{},
+		Serve: func(context.Context) error { return want },
+	})
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	result := manager.Run(tunnel)
+	if !errors.Is(result.Err, want) {
+		t.Fatalf("Run() error = %v", result.Err)
+	}
+	if len(events) != 2 || events[0].Current.State != runtimestate.StateRunning || events[1].Current.State != runtimestate.StateFailed {
+		t.Fatalf("lifecycle events = %+v", events)
+	}
+	if events[1].Current.Error != want.Error() {
+		t.Fatalf("failure = %q", events[1].Current.Error)
 	}
 }
 

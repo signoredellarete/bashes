@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	runtimestate "github.com/signoredellarete/bashes/internal/runtime"
 )
 
 type Options[T comparable] struct {
@@ -21,10 +23,11 @@ type Binding[T comparable] struct {
 }
 
 type entry[T comparable] struct {
-	id       string
-	groupKey string
-	value    T
-	apps     map[string]struct{}
+	id        string
+	groupKey  string
+	value     T
+	apps      map[string]struct{}
+	lifecycle *runtimestate.Lifecycle
 }
 
 type Registry[T comparable] struct {
@@ -32,11 +35,17 @@ type Registry[T comparable] struct {
 	byID         map[string]*entry[T]
 	byGroup      map[string]string
 	runtimeByApp map[string]string
+	observer     runtimestate.Observer
 }
 
 func NewRegistry[T comparable]() *Registry[T] {
+	return NewRegistryWithObserver[T](nil)
+}
+
+func NewRegistryWithObserver[T comparable](observer runtimestate.Observer) *Registry[T] {
 	return &Registry[T]{
-		byID: make(map[string]*entry[T]), byGroup: make(map[string]string), runtimeByApp: make(map[string]string),
+		byID: make(map[string]*entry[T]), byGroup: make(map[string]string),
+		runtimeByApp: make(map[string]string), observer: observer,
 	}
 }
 
@@ -47,22 +56,32 @@ func (registry *Registry[T]) Register(options Options[T]) error {
 	if options.RuntimeID == "" || options.GroupKey == "" || options.AppID == "" {
 		return errors.New("Web App runtime, group and app IDs are required")
 	}
+	lifecycle, err := runtimestate.NewLifecycle(runtimestate.Options{
+		ID: options.RuntimeID, ResourceID: options.AppID,
+		Kind: "web-app", Observer: registry.observer,
+	})
+	if err != nil {
+		return err
+	}
 	item := &entry[T]{
 		id: options.RuntimeID, groupKey: options.GroupKey, value: options.Value,
-		apps: map[string]struct{}{options.AppID: {}},
+		apps: map[string]struct{}{options.AppID: {}}, lifecycle: lifecycle,
 	}
 	registry.mu.Lock()
-	defer registry.mu.Unlock()
 	if _, exists := registry.byID[item.id]; exists {
+		registry.mu.Unlock()
 		return fmt.Errorf("Web App runtime %q already exists", item.id)
 	}
 	if _, exists := registry.byGroup[item.groupKey]; exists {
+		registry.mu.Unlock()
 		return fmt.Errorf("Web App runtime group %q already exists", item.groupKey)
 	}
 	registry.detachAppLocked(options.AppID)
 	registry.byID[item.id] = item
 	registry.byGroup[item.groupKey] = item.id
 	registry.runtimeByApp[options.AppID] = item.id
+	registry.mu.Unlock()
+	item.lifecycle.MarkRunning()
 	return nil
 }
 
@@ -161,11 +180,22 @@ func (registry *Registry[T]) DetachApp(appID string) (T, int, bool) {
 }
 
 func (registry *Registry[T]) Remove(runtimeID string, expected T) bool {
+	return registry.remove(runtimeID, expected, nil)
+}
+
+func (registry *Registry[T]) Fail(runtimeID string, expected T, cause error) bool {
+	if cause == nil {
+		cause = errors.New("Web App runtime failed")
+	}
+	return registry.remove(runtimeID, expected, cause)
+}
+
+func (registry *Registry[T]) remove(runtimeID string, expected T, cause error) bool {
 	runtimeID = strings.TrimSpace(runtimeID)
 	registry.mu.Lock()
-	defer registry.mu.Unlock()
 	item := registry.byID[runtimeID]
 	if item == nil || item.value != expected {
+		registry.mu.Unlock()
 		return false
 	}
 	delete(registry.byID, runtimeID)
@@ -177,6 +207,11 @@ func (registry *Registry[T]) Remove(runtimeID string, expected T) bool {
 			delete(registry.runtimeByApp, appID)
 		}
 	}
+	registry.mu.Unlock()
+	if cause == nil {
+		item.lifecycle.RequestStop()
+	}
+	item.lifecycle.Complete(cause)
 	return true
 }
 
@@ -188,6 +223,17 @@ func (registry *Registry[T]) Values() []T {
 	}
 	registry.mu.RUnlock()
 	return values
+}
+
+func (registry *Registry[T]) Snapshots() []runtimestate.Snapshot {
+	registry.mu.RLock()
+	snapshots := make([]runtimestate.Snapshot, 0, len(registry.byID))
+	for _, item := range registry.byID {
+		snapshots = append(snapshots, item.lifecycle.Snapshot())
+	}
+	registry.mu.RUnlock()
+	sort.Slice(snapshots, func(i, j int) bool { return snapshots[i].ID < snapshots[j].ID })
+	return snapshots
 }
 
 func (registry *Registry[T]) detachAppLocked(appID string) *entry[T] {

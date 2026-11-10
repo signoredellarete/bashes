@@ -38,13 +38,13 @@ The guiding product rule is:
 
 ## Implementation status
 
-Status on 2026-11-09 for branch `feature/v2-modular-architecture`:
+Status on 2026-11-10 for branch `feature/v2-modular-architecture`:
 
 | Phase | Status | Current result |
 | --- | --- | --- |
 | 0 - Baseline and contracts | Complete | Desktop adapters, error/event contracts and architecture guards are in place. |
 | 1 - Backend application boundaries | In progress | Settings, imports and SSH key workflows are independent of Wails; some facade orchestration remains. |
-| 2 - Runtime manager | In progress | Sessions, tunnels, transfers and Web App runtime ownership have dedicated managers and registries. |
+| 2 - Runtime manager | Complete | Native runtimes have backend ownership, common lifecycle state and deterministic cleanup tests. |
 | 3 - Frontend modularization | In progress | Desktop APIs and shared application/resource state are extracted; feature UI still remains in `main.js`. |
 | 4 - Transfer reliability | Not started | Planned after the application boundaries are stable. |
 | 5 - Plugin foundation | In progress | Manifest, discovery, protocol and supervisor exist without user-facing enablement. |
@@ -85,6 +85,9 @@ Status on 2026-11-09 for branch `feature/v2-modular-architecture`:
 - terminal session lifecycle, SSH tunnel lifecycle and file transfer job state
   are owned by dedicated managers with idempotent cancellation and race-tested
   concurrent cleanup;
+- terminal sessions, tunnels, file transfer sessions/jobs and Web App runtimes
+  expose common `starting`, `running`, `stopping`, `stopped` and `failed`
+  lifecycle transitions through typed snapshots and observer events;
 - SFTP session ownership and shared Web App browser/tunnel associations use
   dedicated registries, so `App` no longer coordinates native resources through
   one global mutex;
@@ -101,8 +104,8 @@ Status on 2026-11-09 for branch `feature/v2-modular-architecture`:
 - plugin package details are documented in
   [PLUGIN_MANIFEST.md](PLUGIN_MANIFEST.md).
 
-The next implementation milestone is reducing the remaining Wails facade around
-connection orchestration, then continuing feature-by-feature frontend
+The next implementation milestone is completing the remaining backend
+application boundaries in Phase 1 before continuing feature-by-feature frontend
 extraction. Plugin process supervision is available
 to the application shutdown path, but user-facing plugin installation and
 enablement remain blocked on explicit permission and trust policy.
@@ -339,10 +342,10 @@ without constructing the Wails facade.
 
 ### Phase 2: Runtime manager
 
-- [-] Introduce common lifecycle state and structured runtime events.
+- [x] Introduce common lifecycle state and structured runtime events.
 - [x] Move SSH/local sessions, tunnels, transfers and Web App runtimes behind the
   manager incrementally.
-- [-] Add deterministic tests for concurrent start/stop, connection loss, deletion,
+- [x] Add deterministic tests for concurrent start/stop, connection loss, deletion,
   database replacement and shutdown.
 
 Exit condition: no native resource relies on frontend cleanup for correctness.

@@ -676,7 +676,7 @@ func (a *App) StartSSHTunnel(input SSHTunnelInput) (SSHTunnelInfo, error) {
 	}
 
 	go remotessh.MonitorKeepAlive(ctx, client, remotessh.KeepAliveOptions{}, func(err error) {
-		if a.tunnels.Fail(tunnel) {
+		if a.tunnels.Fail(tunnel, err) {
 			a.emit(desktop.EventSSHTunnelClosed, SSHEvent{SessionID: tunnelID, Message: fmt.Sprintf("Tunnel closed: SSH keepalive failed: %v", err)})
 		}
 	})

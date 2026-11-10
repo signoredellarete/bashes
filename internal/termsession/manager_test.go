@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/signoredellarete/bashes/internal/remotessh"
+	runtimestate "github.com/signoredellarete/bashes/internal/runtime"
 )
 
 func TestManagerLifecycle(t *testing.T) {
@@ -73,6 +74,46 @@ func TestManagerRejectsDuplicateIDs(t *testing.T) {
 		t.Fatal("second Register() error = nil")
 	}
 	manager.Stop("duplicate")
+}
+
+func TestManagerConcurrentStopEmitsOneTerminalLifecycle(t *testing.T) {
+	var eventsMu sync.Mutex
+	events := make([]runtimestate.Event, 0)
+	manager := NewManagerWithObserver(func(event runtimestate.Event) {
+		eventsMu.Lock()
+		events = append(events, event)
+		eventsMu.Unlock()
+	})
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	shell := newFakeShell()
+	if _, err := manager.Register(Options{
+		ID: "session-1", ResourceID: "host-1", Kind: KindLocal, Shell: shell, Stdin: writer,
+	}); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	if got := manager.Snapshots(); len(got) != 1 || got[0].State != runtimestate.StateRunning {
+		t.Fatalf("Snapshots() = %+v", got)
+	}
+
+	var wait sync.WaitGroup
+	for range 8 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			manager.Stop("session-1")
+		}()
+	}
+	wait.Wait()
+	if shell.closeCount() != 1 {
+		t.Fatalf("shell close count = %d, want 1", shell.closeCount())
+	}
+
+	eventsMu.Lock()
+	defer eventsMu.Unlock()
+	if len(events) != 3 || events[0].Current.State != runtimestate.StateRunning || events[2].Current.State != runtimestate.StateStopped {
+		t.Fatalf("lifecycle events = %+v", events)
+	}
 }
 
 type fakeShell struct {

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	runtimestate "github.com/signoredellarete/bashes/internal/runtime"
 )
 
 type JobInfo struct {
@@ -34,22 +36,28 @@ type JobOptions struct {
 }
 
 type Job struct {
-	mu       sync.Mutex
-	info     JobInfo
-	cancel   context.CancelFunc
-	done     chan struct{}
-	doneOnce sync.Once
-	lastEmit time.Time
-	openPath string
+	mu        sync.Mutex
+	info      JobInfo
+	cancel    context.CancelFunc
+	done      chan struct{}
+	doneOnce  sync.Once
+	lastEmit  time.Time
+	openPath  string
+	lifecycle *runtimestate.Lifecycle
 }
 
 type Manager struct {
-	mu   sync.RWMutex
-	jobs map[string]*Job
+	mu       sync.RWMutex
+	jobs     map[string]*Job
+	observer runtimestate.Observer
 }
 
 func NewManager() *Manager {
-	return &Manager{jobs: make(map[string]*Job)}
+	return NewManagerWithObserver(nil)
+}
+
+func NewManagerWithObserver(observer runtimestate.Observer) *Manager {
+	return &Manager{jobs: make(map[string]*Job), observer: observer}
 }
 
 func (m *Manager) Start(options JobOptions) (*Job, context.Context, error) {
@@ -64,11 +72,20 @@ func (m *Manager) Start(options JobOptions) (*Job, context.Context, error) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	lifecycle, err := runtimestate.NewLifecycle(runtimestate.Options{
+		ID: options.Info.JobID, ResourceID: options.Info.ResourceID,
+		Kind: "file-transfer-job", Observer: m.observer,
+	})
+	if err != nil {
+		cancel()
+		return nil, nil, err
+	}
 	job := &Job{
-		info:     options.Info,
-		cancel:   cancel,
-		done:     make(chan struct{}),
-		openPath: options.OpenPath,
+		info:      options.Info,
+		cancel:    cancel,
+		done:      make(chan struct{}),
+		openPath:  options.OpenPath,
+		lifecycle: lifecycle,
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -179,6 +196,17 @@ func (m *Manager) PruneFinished(resourceID string, keep int) {
 	}
 }
 
+func (m *Manager) Snapshots() []runtimestate.Snapshot {
+	m.mu.RLock()
+	snapshots := make([]runtimestate.Snapshot, 0, len(m.jobs))
+	for _, job := range m.jobs {
+		snapshots = append(snapshots, job.lifecycle.Snapshot())
+	}
+	m.mu.RUnlock()
+	sort.Slice(snapshots, func(i, j int) bool { return snapshots[i].ID < snapshots[j].ID })
+	return snapshots
+}
+
 func IsActive(status string) bool {
 	return status == "queued" || status == "running"
 }
@@ -194,8 +222,12 @@ func (job *Job) Snapshot() JobInfo {
 
 func (job *Job) Update(update func(*JobInfo)) {
 	job.mu.Lock()
-	defer job.mu.Unlock()
 	update(&job.info)
+	status := job.info.Status
+	job.mu.Unlock()
+	if status == "running" {
+		job.lifecycle.MarkRunning()
+	}
 }
 
 func (job *Job) Finish(err error) {
@@ -215,11 +247,18 @@ func (job *Job) Finish(err error) {
 			info.Error = err.Error()
 		}
 	})
+	finishedStatus := job.Snapshot().Status
+	if err == nil || errors.Is(err, context.Canceled) || finishedStatus == "canceled" {
+		job.lifecycle.Complete(nil)
+	} else {
+		job.lifecycle.Complete(err)
+	}
 	job.cancel()
 	job.doneOnce.Do(func() { close(job.done) })
 }
 
 func (job *Job) Cancel() {
+	job.lifecycle.RequestStop()
 	job.cancel()
 }
 

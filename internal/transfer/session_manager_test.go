@@ -1,6 +1,10 @@
 package transfer
 
-import "testing"
+import (
+	"testing"
+
+	runtimestate "github.com/signoredellarete/bashes/internal/runtime"
+)
 
 func TestSessionManagerLifecycleAndResourceLookup(t *testing.T) {
 	manager := NewSessionManager[*testSession]()
@@ -46,6 +50,23 @@ func TestSessionManagerRejectsDuplicateAndInvalidSessions(t *testing.T) {
 	}
 	if err := manager.Register(SessionOptions[int]{ResourceID: "host-1", Close: func(int) {}}); err == nil {
 		t.Fatal("invalid Register() error = nil")
+	}
+}
+
+func TestSessionManagerEmitsLifecycle(t *testing.T) {
+	events := make([]runtimestate.Event, 0)
+	manager := NewSessionManagerWithObserver[int](func(event runtimestate.Event) { events = append(events, event) })
+	if err := manager.Register(SessionOptions[int]{
+		ID: "files-1", ResourceID: "host-1", Value: 1, Close: func(int) {},
+	}); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	if got := manager.Snapshots(); len(got) != 1 || got[0].State != runtimestate.StateRunning {
+		t.Fatalf("Snapshots() = %+v", got)
+	}
+	manager.Stop("files-1")
+	if len(events) != 3 || events[2].Current.State != runtimestate.StateStopped {
+		t.Fatalf("lifecycle events = %+v", events)
 	}
 }
 

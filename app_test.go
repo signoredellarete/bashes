@@ -22,7 +22,10 @@ import (
 	"github.com/signoredellarete/bashes/internal/application"
 	"github.com/signoredellarete/bashes/internal/domain"
 	"github.com/signoredellarete/bashes/internal/remotessh"
+	"github.com/signoredellarete/bashes/internal/sshtunnel"
 	"github.com/signoredellarete/bashes/internal/termsession"
+	"github.com/signoredellarete/bashes/internal/transfer"
+	"github.com/signoredellarete/bashes/internal/webappruntime"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -837,6 +840,119 @@ func TestBeforeCloseDisablesEventsBeforeStoppingSessions(t *testing.T) {
 	if got := shell.closeCount(); got != 1 {
 		t.Fatalf("idempotent shutdown close count = %d, want 1", got)
 	}
+}
+
+func TestDeleteResourceStopsOwnedNativeRuntimes(t *testing.T) {
+	app := NewApp(filepath.Join(t.TempDir(), "hosts.json"))
+	host, err := app.AddHost(applicationEndpoint("host", "10.0.0.1"))
+	if err != nil {
+		t.Fatalf("AddHost() error = %v", err)
+	}
+	shell := registerTestTerminalSession(t, app, "session-1", host.ID)
+	tunnelClient := &testRuntimeCloser{}
+	tunnelListener := &testRuntimeCloser{}
+	if _, err := app.tunnels.Register(sshtunnel.Options{
+		Info:   sshtunnel.Info{TunnelID: "tunnel-1", ResourceID: host.ID, Type: "socks"},
+		Client: tunnelClient, Listener: tunnelListener,
+		Serve: func(context.Context) error { return nil },
+	}); err != nil {
+		t.Fatalf("Register(tunnel) error = %v", err)
+	}
+	transferClosed := false
+	if err := app.transfers.Register(transfer.SessionOptions[*fileTransferSession]{
+		ID: "files-1", ResourceID: host.ID, Value: &fileTransferSession{},
+		Close: func(*fileTransferSession) { transferClosed = true },
+	}); err != nil {
+		t.Fatalf("Register(transfer) error = %v", err)
+	}
+
+	if err := app.DeleteResource(host.ID); err != nil {
+		t.Fatalf("DeleteResource() error = %v", err)
+	}
+	if shell.closeCount() != 1 || tunnelClient.closeCount() != 1 || tunnelListener.closeCount() != 1 || !transferClosed {
+		t.Fatalf("runtime cleanup = shell %d, client %d, listener %d, transfer %v",
+			shell.closeCount(), tunnelClient.closeCount(), tunnelListener.closeCount(), transferClosed)
+	}
+}
+
+func TestImportDatabaseStopsAllNativeRuntimes(t *testing.T) {
+	dir := t.TempDir()
+	source := NewApp(filepath.Join(dir, "source", "hosts.json"))
+	if _, err := source.AddHost(applicationEndpoint("replacement", "10.0.0.20")); err != nil {
+		t.Fatalf("AddHost(source) error = %v", err)
+	}
+	exportPath := filepath.Join(dir, "replacement.json")
+	if err := source.ExportDatabase(exportPath); err != nil {
+		t.Fatalf("ExportDatabase() error = %v", err)
+	}
+
+	target := NewApp(filepath.Join(dir, "target", "hosts.json"))
+	shell := registerTestTerminalSession(t, target, "session-1", "host-1")
+	tunnelClient := &testRuntimeCloser{}
+	tunnelListener := &testRuntimeCloser{}
+	if _, err := target.tunnels.Register(sshtunnel.Options{
+		Info:   sshtunnel.Info{TunnelID: "tunnel-1", ResourceID: "host-1", Type: "socks"},
+		Client: tunnelClient, Listener: tunnelListener,
+		Serve: func(context.Context) error { return nil },
+	}); err != nil {
+		t.Fatalf("Register(tunnel) error = %v", err)
+	}
+	transferClosed := false
+	if err := target.transfers.Register(transfer.SessionOptions[*fileTransferSession]{
+		ID: "files-1", ResourceID: "host-1", Value: &fileTransferSession{},
+		Close: func(*fileTransferSession) { transferClosed = true },
+	}); err != nil {
+		t.Fatalf("Register(transfer) error = %v", err)
+	}
+	runtimeContext, cancelRuntime := context.WithCancel(context.Background())
+	profileDir := filepath.Join(dir, "private-profile")
+	if err := os.MkdirAll(profileDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(profile) error = %v", err)
+	}
+	webRuntime := &webAppRuntime{
+		id: "webapp-1", groupKey: "browser:profile", profileDir: profileDir,
+		private: true, ctx: runtimeContext, cancel: cancelRuntime,
+		info: WebAppRuntimeInfo{RuntimeID: "webapp-1", WebAppID: "app-1"},
+	}
+	if err := target.webAppRuntimes.Register(webappruntime.Options[*webAppRuntime]{
+		RuntimeID: webRuntime.id, GroupKey: webRuntime.groupKey, AppID: "app-1", Value: webRuntime,
+	}); err != nil {
+		t.Fatalf("Register(web app) error = %v", err)
+	}
+
+	if err := target.ImportDatabase(exportPath); err != nil {
+		t.Fatalf("ImportDatabase() error = %v", err)
+	}
+	if len(target.sessions.IDs()) != 0 || len(target.tunnels.IDs()) != 0 || len(target.transfers.IDs()) != 0 || len(target.webAppRuntimes.Values()) != 0 {
+		t.Fatal("database replacement left native runtimes registered")
+	}
+	if shell.closeCount() != 1 || tunnelClient.closeCount() != 1 || tunnelListener.closeCount() != 1 || !transferClosed {
+		t.Fatal("database replacement did not close all native resources")
+	}
+	if runtimeContext.Err() == nil {
+		t.Fatal("Web App runtime context was not canceled")
+	}
+	if _, err := os.Stat(profileDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("private Web App profile still exists: %v", err)
+	}
+}
+
+type testRuntimeCloser struct {
+	mu     sync.Mutex
+	closed int
+}
+
+func (closer *testRuntimeCloser) Close() error {
+	closer.mu.Lock()
+	closer.closed++
+	closer.mu.Unlock()
+	return nil
+}
+
+func (closer *testRuntimeCloser) closeCount() int {
+	closer.mu.Lock()
+	defer closer.mu.Unlock()
+	return closer.closed
 }
 
 type testTerminalShell struct {

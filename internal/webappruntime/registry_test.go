@@ -1,6 +1,10 @@
 package webappruntime
 
-import "testing"
+import (
+	"testing"
+
+	runtimestate "github.com/signoredellarete/bashes/internal/runtime"
+)
 
 func TestRegistrySharesRuntimeAcrossApps(t *testing.T) {
 	registry := NewRegistry[*testRuntime]()
@@ -69,6 +73,49 @@ func TestRegistryReassignsAppWithoutLeavingStaleBinding(t *testing.T) {
 		t.Fatalf("first runtime apps = %v", got)
 	}
 }
+
+func TestRegistryEmitsLifecycle(t *testing.T) {
+	events := make([]runtimestate.Event, 0)
+	registry := NewRegistryWithObserver[*testRuntime](func(event runtimestate.Event) { events = append(events, event) })
+	runtime := &testRuntime{id: "runtime-1"}
+	if err := registry.Register(Options[*testRuntime]{
+		RuntimeID: runtime.id, GroupKey: "group-1", AppID: "app-1", Value: runtime,
+	}); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	if got := registry.Snapshots(); len(got) != 1 || got[0].State != runtimestate.StateRunning {
+		t.Fatalf("Snapshots() = %+v", got)
+	}
+	if !registry.Remove(runtime.id, runtime) {
+		t.Fatal("Remove() = false")
+	}
+	if len(events) != 3 || events[2].Current.State != runtimestate.StateStopped {
+		t.Fatalf("lifecycle events = %+v", events)
+	}
+}
+
+func TestRegistryReportsRuntimeFailure(t *testing.T) {
+	events := make([]runtimestate.Event, 0)
+	registry := NewRegistryWithObserver[*testRuntime](func(event runtimestate.Event) { events = append(events, event) })
+	runtime := &testRuntime{id: "runtime-1"}
+	if err := registry.Register(Options[*testRuntime]{
+		RuntimeID: runtime.id, GroupKey: "group-1", AppID: "app-1", Value: runtime,
+	}); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	if !registry.Fail(runtime.id, runtime, errTestRuntimeFailure) {
+		t.Fatal("Fail() = false")
+	}
+	if len(events) != 2 || events[1].Current.State != runtimestate.StateFailed || events[1].Current.Error != errTestRuntimeFailure.Error() {
+		t.Fatalf("lifecycle events = %+v", events)
+	}
+}
+
+var errTestRuntimeFailure = &testRuntimeError{}
+
+type testRuntimeError struct{}
+
+func (*testRuntimeError) Error() string { return "browser crashed" }
 
 type testRuntime struct {
 	id string

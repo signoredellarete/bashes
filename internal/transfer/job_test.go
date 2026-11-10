@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	runtimestate "github.com/signoredellarete/bashes/internal/runtime"
 )
 
 func TestManagerAllowsOnlyOneActiveJobPerResource(t *testing.T) {
@@ -93,6 +95,23 @@ func TestManagerDismissAndPruneFinishedJobs(t *testing.T) {
 	manager.PruneFinished("host-1", 2)
 	if got := manager.InfosForSession("session-1"); len(got) != 2 {
 		t.Fatalf("retained jobs = %d, want 2", len(got))
+	}
+}
+
+func TestJobEmitsCommonLifecycle(t *testing.T) {
+	events := make([]runtimestate.Event, 0)
+	manager := NewManagerWithObserver(func(event runtimestate.Event) { events = append(events, event) })
+	job, _, err := manager.Start(JobOptions{Info: testJobInfo("one", "session-1", "host-1")})
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	job.Update(func(info *JobInfo) { info.Status = "running" })
+	job.Finish(errors.New("disk full"))
+	if len(events) != 2 || events[0].Current.State != runtimestate.StateRunning || events[1].Current.State != runtimestate.StateFailed {
+		t.Fatalf("lifecycle events = %+v", events)
+	}
+	if got := manager.Snapshots(); len(got) != 1 || got[0].Error != "disk full" {
+		t.Fatalf("Snapshots() = %+v", got)
 	}
 }
 

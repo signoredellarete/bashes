@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/signoredellarete/bashes/internal/remotessh"
+	runtimestate "github.com/signoredellarete/bashes/internal/runtime"
 )
 
 type Kind string
@@ -44,6 +45,7 @@ type Session struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	closeOnce  sync.Once
+	lifecycle  *runtimestate.Lifecycle
 }
 
 type WaitResult struct {
@@ -56,10 +58,15 @@ type WaitResult struct {
 type Manager struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
+	observer runtimestate.Observer
 }
 
 func NewManager() *Manager {
-	return &Manager{sessions: make(map[string]*Session)}
+	return NewManagerWithObserver(nil)
+}
+
+func NewManagerWithObserver(observer runtimestate.Observer) *Manager {
+	return &Manager{sessions: make(map[string]*Session), observer: observer}
 }
 
 func (m *Manager) Register(options Options) (*Session, error) {
@@ -82,6 +89,14 @@ func (m *Manager) Register(options Options) (*Session, error) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	lifecycle, err := runtimestate.NewLifecycle(runtimestate.Options{
+		ID: options.ID, ResourceID: options.ResourceID,
+		Kind: "terminal:" + string(options.Kind), Observer: m.observer,
+	})
+	if err != nil {
+		cancel()
+		return nil, err
+	}
 	session := &Session{
 		id:         options.ID,
 		resourceID: options.ResourceID,
@@ -91,14 +106,17 @@ func (m *Manager) Register(options Options) (*Session, error) {
 		stdin:      options.Stdin,
 		ctx:        ctx,
 		cancel:     cancel,
+		lifecycle:  lifecycle,
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if _, exists := m.sessions[session.id]; exists {
+		m.mu.Unlock()
 		cancel()
 		return nil, fmt.Errorf("terminal session %q already exists", session.id)
 	}
 	m.sessions[session.id] = session
+	m.mu.Unlock()
+	session.lifecycle.MarkRunning()
 	return session, nil
 }
 
@@ -128,7 +146,9 @@ func (m *Manager) Stop(id string) (Kind, bool) {
 	if session == nil {
 		return "", false
 	}
+	session.lifecycle.RequestStop()
 	session.close()
+	session.lifecycle.Complete(nil)
 	return session.kind, true
 }
 
@@ -147,6 +167,11 @@ func (m *Manager) Wait(session *Session) WaitResult {
 
 	stopped := session.ctx.Err() != nil
 	session.close()
+	lifecycleErr := err
+	if stopped || errors.Is(err, io.EOF) {
+		lifecycleErr = nil
+	}
+	session.lifecycle.Complete(lifecycleErr)
 	return WaitResult{
 		Kind:          session.kind,
 		Err:           err,
@@ -185,6 +210,17 @@ func (m *Manager) IDsForResource(resourceID string) []string {
 	m.mu.RUnlock()
 	sort.Strings(ids)
 	return ids
+}
+
+func (m *Manager) Snapshots() []runtimestate.Snapshot {
+	m.mu.RLock()
+	snapshots := make([]runtimestate.Snapshot, 0, len(m.sessions))
+	for _, session := range m.sessions {
+		snapshots = append(snapshots, session.lifecycle.Snapshot())
+	}
+	m.mu.RUnlock()
+	sort.Slice(snapshots, func(i, j int) bool { return snapshots[i].ID < snapshots[j].ID })
+	return snapshots
 }
 
 func (m *Manager) session(id string) (*Session, error) {

@@ -296,7 +296,7 @@ func (a *App) startWebAppRuntime(app domain.WebApp, browser webappbrowser.Browse
 	if listener != nil {
 		go func() {
 			if err := remotessh.ServeSOCKS5WithDialer(ctx, listener, runtime.dial); err != nil && ctx.Err() == nil {
-				a.closeWebAppRuntime(runtime, true, fmt.Sprintf("Web App tunnel closed: %v", err))
+				a.failWebAppRuntime(runtime, true, fmt.Sprintf("Web App tunnel closed: %v", err), err)
 			}
 		}()
 		a.monitorWebAppTunnel(ctx, runtime, client)
@@ -310,6 +310,8 @@ func (a *App) startWebAppRuntime(app domain.WebApp, browser webappbrowser.Browse
 		message := "Web App browser closed"
 		if err != nil {
 			message = fmt.Sprintf("Web App browser closed with an error: %v", err)
+			a.failWebAppRuntime(runtime, false, message, err)
+			return
 		}
 		a.closeWebAppRuntime(runtime, false, message)
 	}()
@@ -362,8 +364,20 @@ func (a *App) openWebAppTab(runtime *webAppRuntime, url string) error {
 }
 
 func (a *App) closeWebAppRuntime(runtime *webAppRuntime, killBrowser bool, message string) {
+	a.finishWebAppRuntime(runtime, killBrowser, message, nil)
+}
+
+func (a *App) failWebAppRuntime(runtime *webAppRuntime, killBrowser bool, message string, cause error) {
+	a.finishWebAppRuntime(runtime, killBrowser, message, cause)
+}
+
+func (a *App) finishWebAppRuntime(runtime *webAppRuntime, killBrowser bool, message string, cause error) {
 	runtime.stopOnce.Do(func() {
-		a.webAppRuntimes.Remove(runtime.id, runtime)
+		if cause != nil {
+			a.webAppRuntimes.Fail(runtime.id, runtime, cause)
+		} else {
+			a.webAppRuntimes.Remove(runtime.id, runtime)
+		}
 
 		runtime.cancel()
 		runtime.closeNetwork()

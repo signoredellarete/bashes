@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	runtimestate "github.com/signoredellarete/bashes/internal/runtime"
 )
 
 type Info struct {
@@ -41,6 +43,7 @@ type Tunnel struct {
 	closeOnce sync.Once
 	runMu     sync.Mutex
 	running   bool
+	lifecycle *runtimestate.Lifecycle
 }
 
 type RunResult struct {
@@ -51,12 +54,17 @@ type RunResult struct {
 }
 
 type Manager struct {
-	mu      sync.RWMutex
-	tunnels map[string]*Tunnel
+	mu       sync.RWMutex
+	tunnels  map[string]*Tunnel
+	observer runtimestate.Observer
 }
 
 func NewManager() *Manager {
-	return &Manager{tunnels: make(map[string]*Tunnel)}
+	return NewManagerWithObserver(nil)
+}
+
+func NewManagerWithObserver(observer runtimestate.Observer) *Manager {
+	return &Manager{tunnels: make(map[string]*Tunnel), observer: observer}
 }
 
 func (m *Manager) Register(options Options) (*Tunnel, error) {
@@ -77,13 +85,22 @@ func (m *Manager) Register(options Options) (*Tunnel, error) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	lifecycle, err := runtimestate.NewLifecycle(runtimestate.Options{
+		ID: options.Info.TunnelID, ResourceID: options.Info.ResourceID,
+		Kind: "ssh-tunnel:" + options.Info.Type, Observer: m.observer,
+	})
+	if err != nil {
+		cancel()
+		return nil, err
+	}
 	tunnel := &Tunnel{
-		info:     options.Info,
-		client:   options.Client,
-		listener: options.Listener,
-		serve:    options.Serve,
-		ctx:      ctx,
-		cancel:   cancel,
+		info:      options.Info,
+		client:    options.Client,
+		listener:  options.Listener,
+		serve:     options.Serve,
+		ctx:       ctx,
+		cancel:    cancel,
+		lifecycle: lifecycle,
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -106,6 +123,7 @@ func (m *Manager) Run(tunnel *Tunnel) RunResult {
 	}
 	tunnel.running = true
 	tunnel.runMu.Unlock()
+	tunnel.lifecycle.MarkRunning()
 
 	err := tunnel.serve(tunnel.ctx)
 	m.mu.Lock()
@@ -116,6 +134,11 @@ func (m *Manager) Run(tunnel *Tunnel) RunResult {
 	m.mu.Unlock()
 	stopped := tunnel.ctx.Err() != nil
 	tunnel.close()
+	if stopped {
+		tunnel.lifecycle.Complete(nil)
+	} else {
+		tunnel.lifecycle.Complete(err)
+	}
 	return RunResult{
 		ID:            tunnel.info.TunnelID,
 		Err:           err,
@@ -133,11 +156,13 @@ func (m *Manager) Stop(id string) bool {
 	if tunnel == nil {
 		return false
 	}
+	tunnel.lifecycle.RequestStop()
 	tunnel.close()
+	tunnel.lifecycle.Complete(nil)
 	return true
 }
 
-func (m *Manager) Fail(tunnel *Tunnel) bool {
+func (m *Manager) Fail(tunnel *Tunnel, cause error) bool {
 	if tunnel == nil {
 		return false
 	}
@@ -149,6 +174,7 @@ func (m *Manager) Fail(tunnel *Tunnel) bool {
 	m.mu.Unlock()
 	if authoritative {
 		tunnel.close()
+		tunnel.lifecycle.Complete(cause)
 	}
 	return authoritative
 }
@@ -177,6 +203,17 @@ func (m *Manager) IDs() []string {
 
 func (m *Manager) IDsForResource(resourceID string) []string {
 	return m.idsForResource(strings.TrimSpace(resourceID))
+}
+
+func (m *Manager) Snapshots() []runtimestate.Snapshot {
+	m.mu.RLock()
+	snapshots := make([]runtimestate.Snapshot, 0, len(m.tunnels))
+	for _, tunnel := range m.tunnels {
+		snapshots = append(snapshots, tunnel.lifecycle.Snapshot())
+	}
+	m.mu.RUnlock()
+	sort.Slice(snapshots, func(i, j int) bool { return snapshots[i].ID < snapshots[j].ID })
+	return snapshots
 }
 
 func (m *Manager) idsForResource(resourceID string) []string {

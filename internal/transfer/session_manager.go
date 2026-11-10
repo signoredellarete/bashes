@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	runtimestate "github.com/signoredellarete/bashes/internal/runtime"
 )
 
 type SessionOptions[T any] struct {
@@ -21,15 +23,21 @@ type managedSession[T any] struct {
 	value      T
 	close      func(T)
 	closeOnce  sync.Once
+	lifecycle  *runtimestate.Lifecycle
 }
 
 type SessionManager[T any] struct {
 	mu       sync.RWMutex
 	sessions map[string]*managedSession[T]
+	observer runtimestate.Observer
 }
 
 func NewSessionManager[T any]() *SessionManager[T] {
-	return &SessionManager[T]{sessions: make(map[string]*managedSession[T])}
+	return NewSessionManagerWithObserver[T](nil)
+}
+
+func NewSessionManagerWithObserver[T any](observer runtimestate.Observer) *SessionManager[T] {
+	return &SessionManager[T]{sessions: make(map[string]*managedSession[T]), observer: observer}
 }
 
 func (m *SessionManager[T]) Register(options SessionOptions[T]) error {
@@ -44,15 +52,24 @@ func (m *SessionManager[T]) Register(options SessionOptions[T]) error {
 	if options.Close == nil {
 		return errors.New("file transfer session close function is required")
 	}
+	lifecycle, err := runtimestate.NewLifecycle(runtimestate.Options{
+		ID: options.ID, ResourceID: options.ResourceID, Kind: "file-transfer-session", Observer: m.observer,
+	})
+	if err != nil {
+		return err
+	}
 	session := &managedSession[T]{
-		id: options.ID, resourceID: options.ResourceID, value: options.Value, close: options.Close,
+		id: options.ID, resourceID: options.ResourceID, value: options.Value,
+		close: options.Close, lifecycle: lifecycle,
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if _, exists := m.sessions[session.id]; exists {
+		m.mu.Unlock()
 		return fmt.Errorf("file transfer session %q already exists", session.id)
 	}
 	m.sessions[session.id] = session
+	m.mu.Unlock()
+	session.lifecycle.MarkRunning()
 	return nil
 }
 
@@ -77,7 +94,9 @@ func (m *SessionManager[T]) Stop(id string) bool {
 	if session == nil {
 		return false
 	}
+	session.lifecycle.RequestStop()
 	session.closeOnce.Do(func() { session.close(session.value) })
+	session.lifecycle.Complete(nil)
 	return true
 }
 
@@ -87,6 +106,17 @@ func (m *SessionManager[T]) IDs() []string {
 
 func (m *SessionManager[T]) IDsForResource(resourceID string) []string {
 	return m.idsForResource(strings.TrimSpace(resourceID))
+}
+
+func (m *SessionManager[T]) Snapshots() []runtimestate.Snapshot {
+	m.mu.RLock()
+	snapshots := make([]runtimestate.Snapshot, 0, len(m.sessions))
+	for _, session := range m.sessions {
+		snapshots = append(snapshots, session.lifecycle.Snapshot())
+	}
+	m.mu.RUnlock()
+	sort.Slice(snapshots, func(i, j int) bool { return snapshots[i].ID < snapshots[j].ID })
+	return snapshots
 }
 
 func (m *SessionManager[T]) idsForResource(resourceID string) []string {
