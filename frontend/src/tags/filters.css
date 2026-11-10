@@ -1,0 +1,125 @@
+.tag-filters {
+  display: grid;
+  gap: 6px;
+  padding-bottom: 2px;
+}
+
+.tag-filters header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.tag-filters header > span {
+  color: #85909c;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tag-filters header::after {
+  height: 1px;
+  flex: 1;
+  background: #e4e8ec;
+  content: "";
+}
+
+.tag-filter-mode {
+  display: flex;
+  order: 2;
+  border: 1px solid #dce1e6;
+  border-radius: 5px;
+  background: #eef1f4;
+  padding: 1px;
+}
+
+.tag-filter-mode button {
+  min-width: 30px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #7b8793;
+  cursor: pointer;
+  padding: 2px 5px;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.tag-filter-mode button.active {
+  background: #df7f28;
+  color: #fff;
+}
+
+.tag-filter-chips {
+  display: flex;
+  max-height: 78px;
+  flex-wrap: wrap;
+  gap: 4px;
+  overflow: auto;
+}
+
+.tag-filter-chip {
+  display: inline-flex;
+  max-width: 100%;
+  height: 22px;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #dce1e6;
+  border-radius: 4px;
+  background: #fff;
+  color: #66717f;
+  cursor: pointer;
+  padding: 0 7px;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.tag-filter-chip.active {
+  border-color: oklch(0.66 0.14 var(--tag-hue));
+  background: oklch(0.965 0.028 var(--tag-hue));
+  color: oklch(0.45 0.11 var(--tag-hue));
+}
+
+.tag-filter-chip .tag-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: oklch(0.66 0.14 var(--tag-hue));
+  opacity: 0.7;
+}
+
+.tag-filter-chip.active .tag-dot {
+  opacity: 1;
+}
+
+.tag-filter-chip small {
+  opacity: 0.6;
+  font-size: 9px;
+}
+
+.clear-tag-filters {
+  display: inline-flex;
+  height: 22px;
+  align-items: center;
+  gap: 4px;
+  border: 1px dashed #cbd2da;
+  border-radius: 4px;
+  background: #f7f8fa;
+  color: #7b8793;
+  cursor: pointer;
+  padding: 0 7px;
+  font-size: 10.5px;
+}
+
+.clear-tag-filters:hover {
+  border-color: #aeb7c1;
+  background: #eef1f4;
+  color: var(--color-text-strong);
+}
+
+.clear-tag-filters .ti {
+  font-size: 12px;
+}

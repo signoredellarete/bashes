@@ -54,6 +54,8 @@ import { mountAppOverlays } from './app/overlays/mount.js';
 import { mountSettingsPanel } from './settings/mount.js';
 import { settingsPanelData as createSettingsPanelData } from './settings/model.js';
 import { mountTagPanel } from './tags/mount.js';
+import { mountTagFilters } from './tags/filters-mount.js';
+import { tagFilterData } from './tags/filter-model.js';
 import { tagPanelData as createTagPanelData } from './tags/panel-model.js';
 import { passwordFieldValue, placeCaretAfterSavedPassword, showSavedPassword } from './password-field.js';
 import {
@@ -106,6 +108,8 @@ import { webAppWorkspaceData } from './web-apps/workspace-model.js';
 import './terminal-fonts.css';
 import './styles.css';
 import './app/overlays/overlays.css';
+import './tags/filters.css';
+import './tags/panel.css';
 import './web-apps/workspace.css';
 
 const terminalSettings = loadTerminalSettings(localStorage);
@@ -305,16 +309,7 @@ app.innerHTML = `
       </button>
     </div>
 
-    <section id="tag-filters" class="tag-filters" aria-label="Filter connections by tag" hidden>
-      <header>
-        <span>Filter by tag</span>
-        <div class="tag-filter-mode" aria-label="Tag matching mode">
-          <button id="tag-mode-any" type="button" title="Match any selected tag">ANY</button>
-          <button id="tag-mode-all" type="button" title="Match all selected tags">ALL</button>
-        </div>
-      </header>
-      <div id="tag-filter-chips" class="tag-filter-chips"></div>
-    </section>
+    <div id="tag-filters-root"></div>
 
     <div id="hosts-scroll" class="hosts-scroll">
       <section id="hosts" class="hosts" aria-label="Hosts"></section>
@@ -801,6 +796,14 @@ const webAppWorkspace = mountWebAppWorkspace(document.querySelector('#webapp-wor
   onopen: () => openSelectedWebApp(),
   ontoggletunnel: () => toggleSelectedWebAppTunnel(),
 });
+const tagFilters = mountTagFilters(document.querySelector('#tag-filters-root'), {
+  ontoggle: (tag) => {
+    if (Date.now() >= suppressTagFilterClickUntil) toggleTagFilter(tag);
+  },
+  onclear: () => clearTagFilters(),
+  onmode: (mode) => setTagFilterMode(mode),
+  onrender: () => initializeTagSorting(),
+});
 
 const stack = document.querySelector('#terminal-stack');
 const hostsScroll = document.querySelector('#hosts-scroll');
@@ -836,8 +839,6 @@ document.querySelectorAll('[data-add-resource]').forEach((button) => {
   });
 });
 document.querySelector('#open-tag-manager').addEventListener('click', () => openTagPanel());
-document.querySelector('#tag-mode-any').addEventListener('click', () => setTagFilterMode('any'));
-document.querySelector('#tag-mode-all').addEventListener('click', () => setTagFilterMode('all'));
 document.querySelector('#open-keys-panel').addEventListener('click', () => openKeysPanel({ allowInstall: true }));
 document.querySelector('#open-tunnel-panel').addEventListener('click', () => openTunnelPanel());
 document.querySelector('#open-file-transfer').addEventListener('click', () => openFileTransferModal());
@@ -1065,6 +1066,7 @@ async function submitResource(event) {
   const input = endpointInput(form, type);
 
   return await withBusy(async () => {
+    let createdResourceID = '';
     if (state.drawerMode === 'edit') {
       const resource = findResource(state.editResourceId)?.resource;
       await apiUpdateResource(state.editResourceId, input);
@@ -1075,13 +1077,17 @@ async function submitResource(event) {
       writeNotice(`Updated ${resource?.hostname ?? 'resource'}.`);
     } else if (state.drawerMode === 'subsystem') {
       const subsystem = await apiAddSubsystem(state.drawerHostId, input);
+      createdResourceID = subsystem.id;
       writeNotice(`Added ${subsystem.type} ${subsystem.hostname}.`);
     } else {
       const host = await apiAddHost(input);
+      createdResourceID = host.id;
       writeNotice(`Added host ${host.hostname}.`);
     }
     closeResourcePanel();
     await refreshHosts();
+    const createdResource = createdResourceID ? findResource(createdResourceID)?.resource : null;
+    if (createdResource) selectResource(createdResource);
     renderTabs();
   });
 }
@@ -1093,6 +1099,7 @@ async function submitWebApp(event) {
   const editingID = form.dataset.webAppId || '';
 
   await withBusy(async () => {
+    let createdWebAppID = '';
     if (editingID) {
       await apiUpdateWebApp(editingID, input);
       const tab = webAppTabForResource(editingID);
@@ -1102,11 +1109,14 @@ async function submitWebApp(event) {
       }
       writeNotice(`Updated ${input.name}.`);
     } else {
-      await apiAddWebApp(input);
+      const webApp = await apiAddWebApp(input);
+      createdWebAppID = webApp.id;
       writeNotice(`Added Web App ${input.name}.`);
     }
     closeWebAppPanel();
     await refreshHosts();
+    const createdWebApp = createdWebAppID ? findResource(createdWebAppID)?.resource : null;
+    if (createdWebApp) selectResource(createdWebApp);
     renderTabs();
   });
 }
@@ -2042,7 +2052,6 @@ function renderHosts(filter = '') {
   container.replaceChildren(...elements);
   requestAnimationFrame(syncSidebarScrollbarInset);
   if (canReorder && state.topLevelOrder.length > 1) initializeHostSorting(container);
-  initializeTagSorting();
 }
 
 function resourceRows(node, type, depth) {
@@ -2134,59 +2143,15 @@ function resourceRow(resource, type, depth = 0) {
 }
 
 function renderTagFilters() {
-  const section = document.querySelector('#tag-filters');
-  const container = document.querySelector('#tag-filter-chips');
-  const tags = mergeTagCatalog(state.tags, [...state.hosts, ...state.webApps]);
-  const available = new Set(tags.map((tag) => tag.key));
-  state.activeTagFilters = state.activeTagFilters.filter((tag) => available.has(tag));
-  section.hidden = tags.length === 0;
-
-  const any = document.querySelector('#tag-mode-any');
-  const all = document.querySelector('#tag-mode-all');
-  any.classList.toggle('active', state.tagFilterMode === 'any');
-  all.classList.toggle('active', state.tagFilterMode === 'all');
-  any.setAttribute('aria-pressed', state.tagFilterMode === 'any' ? 'true' : 'false');
-  all.setAttribute('aria-pressed', state.tagFilterMode === 'all' ? 'true' : 'false');
-
-  const chips = tags.map((tag) => {
-    const button = document.createElement('button');
-    const active = state.activeTagFilters.includes(tag.key);
-    button.type = 'button';
-    button.className = `tag-filter-chip${active ? ' active' : ''}`;
-    button.dataset.tagKey = tag.key;
-    button.dataset.tagName = tag.name;
-    button.title = `${tag.count} connection${tag.count === 1 ? '' : 's'} tagged ${tag.name}`;
-    button.setAttribute('aria-pressed', active ? 'true' : 'false');
-    applyTagPalette(button, tag.name);
-
-    const dot = document.createElement('span');
-    dot.className = 'tag-dot';
-    const label = document.createElement('span');
-    label.textContent = tag.name;
-    const count = document.createElement('small');
-    count.textContent = String(tag.count);
-    button.append(dot, label, count);
-    button.addEventListener('click', () => {
-      if (Date.now() < suppressTagFilterClickUntil) return;
-      toggleTagFilter(tag.key);
-    });
-    return button;
+  const data = tagFilterData({
+    catalog: state.tags,
+    hosts: state.hosts,
+    webApps: state.webApps,
+    activeFilters: state.activeTagFilters,
+    mode: state.tagFilterMode,
   });
-
-  if (state.activeTagFilters.length > 0) {
-    const clear = document.createElement('button');
-    clear.type = 'button';
-    clear.className = 'clear-tag-filters';
-    clear.title = 'Clear tag filters';
-    clear.append(iconElement('x'));
-    const label = document.createElement('span');
-    label.textContent = 'Clear';
-    clear.append(label);
-    clear.addEventListener('click', () => clearTagFilters());
-    chips.push(clear);
-  }
-
-  container.replaceChildren(...chips);
+  state.activeTagFilters = data.activeFilters;
+  tagFilters.update(data);
 }
 
 function renderResourceTagPills(container, tags, resourceID) {
