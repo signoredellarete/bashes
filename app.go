@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/signoredellarete/bashes/internal/apperrors"
 	"github.com/signoredellarete/bashes/internal/application"
 	"github.com/signoredellarete/bashes/internal/connectionauth"
 	"github.com/signoredellarete/bashes/internal/credentials"
@@ -33,6 +32,7 @@ import (
 	"github.com/signoredellarete/bashes/internal/terminalruntime"
 	"github.com/signoredellarete/bashes/internal/termsession"
 	"github.com/signoredellarete/bashes/internal/transfer"
+	"github.com/signoredellarete/bashes/internal/tunnelruntime"
 	"github.com/signoredellarete/bashes/internal/webappbrowser"
 	"github.com/signoredellarete/bashes/internal/webappruntime"
 	"golang.org/x/crypto/ssh"
@@ -61,6 +61,7 @@ type App struct {
 	sessions         *termsession.Manager
 	terminalSessions *terminalruntime.Service
 	tunnels          *sshtunnel.Manager
+	tunnelRuntime    *tunnelruntime.Service
 	transfers        *transfer.SessionManager[*fileTransferSession]
 	transferJobs     *transfer.Manager
 	webAppRuntimes   *webappruntime.Registry[*webAppRuntime]
@@ -119,6 +120,9 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 	}
 	app.terminalSessions = terminalruntime.NewService(
 		applicationService, authPreferences, sshKeyService, sshConnector, sessionManager, app.handleTerminalEvent,
+	)
+	app.tunnelRuntime = tunnelruntime.NewService(
+		applicationService, authPreferences, sshKeyService, sshConnector, app.tunnels, app.now, app.handleTunnelEvent,
 	)
 	return app
 }
@@ -598,139 +602,28 @@ func terminalSSHInput(input SSHSessionInput) terminalruntime.SSHInput {
 }
 
 func (a *App) StartSSHTunnel(input SSHTunnelInput) (SSHTunnelInfo, error) {
-	resource, err := a.resourceByID(input.ResourceID)
-	if err != nil {
-		return SSHTunnelInfo{}, err
-	}
-	if err := normalizeTunnelInput(&input); err != nil {
-		return SSHTunnelInfo{}, err
-	}
-
-	sessionInput := SSHSessionInput{
-		ResourceID:           input.ResourceID,
-		Password:             input.Password,
-		PrivateKeyPath:       input.PrivateKeyPath,
-		KeyName:              input.KeyName,
-		PrivateKeyPassphrase: input.PrivateKeyPassphrase,
-		ManagePassword:       input.ManagePassword,
-		SavePassword:         input.SavePassword,
-		TrustHostKey:         input.TrustHostKey,
-		AcceptHostKey:        input.AcceptHostKey,
-		ReplaceHostKey:       input.ReplaceHostKey,
-	}
-	sessionInput, err = a.prepareSessionInput(resource, sessionInput)
-	if err != nil {
-		return SSHTunnelInfo{}, err
-	}
-	dialInput := a.resolveSessionKeyPath(sessionInput)
-
-	client, err := a.dialResource(resource, dialInput, remotessh.DefaultTimeout)
-	if err != nil {
-		return SSHTunnelInfo{}, err
-	}
-	if err := a.persistPasswordChoice(resource.ID, sessionInput); err != nil {
-		client.Close()
-		return SSHTunnelInfo{}, err
-	}
-
-	listener, forwardAddress, err := a.startTunnelListener(client, input)
-	if err != nil {
-		client.Close()
-		return SSHTunnelInfo{}, err
-	}
-
-	now := a.now()
-	tunnelID := fmt.Sprintf("tunnel-%d", now.UnixNano())
-	info := SSHTunnelInfo{
-		TunnelID:      tunnelID,
-		ResourceID:    resource.ID,
-		Type:          input.Type,
-		LocalHost:     input.LocalHost,
-		LocalPort:     input.LocalPort,
-		LocalAddress:  listener.Addr().String(),
-		Target:        fmt.Sprintf("%s@%s:%d", resource.User, sshHost(resource), resource.Port),
-		ForwardTarget: tunnelForwardTarget(input, forwardAddress),
-		StartedAt:     now.Format(time.RFC3339),
-	}
-	serve := func(ctx context.Context) error {
-		switch info.Type {
-		case "socks":
-			return remotessh.ServeSOCKS5(ctx, listener, client)
-		case "local":
-			return remotessh.ServeLocalForward(ctx, listener, client, forwardAddress)
-		case "remote":
-			return remotessh.ServeRemoteForward(ctx, listener, forwardAddress)
-		default:
-			return fmt.Errorf("unsupported tunnel type %q", info.Type)
-		}
-	}
-	tunnel, err := a.tunnels.Register(sshtunnel.Options{
-		Info: info, Client: client, Listener: listener, Serve: serve,
-	})
-	if err != nil {
-		_ = listener.Close()
-		_ = client.Close()
-		return SSHTunnelInfo{}, err
-	}
-	ctx := a.tunnels.Context(tunnel)
-
-	if auth := authPreferenceFromSessionInput(sessionInput); auth != nil {
-		if err := a.service.SetResourceAuth(resource.ID, *auth); err != nil {
-			a.emit(desktop.EventSSHStatus, SSHEvent{SessionID: tunnelID, Message: fmt.Sprintf("Could not save SSH auth preference: %v", err)})
-		}
-	}
-
-	go remotessh.MonitorKeepAlive(ctx, client, remotessh.KeepAliveOptions{}, func(err error) {
-		if a.tunnels.Fail(tunnel, err) {
-			a.emit(desktop.EventSSHTunnelClosed, SSHEvent{SessionID: tunnelID, Message: fmt.Sprintf("Tunnel closed: SSH keepalive failed: %v", err)})
-		}
-	})
-	go a.waitForTunnel(tunnel)
-
-	return info, nil
-}
-
-func (a *App) startTunnelListener(client *ssh.Client, input SSHTunnelInput) (net.Listener, string, error) {
-	switch input.Type {
-	case "socks":
-		listener, err := net.Listen("tcp", net.JoinHostPort(input.LocalHost, fmt.Sprint(input.LocalPort)))
-		if err != nil {
-			return nil, "", fmt.Errorf("start SOCKS tunnel listener: %w", err)
-		}
-		return listener, "", nil
-	case "local":
-		listener, err := net.Listen("tcp", net.JoinHostPort(input.LocalHost, fmt.Sprint(input.LocalPort)))
-		if err != nil {
-			return nil, "", fmt.Errorf("start local tunnel listener: %w", err)
-		}
-		return listener, net.JoinHostPort(input.RemoteHost, fmt.Sprint(input.RemotePort)), nil
-	case "remote":
-		listener, err := client.Listen("tcp", net.JoinHostPort(input.LocalHost, fmt.Sprint(input.LocalPort)))
-		if err != nil {
-			return nil, "", fmt.Errorf("start remote tunnel listener: %w", err)
-		}
-		return listener, net.JoinHostPort(input.RemoteHost, fmt.Sprint(input.RemotePort)), nil
-	default:
-		return nil, "", fmt.Errorf("unsupported tunnel type %q", input.Type)
-	}
+	return a.tunnelRuntime.Start(tunnelInput(input))
 }
 
 func (a *App) ListSSHTunnels() []SSHTunnelInfo {
-	return a.tunnels.Infos()
+	return a.tunnelRuntime.Infos()
 }
 
 func (a *App) StopSSHTunnel(tunnelID string) error {
-	a.tunnels.Stop(tunnelID)
+	a.tunnelRuntime.Stop(tunnelID)
 	return nil
 }
 
-func (a *App) waitForTunnel(tunnel *sshtunnel.Tunnel) {
-	result := a.tunnels.Run(tunnel)
-	if result.Stopped || !result.Authoritative {
-		return
-	}
-	if result.Err != nil {
-		a.emit(desktop.EventSSHTunnelClosed, SSHEvent{SessionID: result.ID, Message: fmt.Sprintf("Tunnel closed: %v", result.Err)})
+func tunnelInput(input SSHTunnelInput) tunnelruntime.Input {
+	return tunnelruntime.Input{
+		ResourceID: input.ResourceID, Type: input.Type,
+		LocalHost: input.LocalHost, LocalPort: input.LocalPort,
+		RemoteHost: input.RemoteHost, RemotePort: input.RemotePort,
+		Password: input.Password, PrivateKeyPath: input.PrivateKeyPath,
+		KeyName: input.KeyName, PrivateKeyPassphrase: input.PrivateKeyPassphrase,
+		ManagePassword: input.ManagePassword, SavePassword: input.SavePassword,
+		TrustHostKey: input.TrustHostKey, AcceptHostKey: input.AcceptHostKey,
+		ReplaceHostKey: input.ReplaceHostKey, AllowPublicBind: input.AllowPublicBind,
 	}
 }
 
@@ -748,9 +641,7 @@ func (a *App) StopSSHSession(sessionID string) error {
 }
 
 func (a *App) stopTunnelsForResource(resourceID string) {
-	for _, id := range a.tunnels.IDsForResource(resourceID) {
-		_ = a.StopSSHTunnel(id)
-	}
+	a.tunnelRuntime.StopForResource(resourceID)
 }
 
 func (a *App) stopSessionsForResource(resourceID string) {
@@ -805,9 +696,7 @@ func nestedResourceIDsForDelete(subsystems []domain.Endpoint, id string) []strin
 
 func (a *App) stopAllRuntimeConnections() {
 	a.terminalSessions.StopAll()
-	for _, id := range a.tunnels.IDs() {
-		_ = a.StopSSHTunnel(id)
-	}
+	a.tunnelRuntime.StopAll()
 	for _, id := range a.transfers.IDs() {
 		_ = a.CloseFileTransfer(id)
 	}
@@ -1016,6 +905,15 @@ func (a *App) handleTerminalEvent(event terminalruntime.Event) {
 	}
 }
 
+func (a *App) handleTunnelEvent(event tunnelruntime.Event) {
+	payload := SSHEvent{SessionID: event.TunnelID, Message: event.Message}
+	if event.Closed {
+		a.emit(desktop.EventSSHTunnelClosed, payload)
+		return
+	}
+	a.emit(desktop.EventSSHStatus, payload)
+}
+
 func applyAuthPreference(resource domain.Endpoint, input SSHSessionInput) SSHSessionInput {
 	return sshSessionInput(connectionauth.ApplyPreference(resource, connectionAuthInput(input)), input)
 }
@@ -1029,71 +927,16 @@ func authPreferenceFromSessionInput(input SSHSessionInput) *domain.Auth {
 }
 
 func normalizeTunnelInput(input *SSHTunnelInput) error {
-	input.Type = strings.ToLower(strings.TrimSpace(input.Type))
-	if input.Type == "" {
-		input.Type = "socks"
+	normalized := tunnelInput(*input)
+	if err := tunnelruntime.NormalizeInput(&normalized); err != nil {
+		return err
 	}
-	if input.Type != "socks" && input.Type != "local" && input.Type != "remote" {
-		return fmt.Errorf("unsupported tunnel type %q", input.Type)
-	}
-
-	input.LocalHost = strings.TrimSpace(input.LocalHost)
-	if input.LocalHost == "" {
-		input.LocalHost = "127.0.0.1"
-	}
-	if invalidTunnelHost(input.LocalHost) {
-		return errors.New("local bind address contains invalid characters")
-	}
-	if !input.AllowPublicBind && !isLoopbackBind(input.LocalHost) {
-		return apperrors.New("public_tunnel_bind", "public tunnel bind requires confirmation", map[string]string{
-			"host": input.LocalHost,
-			"type": input.Type,
-		})
-	}
-	if input.LocalPort < 1 || input.LocalPort > 65535 {
-		return errors.New("local port must be between 1 and 65535")
-	}
-	if input.Type == "socks" {
-		return nil
-	}
-
-	input.RemoteHost = strings.TrimSpace(input.RemoteHost)
-	if input.RemoteHost == "" {
-		input.RemoteHost = "127.0.0.1"
-	}
-	if invalidTunnelHost(input.RemoteHost) {
-		return errors.New("forward target address contains invalid characters")
-	}
-	if input.RemotePort < 1 || input.RemotePort > 65535 {
-		return errors.New("forward target port must be between 1 and 65535")
-	}
+	input.Type = normalized.Type
+	input.LocalHost = normalized.LocalHost
+	input.LocalPort = normalized.LocalPort
+	input.RemoteHost = normalized.RemoteHost
+	input.RemotePort = normalized.RemotePort
 	return nil
-}
-
-func isLoopbackBind(host string) bool {
-	host = strings.TrimSpace(strings.Trim(host, "[]"))
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
-}
-
-func invalidTunnelHost(host string) bool {
-	return strings.ContainsAny(host, "\r\n\t ")
-}
-
-func tunnelForwardTarget(input SSHTunnelInput, forwardAddress string) string {
-	switch input.Type {
-	case "socks":
-		return "dynamic"
-	case "local":
-		return forwardAddress
-	case "remote":
-		return forwardAddress
-	default:
-		return ""
-	}
 }
 
 func (a *App) dialResource(resource domain.Endpoint, input SSHSessionInput, timeout time.Duration) (*ssh.Client, error) {
