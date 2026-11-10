@@ -43,7 +43,7 @@ Status on 2026-11-10 for branch `feature/v2-modular-architecture`:
 | Phase | Status | Current result |
 | --- | --- | --- |
 | 0 - Baseline and contracts | Complete | Desktop adapters, error/event contracts and architecture guards are in place. |
-| 1 - Backend application boundaries | In progress | Data workflows are independent of Wails; tunnel, transfer and Web App orchestration still need extraction. |
+| 1 - Backend application boundaries | Complete | Data and connection workflows are independent of Wails and native operations use injectable adapters. |
 | 2 - Runtime manager | Complete | Native runtimes have backend ownership, common lifecycle state and deterministic cleanup tests. |
 | 3 - Frontend modularization | In progress | Desktop APIs and shared application/resource state are extracted; feature UI still remains in `main.js`. |
 | 4 - Transfer reliability | Not started | Planned after the application boundaries are stable. |
@@ -109,9 +109,10 @@ Status on 2026-11-10 for branch `feature/v2-modular-architecture`:
 - plugin package details are documented in
   [PLUGIN_MANIFEST.md](PLUGIN_MANIFEST.md).
 
-The next implementation milestone is completing the remaining runtime service
-extractions in Phase 1 before returning to frontend modularization. Plugin
-process supervision is available
+The next implementation milestone is frontend modularization in Phase 3. The
+SFTP engine remains a Phase 4 concern, where its extraction is coupled to
+conflict, retry and rollback contracts rather than treated as an unrelated
+facade refactor. Plugin process supervision is available
 to the application shutdown path, but user-facing plugin installation and
 enablement remain blocked on explicit permission and trust policy.
 
@@ -336,7 +337,7 @@ binding implementation.
 
 ### Phase 1: Backend application boundaries
 
-- [-] Reduce `App` to a Wails facade composed from services.
+- [x] Reduce `App` to a Wails facade composed from services.
 - [x] Extract settings, imports and SSH key workflows with existing tests moved or
   expanded around their public contracts.
 - [x] Introduce dependency injection for filesystem, dialogs, browser and clock
@@ -344,6 +345,10 @@ binding implementation.
 
 Exit condition: resource management, imports, keys and settings are testable
 without constructing the Wails facade.
+
+Scope note: protocol engines that already have backend runtime ownership are not
+rewritten merely to move files. The SFTP engine is extracted with the transfer
+contracts in Phase 4; Web App runtime evolution follows the plugin boundary.
 
 ### Phase 2: Runtime manager
 
