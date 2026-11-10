@@ -110,6 +110,8 @@ Status on 2026-11-10 for branch `feature/v2-modular-architecture`:
 - the Tag Manager panel owns its rendering and local edit state in Svelte;
   backend tag mutations and global filtering remain explicit application
   callbacks backed by a tested panel model;
+- the selected Web App workbench is a Svelte feature backed by a pure view
+  model; browser launch and tunnel operations remain application callbacks;
 - plugin manifest validation, discovery, handshake and bounded process
   supervision are tested; the supervisor is part of application shutdown but
   has no user-facing installation or enablement path yet;

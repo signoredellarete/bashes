@@ -101,9 +101,12 @@ import {
   visibleResourceTags,
 } from './resource-tags.js';
 import { isWebAppResource, webAppMatchesFilters } from './web-apps/model.js';
+import { mountWebAppWorkspace } from './web-apps/workspace-mount.js';
+import { webAppWorkspaceData } from './web-apps/workspace-model.js';
 import './terminal-fonts.css';
 import './styles.css';
 import './app/overlays/overlays.css';
+import './web-apps/workspace.css';
 
 const terminalSettings = loadTerminalSettings(localStorage);
 
@@ -350,17 +353,7 @@ app.innerHTML = `
         <div id="session-tabs" class="session-tabs" hidden></div>
         <div id="terminal-stack" class="terminal-stack">
           <div id="empty-terminal" class="empty-terminal">No active terminal session</div>
-          <section id="webapp-workspace" class="webapp-workspace" hidden>
-            <div class="webapp-workspace-icon">${iconMarkup('world-www')}</div>
-            <h3 id="webapp-workspace-name"></h3>
-            <p id="webapp-workspace-url"></p>
-            <p id="webapp-workspace-mode"></p>
-            <p id="webapp-workspace-status" class="webapp-workspace-status"></p>
-            <div class="webapp-workspace-actions">
-              <button id="webapp-workspace-open" type="button">${iconMarkup('external-link')}<span>Open Web App</span></button>
-              <button id="webapp-workspace-tunnel-toggle" class="secondary" type="button" hidden>${iconMarkup('plug-connected-x')}<span>Stop Tunnel</span></button>
-            </div>
-          </section>
+          <section id="webapp-workspace" class="webapp-workspace" hidden></section>
         </div>
       </section>
     </section>
@@ -804,6 +797,10 @@ const tagPanel = mountTagPanel(document.querySelector('#tag-panel-root'), {
   onclear: () => clearTagPanelSelection(),
   onrequestclose: () => closeTagPanel(),
 });
+const webAppWorkspace = mountWebAppWorkspace(document.querySelector('#webapp-workspace'), {
+  onopen: () => openSelectedWebApp(),
+  ontoggletunnel: () => toggleSelectedWebAppTunnel(),
+});
 
 const stack = document.querySelector('#terminal-stack');
 const hostsScroll = document.querySelector('#hosts-scroll');
@@ -870,8 +867,6 @@ document.querySelector('#webapp-form').elements.portMode.addEventListener('chang
 document.querySelector('#webapp-form').elements.browserMode.addEventListener('change', () => updateWebAppFormVisibility());
 document.querySelector('#webapp-auth-form').addEventListener('submit', (event) => submitWebAppAuth(event));
 registerAuthChoiceSync(document.querySelector('#webapp-auth-form'));
-document.querySelector('#webapp-workspace-open').addEventListener('click', () => openSelectedWebApp());
-document.querySelector('#webapp-workspace-tunnel-toggle').addEventListener('click', () => toggleSelectedWebAppTunnel());
 document.querySelector('#resource-tag-query').addEventListener('input', (event) => {
   state.resourceTagQuery = event.currentTarget.value;
   renderResourceTagOptions();
@@ -3593,41 +3588,16 @@ function renderSelection() {
 }
 
 function renderWorkbench(selected) {
-  const workspace = document.querySelector('#webapp-workspace');
   const activeTab = state.sessions.get(state.activeSessionId);
   const webApp = activeTab?.kind === 'webapp' && selected?.type === 'webapp' ? selected.resource : null;
   stack.classList.toggle('webapp-active', Boolean(webApp));
-  workspace.hidden = !webApp;
-  if (!webApp) return;
-  document.querySelector('#webapp-workspace-name').textContent = webApp.name;
-  document.querySelector('#webapp-workspace-url').textContent = webApp.url;
-  const gateway = webApp.connectionMode === 'tunnel' ? findResource(webApp.gatewayResourceId)?.resource : null;
-  document.querySelector('#webapp-workspace-mode').textContent = gateway
-    ? `SSH tunnel via ${gateway.hostname}`
-    : 'Direct connection';
-  const runtime = state.webAppRuntimes.get(webApp.id);
-  const status = document.querySelector('#webapp-workspace-status');
-  const toggle = document.querySelector('#webapp-workspace-tunnel-toggle');
-  if (runtime?.tunnelActive) {
-    status.textContent = `Tunnel active on 127.0.0.1:${runtime.socksPort}`;
-  } else if (runtime?.tunnel) {
-    status.textContent = `Tunnel stopped on 127.0.0.1:${runtime.socksPort}`;
-  } else if (runtime) {
-    status.textContent = `Open in ${runtime.browser}`;
-  } else {
-    status.textContent = webApp.connectionMode === 'tunnel' ? 'Tunnel inactive' : 'Ready to open';
-  }
-  toggle.hidden = !runtime?.tunnel;
-  toggle.disabled = state.busy || !runtime?.tunnel;
-  if (runtime?.tunnel) {
-    const active = Boolean(runtime.tunnelActive);
-    toggle.replaceChildren(iconElement(active ? 'plug-connected-x' : 'player-play-filled'));
-    const label = document.createElement('span');
-    label.textContent = active ? 'Stop Tunnel' : 'Start Tunnel';
-    toggle.append(label);
-    toggle.title = label.textContent;
-    toggle.setAttribute('aria-label', label.textContent);
-  }
+  const gateway = webApp?.connectionMode === 'tunnel' ? findResource(webApp.gatewayResourceId)?.resource : null;
+  webAppWorkspace.update(webAppWorkspaceData({
+    webApp,
+    gateway,
+    runtime: webApp ? state.webAppRuntimes.get(webApp.id) : null,
+    busy: state.busy,
+  }));
 }
 
 function renderKeyOptions(select = document.querySelector('#key-select'), includeEmpty = false) {

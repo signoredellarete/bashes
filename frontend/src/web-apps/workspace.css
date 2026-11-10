@@ -1,0 +1,85 @@
+.webapp-workspace {
+  display: grid;
+  height: 100%;
+  place-content: center;
+  justify-items: center;
+  gap: 9px;
+  background: #101418;
+  padding: 28px;
+  text-align: center;
+}
+
+.webapp-workspace-icon {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid #35414d;
+  background: #202832;
+  color: #ef9b4a;
+  font-size: 27px;
+}
+
+.webapp-workspace h3,
+.webapp-workspace p {
+  margin: 0;
+}
+
+.webapp-workspace h3 {
+  color: #f2f5f7;
+  font-size: 18px;
+}
+
+.webapp-workspace p {
+  max-width: min(640px, 80vw);
+  overflow-wrap: anywhere;
+  color: #91a3b5;
+  font-size: 12px;
+}
+
+.webapp-workspace .webapp-workspace-status {
+  color: #c6d0da;
+  font-weight: 600;
+}
+
+.webapp-workspace-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 7px;
+}
+
+.webapp-workspace button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 7px;
+  border: 1px solid #68749a;
+  border-radius: 6px;
+  background: #495479;
+  color: #fff;
+  cursor: pointer;
+  padding: 8px 12px;
+}
+
+.webapp-workspace button:hover:not(:disabled) {
+  border-color: #7d89ad;
+  background: #56638a;
+}
+
+.webapp-workspace button.secondary {
+  border-color: #465360;
+  background: #1d252e;
+  color: #d7dde5;
+}
+
+.webapp-workspace button.secondary:hover:not(:disabled) {
+  border-color: #697887;
+  background: #27313b;
+}
+
+.webapp-workspace button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
