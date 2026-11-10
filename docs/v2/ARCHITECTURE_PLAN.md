@@ -72,6 +72,8 @@ Status on 2026-11-09 for branch `feature/v2-modular-architecture`:
   socket dependencies;
 - saved-password lifecycle and resource authentication preferences are owned by
   one tested service shared by SSH sessions, tunnels, transfers and Web Apps;
+- SSH and local terminal startup, I/O, resize, keepalive and close events are
+  orchestrated by a desktop-independent runtime service with typed events;
 - SSH dialing, host-key policy, structured trust errors and accepted fingerprint
   persistence are owned by a tested connector shared by sessions, tunnels,
   transfers and Web App gateways;

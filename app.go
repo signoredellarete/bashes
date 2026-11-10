@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -22,7 +21,6 @@ import (
 	"github.com/signoredellarete/bashes/internal/desktop"
 	"github.com/signoredellarete/bashes/internal/domain"
 	"github.com/signoredellarete/bashes/internal/importer"
-	"github.com/signoredellarete/bashes/internal/localterm"
 	"github.com/signoredellarete/bashes/internal/plugin"
 	"github.com/signoredellarete/bashes/internal/remotessh"
 	appsettings "github.com/signoredellarete/bashes/internal/settings"
@@ -32,6 +30,7 @@ import (
 	"github.com/signoredellarete/bashes/internal/sshkeys"
 	"github.com/signoredellarete/bashes/internal/sshtunnel"
 	"github.com/signoredellarete/bashes/internal/store"
+	"github.com/signoredellarete/bashes/internal/terminalruntime"
 	"github.com/signoredellarete/bashes/internal/termsession"
 	"github.com/signoredellarete/bashes/internal/transfer"
 	"github.com/signoredellarete/bashes/internal/webappbrowser"
@@ -60,6 +59,7 @@ type App struct {
 	sshKeyInstaller  *sshkeyinstall.Service
 	webAppBrowsers   *webappbrowser.PreferencesService
 	sessions         *termsession.Manager
+	terminalSessions *terminalruntime.Service
 	tunnels          *sshtunnel.Manager
 	transfers        *transfer.SessionManager[*fileTransferSession]
 	transferJobs     *transfer.Manager
@@ -92,8 +92,9 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 	sshConnector := sshconnection.NewConnector(sshAuthBuilder, applicationService)
 	sshKeyInstaller := sshkeyinstall.NewService(applicationService, sshKeyService, sshConnector)
 	authPreferences := connectionauth.NewService(passwords)
+	sessionManager := termsession.NewManager()
 
-	return &App{
+	app := &App{
 		dataPath:         dataPath,
 		service:          applicationService,
 		database:         databaseService,
@@ -102,7 +103,7 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 		sshKeyInstaller:  sshKeyInstaller,
 		webAppBrowsers:   webAppBrowserService,
 		authPreferences:  authPreferences,
-		sessions:         termsession.NewManager(),
+		sessions:         sessionManager,
 		tunnels:          sshtunnel.NewManager(),
 		transfers:        transfer.NewSessionManager[*fileTransferSession](),
 		transferJobs:     transfer.NewManager(),
@@ -112,6 +113,10 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 		openFile:         openFileWithDefaultApplication,
 		openFileCacheDir: defaultOpenFileCacheDir(dataPath),
 	}
+	app.terminalSessions = terminalruntime.NewService(
+		applicationService, authPreferences, sshKeyService, sshConnector, sessionManager, app.handleTerminalEvent,
+	)
+	return app
 }
 
 func defaultDataPath() string {
@@ -567,111 +572,25 @@ type SSHEvent struct {
 }
 
 func (a *App) StartSSHSession(input SSHSessionInput) (string, error) {
-	resource, err := a.resourceByID(input.ResourceID)
-	if err != nil {
-		return "", err
-	}
-	input, err = a.prepareSessionInput(resource, input)
-	if err != nil {
-		return "", err
-	}
-	dialInput := a.resolveSessionKeyPath(input)
-
-	client, err := a.dialResource(resource, dialInput, remotessh.DefaultTimeout)
-	if err != nil {
-		return "", err
-	}
-	if err := a.persistPasswordChoice(resource.ID, input); err != nil {
-		client.Close()
-		return "", err
-	}
-
-	stdinReader, stdinWriter := io.Pipe()
-	sessionID := fmt.Sprintf("ssh-%d", time.Now().UnixNano())
-	shell, err := remotessh.StartShell(client, remotessh.ShellOptions{
-		Size:   remotessh.TerminalSize{Cols: input.Cols, Rows: input.Rows},
-		Stdin:  stdinReader,
-		Stdout: eventWriter{app: a, sessionID: sessionID},
-		Stderr: eventWriter{app: a, sessionID: sessionID},
-	})
-	if err != nil {
-		stdinWriter.Close()
-		client.Close()
-		return "", err
-	}
-
-	session, err := a.sessions.Register(termsession.Options{
-		ID: sessionID, ResourceID: resource.ID, Kind: termsession.KindSSH,
-		Client: client, Shell: shell, Stdin: stdinWriter,
-	})
-	if err != nil {
-		_ = stdinWriter.Close()
-		_ = shell.Close()
-		_ = client.Close()
-		return "", err
-	}
-	runtimeCtx := a.sessions.Context(session)
-
-	a.emit(desktop.EventSSHStatus, SSHEvent{
-		SessionID: sessionID,
-		Message:   fmt.Sprintf("Connected to %s@%s:%d", resource.User, sshHost(resource), resource.Port),
-	})
-	if auth := authPreferenceFromSessionInput(input); auth != nil {
-		if err := a.service.SetResourceAuth(resource.ID, *auth); err != nil {
-			a.emit(desktop.EventSSHStatus, SSHEvent{
-				SessionID: sessionID,
-				Message:   fmt.Sprintf("Could not save SSH auth preference: %v", err),
-			})
-		}
-	}
-
-	go remotessh.MonitorKeepAlive(runtimeCtx, client, remotessh.KeepAliveOptions{}, func(err error) {
-		_ = shell.Close()
-		_ = client.Close()
-	})
-	go a.waitForShell(sessionID, session)
-
-	return sessionID, nil
+	return a.terminalSessions.StartSSH(terminalSSHInput(input))
 }
 
 func (a *App) SupportsLocalShell() bool {
-	return goruntime.GOOS != "windows"
+	return a.terminalSessions.SupportsLocalShell()
 }
 
 func (a *App) StartLocalSession(input LocalSessionInput) (string, error) {
-	if !a.SupportsLocalShell() {
-		return "", errors.New("local shell is not supported on Windows yet")
-	}
+	return a.terminalSessions.StartLocal(terminalruntime.LocalInput{Cols: input.Cols, Rows: input.Rows})
+}
 
-	stdinReader, stdinWriter := io.Pipe()
-	sessionID := fmt.Sprintf("local-%d", time.Now().UnixNano())
-	shell, err := localterm.StartShell(localterm.ShellOptions{
-		Size:   remotessh.TerminalSize{Cols: input.Cols, Rows: input.Rows},
-		Stdin:  stdinReader,
-		Stdout: eventWriter{app: a, sessionID: sessionID},
-		Stderr: eventWriter{app: a, sessionID: sessionID},
-	})
-	if err != nil {
-		stdinWriter.Close()
-		return "", err
+func terminalSSHInput(input SSHSessionInput) terminalruntime.SSHInput {
+	return terminalruntime.SSHInput{
+		ResourceID: input.ResourceID, Password: input.Password, PrivateKeyPath: input.PrivateKeyPath,
+		KeyName: input.KeyName, PrivateKeyPassphrase: input.PrivateKeyPassphrase,
+		ManagePassword: input.ManagePassword, SavePassword: input.SavePassword,
+		TrustHostKey: input.TrustHostKey, AcceptHostKey: input.AcceptHostKey,
+		ReplaceHostKey: input.ReplaceHostKey, Cols: input.Cols, Rows: input.Rows,
 	}
-
-	session, err := a.sessions.Register(termsession.Options{
-		ID: sessionID, ResourceID: "__bashes_localhost__", Kind: termsession.KindLocal,
-		Shell: shell, Stdin: stdinWriter,
-	})
-	if err != nil {
-		_ = stdinWriter.Close()
-		_ = shell.Close()
-		return "", err
-	}
-	a.emit(desktop.EventSSHStatus, SSHEvent{
-		SessionID: sessionID,
-		Message:   "Local shell started",
-	})
-	go a.waitForShell(sessionID, session)
-
-	return sessionID, nil
 }
 
 func (a *App) StartSSHTunnel(input SSHTunnelInput) (SSHTunnelInfo, error) {
@@ -811,19 +730,15 @@ func (a *App) waitForTunnel(tunnel *sshtunnel.Tunnel) {
 }
 
 func (a *App) WriteSSHSession(sessionID string, data string) error {
-	return a.sessions.Write(sessionID, data)
+	return a.terminalSessions.Write(sessionID, data)
 }
 
 func (a *App) ResizeSSHSession(sessionID string, cols int, rows int) error {
-	return a.sessions.Resize(sessionID, remotessh.TerminalSize{Cols: cols, Rows: rows})
+	return a.terminalSessions.Resize(sessionID, cols, rows)
 }
 
 func (a *App) StopSSHSession(sessionID string) error {
-	kind, stopped := a.sessions.Stop(sessionID)
-	if !stopped {
-		return nil
-	}
-	a.emit(desktop.EventSSHClosed, SSHEvent{SessionID: sessionID, Message: sessionClosedMessage(kind)})
+	a.terminalSessions.Stop(sessionID)
 	return nil
 }
 
@@ -834,9 +749,7 @@ func (a *App) stopTunnelsForResource(resourceID string) {
 }
 
 func (a *App) stopSessionsForResource(resourceID string) {
-	for _, id := range a.sessions.IDsForResource(resourceID) {
-		_ = a.StopSSHSession(id)
-	}
+	a.terminalSessions.StopForResource(resourceID)
 }
 
 func (a *App) closeTransfersForResource(resourceID string) {
@@ -885,29 +798,8 @@ func nestedResourceIDsForDelete(subsystems []domain.Endpoint, id string) []strin
 	return nil
 }
 
-func (a *App) waitForShell(sessionID string, session *termsession.Session) {
-	result := a.sessions.Wait(session)
-	if result.Stopped || !result.Authoritative {
-		return
-	}
-	if result.Err != nil && !errors.Is(result.Err, io.EOF) {
-		a.emit(desktop.EventSSHClosed, SSHEvent{SessionID: sessionID, Message: result.Err.Error()})
-		return
-	}
-	a.emit(desktop.EventSSHClosed, SSHEvent{SessionID: sessionID, Message: sessionClosedMessage(result.Kind)})
-}
-
-func sessionClosedMessage(kind termsession.Kind) string {
-	if kind == termsession.KindLocal {
-		return "Local shell closed"
-	}
-	return "SSH session closed"
-}
-
 func (a *App) stopAllRuntimeConnections() {
-	for _, id := range a.sessions.IDs() {
-		_ = a.StopSSHSession(id)
-	}
+	a.terminalSessions.StopAll()
 	for _, id := range a.tunnels.IDs() {
 		_ = a.StopSSHTunnel(id)
 	}
@@ -1099,22 +991,23 @@ func (a *App) showErrorDialog(title string, err error) {
 	})
 }
 
-type eventWriter struct {
-	app       *App
-	sessionID string
-}
-
-func (w eventWriter) Write(data []byte) (int, error) {
-	if len(data) > 0 {
-		w.app.emit(desktop.EventSSHOutput, sshOutputEvent(w.sessionID, data))
-	}
-	return len(data), nil
-}
-
 func sshOutputEvent(sessionID string, data []byte) SSHEvent {
 	return SSHEvent{
 		SessionID: sessionID,
 		Bytes:     base64.StdEncoding.EncodeToString(data),
+	}
+}
+
+func (a *App) handleTerminalEvent(event terminalruntime.Event) {
+	payload := SSHEvent{SessionID: event.SessionID, Message: event.Message}
+	switch event.Kind {
+	case terminalruntime.EventOutput:
+		payload = sshOutputEvent(event.SessionID, event.Data)
+		a.emit(desktop.EventSSHOutput, payload)
+	case terminalruntime.EventStatus:
+		a.emit(desktop.EventSSHStatus, payload)
+	case terminalruntime.EventClosed:
+		a.emit(desktop.EventSSHClosed, payload)
 	}
 }
 
