@@ -1845,7 +1845,9 @@ html.sorting-tags * {
 .panel-scrim {
   position: fixed;
   inset: 0;
+  border: 0;
   background: rgba(16, 20, 24, 0.28);
+  padding: 0;
 }
 
 .panel-card {

@@ -53,6 +53,8 @@ import { createAppState } from './state/app-state.js';
 import { mountAppOverlays } from './app/overlays/mount.js';
 import { mountSettingsPanel } from './settings/mount.js';
 import { settingsPanelData as createSettingsPanelData } from './settings/model.js';
+import { mountTagPanel } from './tags/mount.js';
+import { tagPanelData as createTagPanelData } from './tags/panel-model.js';
 import { passwordFieldValue, placeCaretAfterSavedPassword, showSavedPassword } from './password-field.js';
 import {
   errorDetail,
@@ -777,43 +779,7 @@ app.innerHTML = `
     </section>
   </section>
 
-  <section id="tag-panel" class="slide-panel tag-panel" hidden>
-    <div class="panel-scrim"></div>
-    <section class="panel-card tag-panel-card" role="dialog" aria-modal="true" aria-labelledby="tag-panel-title">
-      <header class="panel-header tag-panel-header">
-        <div class="tag-panel-heading">
-          <span class="tag-panel-heading-icon">${iconMarkup('tags')}</span>
-          <div>
-            <h3 id="tag-panel-title">Manage tags</h3>
-            <p id="tag-panel-subtitle">No tags</p>
-          </div>
-        </div>
-        <button class="close-panel" type="button" data-close-tags title="Close" aria-label="Close tag manager">${ICON_CLOSE}</button>
-      </header>
-
-      <form id="tag-create-form" class="tag-create-form">
-        <label class="tag-create-control">
-          ${iconMarkup('tag')}
-          <input name="name" maxlength="40" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="New tag name..." aria-label="New tag name" required />
-        </label>
-        <button id="tag-create-submit" type="submit" disabled>Create</button>
-      </form>
-
-      <div class="tag-list-heading">
-        <span>All tags</span>
-        <small id="tag-list-hint">Click a tag to filter</small>
-      </div>
-      <div id="tag-manager-list" class="tag-manager-list"></div>
-
-      <footer class="tag-panel-footer">
-        <span id="tag-panel-status">No active filters</span>
-        <div>
-          <button id="tag-panel-clear" class="secondary" type="button">Clear filter</button>
-          <button type="button" data-close-tags>Done</button>
-        </div>
-      </footer>
-    </section>
-  </section>
+  <div id="tag-panel-root"></div>
 
   <div id="app-tooltip" class="app-tooltip" role="tooltip" hidden></div>
   <div id="edit-context-menu" class="edit-context-menu" hidden>
@@ -830,6 +796,14 @@ const settingsPanel = mountSettingsPanel(document.querySelector('#settings-root'
 });
 const appOverlays = mountAppOverlays(document.querySelector('#app-overlays-root'), {
   onclosed: () => restoreTerminalFocusAfterOverlay(),
+});
+const tagPanel = mountTagPanel(document.querySelector('#tag-panel-root'), {
+  oncreate: (name) => createManagedTag(name),
+  onrename: (tag, name) => renameManagedTag(tag, name),
+  ondelete: (tag) => deleteManagedTag(tag),
+  ontoggle: (tag) => toggleTagPanelTag(tag),
+  onclear: () => clearTagPanelSelection(),
+  onrequestclose: () => closeTagPanel(),
 });
 
 const stack = document.querySelector('#terminal-stack');
@@ -909,9 +883,6 @@ document.querySelector('#webapp-tag-query').addEventListener('input', (event) =>
   renderWebAppTagOptions();
 });
 document.querySelector('#webapp-tag-query').addEventListener('keydown', (event) => handleWebAppTagInput(event));
-document.querySelector('#tag-create-form').addEventListener('submit', (event) => submitCreateTag(event));
-document.querySelector('#tag-create-form').elements.name.addEventListener('input', () => updateTagCreateButton());
-document.querySelector('#tag-panel-clear').addEventListener('click', () => clearTagPanelSelection());
 document.querySelector('#connect-form').addEventListener('submit', (event) => submitConnect(event));
 document.querySelector('#tunnel-form').addEventListener('submit', (event) => submitTunnel(event));
 document.querySelector('#tunnel-form').addEventListener('input', () => updateTunnelSummary());
@@ -958,9 +929,6 @@ document.querySelectorAll('[data-close-tunnel]').forEach((element) => {
 document.querySelectorAll('[data-close-keys]').forEach((element) => {
   element.addEventListener('click', () => closeKeysPanel());
 });
-document.querySelectorAll('[data-close-tags]').forEach((element) => {
-  element.addEventListener('click', () => closeTagPanel());
-});
 document.querySelectorAll('[data-close-file-transfer]').forEach((element) => {
   element.addEventListener('click', () => closeFileTransferModal());
 });
@@ -993,7 +961,7 @@ window.addEventListener('keydown', (event) => {
     closeAppModal();
   } else if (event.key === 'Escape' && !document.querySelector('#settings-panel').hidden) {
     closeSettingsPanel();
-  } else if (event.key === 'Escape' && !document.querySelector('#tag-panel').hidden) {
+  } else if (event.key === 'Escape' && tagPanel.isOpen()) {
     closeTagPanel();
   } else if (event.key === 'Escape') {
     closeFieldHelpPopovers();
@@ -2489,148 +2457,50 @@ function setTagFilterMode(mode) {
 }
 
 function openTagPanel() {
-  state.editingTagKey = null;
-  renderTagPanel();
-
-  const panel = document.querySelector('#tag-panel');
-  panel.hidden = false;
-  requestAnimationFrame(() => panel.classList.add('open'));
-  window.setTimeout(() => document.querySelector('#tag-create-form').elements.name.focus(), 0);
+  tagPanel.open(tagPanelData());
 }
 
 function closeTagPanel() {
-  const panel = document.querySelector('#tag-panel');
-  panel.classList.remove('open');
-  panel.hidden = true;
-  state.editingTagKey = null;
+  tagPanel.close();
   restoreTerminalFocusAfterOverlay();
 }
 
 function renderTagPanel() {
-  const tags = mergeTagCatalog(state.tags, [...state.hosts, ...state.webApps]);
-  const title = document.querySelector('#tag-panel-title');
-  const subtitle = document.querySelector('#tag-panel-subtitle');
-  const hint = document.querySelector('#tag-list-hint');
-  const status = document.querySelector('#tag-panel-status');
-  const clear = document.querySelector('#tag-panel-clear');
-  const list = document.querySelector('#tag-manager-list');
-
-  const systems = countResources(state.hosts);
-  title.textContent = 'Manage tags';
-  subtitle.textContent = `${tags.length} tag${tags.length === 1 ? '' : 's'} across ${systems} system${systems === 1 ? '' : 's'}`;
-  hint.textContent = 'Click a tag to filter';
-  status.textContent = state.activeTagFilters.length > 0
-    ? `${state.activeTagFilters.length} active filter${state.activeTagFilters.length === 1 ? '' : 's'}`
-    : 'No active filters';
-  clear.textContent = 'Clear filter';
-  clear.disabled = state.activeTagFilters.length === 0;
-
-  if (tags.length === 0) {
-    const empty = document.createElement('p');
-    empty.className = 'tag-manager-empty';
-    empty.textContent = 'Create the first tag to organize your connections.';
-    list.replaceChildren(empty);
-    return;
-  }
-  list.replaceChildren(...tags.map((tag) => renderTagManagerRow(tag)));
+  tagPanel.update(tagPanelData());
 }
 
-function renderTagManagerRow(tag) {
-  const row = document.createElement('div');
-  const selected = state.activeTagFilters.includes(tag.key);
-  row.className = `tag-manager-row${selected ? ' selected' : ''}`;
-  applyTagPalette(row, tag.name);
-
-  if (state.editingTagKey === tag.key) {
-    const form = document.createElement('form');
-    form.className = 'tag-rename-form';
-    const input = document.createElement('input');
-    input.value = tag.name;
-    input.maxLength = 40;
-    input.required = true;
-    input.setAttribute('aria-label', `Rename ${tag.name}`);
-    const save = tagIconButton('check', 'Save tag name');
-    save.type = 'submit';
-    const cancel = tagIconButton('x', 'Cancel rename');
-    cancel.addEventListener('click', () => {
-      state.editingTagKey = null;
-      renderTagPanel();
-    });
-    form.append(input, save, cancel);
-    form.addEventListener('submit', (event) => submitRenameTag(event, tag));
-    row.append(form);
-    window.setTimeout(() => {
-      input.focus();
-      input.select();
-    }, 0);
-    return row;
-  }
-
-  const select = document.createElement('button');
-  select.type = 'button';
-  select.className = 'tag-manager-select';
-  select.setAttribute('aria-pressed', selected ? 'true' : 'false');
-  select.title = `${selected ? 'Remove' : 'Apply'} ${tag.name} filter`;
-  const swatch = document.createElement('span');
-  swatch.className = 'tag-manager-swatch';
-  const name = document.createElement('strong');
-  name.textContent = tag.name;
-  const count = document.createElement('small');
-  count.textContent = `${tag.count} system${tag.count === 1 ? '' : 's'}`;
-  select.append(swatch, name, count);
-  select.addEventListener('click', () => toggleTagPanelTag(tag));
-
-  const actions = document.createElement('div');
-  actions.className = 'tag-manager-actions';
-  const edit = tagIconButton('pencil', `Rename ${tag.name}`);
-  edit.addEventListener('click', () => {
-    state.editingTagKey = tag.key;
-    renderTagPanel();
+function tagPanelData() {
+  return createTagPanelData({
+    catalog: state.tags,
+    hosts: state.hosts,
+    webApps: state.webApps,
+    activeFilters: state.activeTagFilters,
+    busy: state.busy,
   });
-  const remove = tagIconButton('trash', `Delete ${tag.name}`, 'danger-icon');
-  remove.addEventListener('click', () => deleteManagedTag(tag));
-  actions.append(edit, remove);
-  row.append(select, actions);
-  return row;
 }
 
-function tagIconButton(icon, label, className = '') {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = `tag-row-action ${className}`.trim();
-  button.title = label;
-  button.setAttribute('aria-label', label);
-  button.append(iconElement(icon));
-  return button;
-}
-
-async function submitCreateTag(event) {
-  event.preventDefault();
-  const input = event.currentTarget.elements.name;
-  const name = input.value.trim();
-  if (!name) return;
-
+async function createManagedTag(name) {
+  let created = false;
   await withBusy(async () => {
     await apiCreateTag(name);
-    input.value = '';
+    created = true;
     await refreshHosts();
     renderTagPanel();
   });
+  return created;
 }
 
-async function submitRenameTag(event, tag) {
-  event.preventDefault();
-  const newName = event.currentTarget.querySelector('input').value.trim();
-  if (!newName) return;
-
+async function renameManagedTag(tag, newName) {
+  let renamed = false;
   await withBusy(async () => {
     await apiRenameTag(tag.name, newName);
     const replacement = canonicalTag(newName);
     state.activeTagFilters = state.activeTagFilters.map((active) => active === tag.key ? replacement : active);
-    state.editingTagKey = null;
+    renamed = true;
     await refreshHosts();
     renderTagPanel();
   });
+  return renamed;
 }
 
 async function deleteManagedTag(tag) {
@@ -2660,21 +2530,6 @@ function toggleTagPanelTag(tag) {
 function clearTagPanelSelection() {
   clearTagFilters();
   renderTagPanel();
-}
-
-function updateTagCreateButton() {
-  const form = document.querySelector('#tag-create-form');
-  document.querySelector('#tag-create-submit').disabled = state.busy || form.elements.name.value.trim() === '';
-}
-
-function countResources(resources) {
-  let count = 0;
-  const visit = (resource) => {
-    count += 1;
-    for (const child of resource?.subsystems ?? []) visit(child);
-  };
-  for (const resource of resources ?? []) visit(resource);
-  return count;
 }
 
 function initializeHostSorting(container) {
@@ -4672,7 +4527,7 @@ async function withBusy(task) {
 
   state.busy = true;
   renderSelection();
-  updateTagCreateButton();
+  tagPanel.setBusy(true);
   try {
     return await task();
   } catch (error) {
@@ -4681,7 +4536,7 @@ async function withBusy(task) {
   } finally {
     state.busy = false;
     renderSelection();
-    updateTagCreateButton();
+    tagPanel.setBusy(false);
   }
 }
 

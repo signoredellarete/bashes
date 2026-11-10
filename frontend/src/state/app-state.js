@@ -26,7 +26,6 @@ export function createAppState({ terminalSettings, storage = globalThis.localSto
     editContextTarget: null,
     activeTagFilters: [],
     tagFilterMode: 'any',
-    editingTagKey: null,
     resourceDraftTags: [],
     resourceTagQuery: '',
     webAppDraftTags: [],
