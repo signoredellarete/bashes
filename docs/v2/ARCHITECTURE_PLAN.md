@@ -38,7 +38,7 @@ The guiding product rule is:
 
 ## Implementation status
 
-Status on 2026-11-10 for branch `feature/v2-modular-architecture`:
+Status on 2026-11-11 for branch `feature/v2-modular-architecture`:
 
 | Phase | Status | Current result |
 | --- | --- | --- |
@@ -118,6 +118,9 @@ Status on 2026-11-10 for branch `feature/v2-modular-architecture`:
 - sidebar card ordering and tag assignment/removal now have one lifecycle-aware
   SortableJS controller, so rerenders destroy stale drag instances before the
   Svelte tree is rebound;
+- the terminal tab strip is rendered by a tested Svelte view model and uses a
+  dedicated SortableJS controller; a separate terminal controller owns xterm
+  creation, input, clipboard, key repeat, disposal, focus, fit and PTY resize;
 - the selected Web App workbench is a Svelte feature backed by a pure view
   model; browser launch and tunnel operations remain application callbacks;
 - newly created hosts, nested systems and Web Apps enter the same selected and
@@ -405,7 +408,7 @@ Exit condition: no native resource relies on frontend cleanup for correctness.
   shared credentials component.
 - [x] Extract the selected Web App workspace and runtime controls.
 - [x] Extract the sidebar resource tree, ordering and tag drag/drop behavior.
-- [ ] Extract terminal tabs, xterm lifecycle, resizing and focus management.
+- [x] Extract terminal tabs, xterm lifecycle, resizing and focus management.
 - [-] Extract the file-transfer modal shell around the existing Svelte file
   manager and transfer queue.
 - [ ] Extract SSH key inventory, generation, import and installation views.

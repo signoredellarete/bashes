@@ -1045,7 +1045,10 @@ html.tabs-drag-outline-ready .session-tab-wrap.drag-outline-source .tab-close {
   cursor: pointer;
 }
 
-.tab-close .ti {
+.tab-close .ti,
+.tab-close svg {
+  width: 14px;
+  height: 14px;
   font-size: 14px;
 }
 

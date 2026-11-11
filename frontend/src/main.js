@@ -1,6 +1,3 @@
-import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
-import Sortable from 'sortablejs';
 import iconArrowsTransferUp from '@tabler/icons/outline/arrows-transfer-up.svg?raw';
 import iconArrowLeft from '@tabler/icons/outline/arrow-left.svg?raw';
 import iconCheck from '@tabler/icons/outline/check.svg?raw';
@@ -70,7 +67,6 @@ import {
   parseUnknownHostKeyError,
 } from './ssh-errors.js';
 import {
-  closedSessionShortcut,
   lastFocusedSessionId as lastFocusedSessionIdFromState,
   pendingSessionForResource as pendingSessionForResourceFromState,
   preferredSessionForResource as preferredSessionForResourceFromState,
@@ -92,13 +88,14 @@ import {
   persistTerminalSettings,
   terminalAppearancePreview,
 } from './terminal-settings.js';
-import { repeatedKeyData } from './terminal-keyboard.js';
-import { createOrderedWriter } from './ordered-writer.js';
-import { pasteIntoTerminal } from './terminal-paste.js';
 import { revealSidebarResource, sidebarListInset } from './sidebar-scroll.js';
 import { loadTunnelPreference, saveTunnelPreference } from './tunnel-preferences.js';
 import { tunnelLabel, tunnelPanelData } from './tunnels/model.js';
 import { mountTunnelPanel } from './tunnels/mount.js';
+import { terminalTabsData, terminalKindLabel } from './terminal-tabs/model.js';
+import { mountTerminalTabs } from './terminal-tabs/mount.js';
+import { createTerminalTabSorting } from './terminal-tabs/sorting.js';
+import { createTerminalController } from './terminal/controller.js';
 import {
   canonicalTag,
   mergeTagCatalog,
@@ -129,9 +126,7 @@ const state = createAppState({ terminalSettings, storage: localStorage });
 
 let searchRenderFrame = 0;
 let sidebarRenderFrame = 0;
-let terminalFitFrame = 0;
 let tooltipTimer = 0;
-let tabSortable = null;
 let suppressTagFilterClickUntil = 0;
 let tagPopover = null;
 let tagPopoverRequest = 0;
@@ -567,9 +562,36 @@ const sidebarSorting = createSidebarSorting({
   onClearAllDragOutlines: () => clearAllDragOutlines(),
   onSuppressTagFilter: () => { suppressTagFilterClickUntil = Date.now() + 120; },
 });
+const terminalTabs = mountTerminalTabs(document.querySelector('#session-tabs'), {
+  onselect: (sessionId) => selectTerminalTab(sessionId),
+  onactivate: (sessionId) => activateTerminalTab(sessionId),
+  onclose: (sessionId) => stopSession(sessionId),
+  ontooltip: (anchor) => showTooltip(anchor),
+  onhidetooltip: () => hideTooltip(),
+  onrender: (data) => finishTerminalTabsRender(data),
+});
+const terminalTabSorting = createTerminalTabSorting({
+  onReorder: (order) => reorderSessionTabs(order),
+  onClearDragOutline: () => clearDragOutline('tabs'),
+  onFocus: () => focusActiveTerminal(),
+});
 
 const stack = document.querySelector('#terminal-stack');
 const hostsScroll = document.querySelector('#hosts-scroll');
+const terminalController = createTerminalController({
+  stack,
+  sessions: () => state.sessions,
+  activeSessionId: () => state.activeSessionId,
+  settings: () => state,
+  writeSession: (sessionId, data) => apiWriteSSHSession(sessionId, data),
+  resizeSession: (sessionId, columns, rows) => apiResizeSSHSession(sessionId, columns, rows),
+  readClipboard,
+  writeClipboard,
+  openLink: (event, url) => openTerminalLink(event, url),
+  closeSession: (sessionId) => removeSessionFromUI(sessionId),
+  reconnectSession: (sessionId) => reconnectClosedSession(sessionId),
+  inputError: (kind, error) => writeNotice(`${terminalKindLabel(kind)} input error: ${error?.message ?? error}`),
+});
 
 window.addEventListener('resize', () => {
   scheduleTerminalFit();
@@ -912,7 +934,7 @@ async function submitConnect({ resourceId, input }) {
       await attachStartedSession(sessionID, selected);
       closeConnectPanel();
       await refreshHosts();
-      resizeActiveSession();
+      scheduleTerminalFit();
     } catch (error) {
       const message = connectErrorMessage(error, selected);
       connectPanel.setStatus(message, 'error');
@@ -959,7 +981,7 @@ async function quickConnect(resource, { failureSessionID = '' } = {}) {
           rows: 32,
         });
         await attachStartedSession(sessionID, resource, 'local', failureSessionID);
-        resizeActiveSession();
+        scheduleTerminalFit();
         return sessionID;
       }
 
@@ -973,7 +995,7 @@ async function quickConnect(resource, { failureSessionID = '' } = {}) {
       }, resource, 'Trust and connect');
       await attachStartedSession(sessionID, resource, 'ssh', failureSessionID);
       await refreshHosts();
-      resizeActiveSession();
+      scheduleTerminalFit();
       return sessionID;
     } catch (error) {
       const message = connectErrorMessage(error, resource);
@@ -1361,14 +1383,11 @@ function markSessionConnectionFailed(sessionID, resource, message) {
   if (!session) return;
 
   if (!session.terminal) {
-    session.element.textContent = '';
-    const terminal = new Terminal(terminalOptions(true));
-    const fitAddon = new FitAddon();
-    terminal.loadAddon(fitAddon);
-    terminal.open(session.element);
-    installTerminalKeyRepeatFallback(terminal, sessionID);
-    session.terminal = terminal;
-    session.fitAddon = fitAddon;
+    session.element?.remove();
+    const view = terminalController.createTerminal(sessionID, 'ssh', true);
+    session.terminal = view.terminal;
+    session.fitAddon = view.fitAddon;
+    session.element = view.element;
   }
 
   session.kind = 'ssh';
@@ -1403,8 +1422,7 @@ function removeSessionFromUI(sessionID) {
   if (session && state.lastSessionByResource.get(session.resourceId) === sessionID) {
     state.lastSessionByResource.delete(session.resourceId);
   }
-  if (session?.terminal) session.terminal.dispose();
-  if (session?.element) session.element.remove();
+  terminalController.dispose(session);
   if (state.activeSessionId === sessionID) {
     setActiveSession(lastFocusedSessionID());
   }
@@ -1783,13 +1801,9 @@ function createPendingTab(resource) {
   }
 
   const sessionID = `pending-${resource.id}`;
-  const pane = document.createElement('section');
-  pane.className = 'terminal-pane pending-pane';
-  pane.dataset.sessionId = sessionID;
-  pane.textContent = isLocalResource(resource)
+  const pane = terminalController.createPendingPane(sessionID, isLocalResource(resource)
     ? 'Ready to start local shell'
-    : `Ready to connect to ${resource.user}@${resource.ip || resource.hostname}:${resource.port}`;
-  stack.append(pane);
+    : `Ready to connect to ${resource.user}@${resource.ip || resource.hostname}:${resource.port}`);
 
   state.sessions.set(sessionID, {
     id: sessionID,
@@ -1852,42 +1866,9 @@ function createSession(sessionID, resource, kind = 'ssh', replaceSessionID = '')
   const replacedSession = replaceSessionID ? state.sessions.get(replaceSessionID) : null;
   const ordinal = replacedSession?.ordinal ?? realSessionsForResource(resource.id).length + 1;
 
-  const pane = document.createElement('section');
-  pane.className = 'terminal-pane';
-  pane.dataset.sessionId = sessionID;
-  stack.append(pane);
-
-  let terminal;
+  let view;
   try {
-    terminal = new Terminal(terminalOptions());
-    const fitAddon = new FitAddon();
-    terminal.loadAddon(fitAddon);
-    terminal.open(pane);
-  const writeInput = createOrderedWriter((data) => apiWriteSSHSession(sessionID, data));
-  installTerminalKeyRepeatFallback(terminal, sessionID, writeInput);
-  terminal.onData((data) => {
-    if (state.sessions.get(sessionID)?.closed) return;
-    writeInput(data).catch((error) => {
-      writeNotice(`${terminalKindLabel(kind)} input error: ${error?.message ?? error}`);
-    });
-  });
-  terminal.onSelectionChange(() => {
-    if (!state.terminalCopyOnSelect) return;
-    const selected = terminal.getSelection();
-    if (!selected) return;
-    writeClipboard(selected).catch(() => {});
-  });
-  pane.addEventListener('contextmenu', (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    readClipboard()
-      .then((text) => {
-        if (state.sessions.get(sessionID)?.closed) return undefined;
-        pasteIntoTerminal(terminal, text);
-        return undefined;
-      })
-      .catch(() => {});
-  });
+    view = terminalController.createTerminal(sessionID, kind);
 
     const nextSession = {
       id: sessionID,
@@ -1896,9 +1877,9 @@ function createSession(sessionID, resource, kind = 'ssh', replaceSessionID = '')
       ordinal,
       target: resourceTarget(resource),
       kind,
-      terminal,
-      fitAddon,
-      element: pane,
+      terminal: view.terminal,
+      fitAddon: view.fitAddon,
+      element: view.element,
       closed: false,
     };
     if (replacedSession) {
@@ -1908,8 +1889,7 @@ function createSession(sessionID, resource, kind = 'ssh', replaceSessionID = '')
       if (state.lastSessionByResource.get(replacedSession.resourceId) === replaceSessionID) {
         state.lastSessionByResource.delete(replacedSession.resourceId);
       }
-      replacedSession.terminal?.dispose();
-      replacedSession.element?.remove();
+      terminalController.dispose(replacedSession);
     } else {
       state.sessions.set(sessionID, nextSession);
     }
@@ -1921,166 +1901,67 @@ function createSession(sessionID, resource, kind = 'ssh', replaceSessionID = '')
     focusActiveTerminal();
   } catch (error) {
     state.sessions.delete(sessionID);
-    terminal?.dispose();
-    pane.remove();
+    terminalController.dispose(view);
     throw error;
   }
 }
 
-function terminalOptions(disableStdin = false) {
-  return {
-    cursorBlink: !disableStdin,
-    convertEol: true,
-    disableStdin,
-    fontFamily: state.terminalFontFamily,
-    fontSize: state.terminalFontSize,
-    rightClickSelectsWord: false,
-    scrollback: state.terminalScrollback,
-    linkHandler: {
-      activate: (event, url) => openTerminalLink(event, url),
-    },
-    theme: {
-      background: '#101418',
-      foreground: '#d7dde5',
-      cursor: '#f5c542',
-      selectionBackground: '#3d4a58',
-    },
-  };
-}
-
-function installTerminalKeyRepeatFallback(terminal, sessionID, writeInput) {
-  terminal.attachCustomKeyEventHandler((event) => {
-    const session = state.sessions.get(sessionID);
-    if (session?.closed && event.type === 'keydown') {
-      const shortcut = closedSessionShortcut(event);
-      event.preventDefault();
-      if (shortcut === 'close') {
-        window.setTimeout(() => removeSessionFromUI(sessionID), 0);
-      } else if (shortcut === 'reconnect') {
-        window.setTimeout(() => reconnectClosedSession(sessionID), 0);
-      }
-      return false;
-    }
-
-    if (event.type !== 'keydown' || !event.repeat || event.isComposing) {
-      return true;
-    }
-
-    const applicationCursor = Boolean(terminal.modes?.applicationCursorKeysMode);
-    const data = repeatedKeyData(event, applicationCursor);
-    if (!data) return true;
-
-    event.preventDefault();
-    writeInput(data).catch((error) => {
-      const session = state.sessions.get(sessionID);
-      writeNotice(`${terminalKindLabel(session?.kind)} input error: ${error?.message ?? error}`);
-    });
-    return false;
-  });
-}
-
 function renderTabs() {
-  const tabs = document.querySelector('#session-tabs');
   hideTooltip();
   clearDragOutline('tabs');
-  tabSortable?.destroy();
-  tabSortable = null;
+  terminalTabSorting.destroy();
   const empty = document.querySelector('#empty-terminal');
   const sessions = [...state.sessions.values()];
-  tabs.hidden = sessions.length === 0;
   empty.hidden = Boolean(state.activeSessionId);
-
-  tabs.replaceChildren(...sessions.map((session) => {
-    const tab = document.createElement('button');
-    tab.type = 'button';
-    tab.className = `session-tab ${session.id === state.activeSessionId ? 'active' : ''} ${session.closed ? 'closed' : ''} ${session.pending ? 'pending' : ''}`;
-    tab.innerHTML = '<span></span><strong></strong>';
-    tab.querySelector('span').textContent = session.kind === 'webapp'
-      ? 'webapp'
-      : session.closed ? 'closed' : session.pending ? 'new' : terminalKindLabel(session.kind);
-    tab.querySelector('strong').textContent = session.title;
+  const resourceTooltips = new Map(sessions.flatMap((session) => {
     const resource = findResource(session.resourceId)?.resource;
-    tab.dataset.tooltip = resource ? resourceTooltip(resource) : `${session.title} - ${session.target}`;
-    tab.dataset.tooltipPlacement = 'bottom';
-    tab.addEventListener('mouseenter', () => showTooltip(tab));
-    tab.addEventListener('focus', () => showTooltip(tab));
-    tab.addEventListener('mouseleave', () => hideTooltip());
-    tab.addEventListener('blur', () => hideTooltip());
-    tab.addEventListener('click', () => {
-      if (!session.pending) clearPendingTabs(session.resourceId);
-      setActiveSession(session.id);
-      renderTabs();
-      renderSelection();
-      scheduleTerminalFit();
-      focusActiveTerminal();
-    });
-    tab.addEventListener('dblclick', () => {
-      if (session.kind === 'webapp' && session.pending) {
-        const webApp = findResource(session.resourceId)?.resource;
-        if (webApp) launchWebApp(webApp);
-      } else if (session.closed) {
-        reconnectClosedSession(session.id);
-      }
-    });
-    const close = document.createElement('button');
-    close.type = 'button';
-    close.className = 'tab-close';
-    close.append(iconElement('x'));
-    close.title = `Close ${session.title}`;
-    close.addEventListener('click', (event) => {
-      event.stopPropagation();
-      stopSession(session.id);
-    });
-
-    const wrapper = document.createElement('div');
-    wrapper.className = `session-tab-wrap ${session.id === state.activeSessionId ? 'active' : ''}`;
-    wrapper.dataset.sessionId = session.id;
-    wrapper.append(tab, close);
-    return wrapper;
+    return resource ? [[session.resourceId, resourceTooltip(resource)]] : [];
+  }));
+  terminalTabs.update(terminalTabsData({
+    sessions,
+    activeSessionId: state.activeSessionId,
+    resourceTooltips,
   }));
 
-  if (sessions.length > 1) initializeTabSorting(tabs);
-
-  document.querySelectorAll('.terminal-pane').forEach((pane) => {
-    pane.hidden = pane.dataset.sessionId !== state.activeSessionId;
-  });
+  terminalController.showActivePanes();
 }
 
-function initializeTabSorting(tabs) {
-  tabSortable = Sortable.create(tabs, {
-    animation: 170,
-    easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
-    direction: 'horizontal',
-    draggable: '.session-tab-wrap',
-    handle: '.session-tab',
-    forceFallback: true,
-    fallbackOnBody: true,
-    fallbackTolerance: 4,
-    ghostClass: 'tab-drag-ghost',
-    chosenClass: 'tab-drag-chosen',
-    fallbackClass: 'tab-drag-mirror',
-    onUnchoose() {
-      clearDragOutline('tabs');
-    },
-    onStart() {
-      document.documentElement.classList.add('sorting-tabs');
-    },
-    onEnd() {
-      clearDragOutline('tabs');
-      document.documentElement.classList.remove('sorting-tabs');
-      const order = [...tabs.querySelectorAll(':scope > .session-tab-wrap')].map((tab) => tab.dataset.sessionId);
-      state.sessions = orderSessions(state.sessions, order);
-      renderTabs();
-      focusActiveTerminal();
-    },
-  });
+function finishTerminalTabsRender(data) {
+  terminalTabSorting.initialize(document.querySelector('#session-tabs'), data.tabs.length > 1);
+}
+
+function selectTerminalTab(sessionID) {
+  const session = state.sessions.get(sessionID);
+  if (!session) return;
+  if (!session.pending) clearPendingTabs(session.resourceId);
+  setActiveSession(session.id);
+  renderTabs();
+  renderSelection();
+  scheduleTerminalFit();
+  focusActiveTerminal();
+}
+
+function activateTerminalTab(sessionID) {
+  const session = state.sessions.get(sessionID);
+  if (!session) return;
+  if (session.kind === 'webapp' && session.pending) {
+    const webApp = findResource(session.resourceId)?.resource;
+    if (webApp) launchWebApp(webApp);
+  } else if (session.closed) {
+    reconnectClosedSession(session.id);
+  }
+}
+
+function reorderSessionTabs(order) {
+  state.sessions = orderSessions(state.sessions, order);
+  renderTabs();
 }
 
 function schedulePointerDragOutline(event) {
   if (event.button !== 0) return;
   if (event.target.closest?.('.resource-tag, .tag-filter-chip')) return;
   const tab = event.target.closest?.('.session-tab');
-  if (tabSortable && tab) {
+  if (terminalTabSorting.isActive() && tab) {
     scheduleDragOutline('tabs', tab.closest('.session-tab-wrap'));
     return;
   }
@@ -3177,10 +3058,6 @@ function sessionTitle(hostname, ordinal) {
   return ordinal > 1 ? `${hostname} #${ordinal}` : hostname;
 }
 
-function terminalKindLabel(kind = 'ssh') {
-  return kind === 'local' ? 'local' : 'ssh';
-}
-
 async function openInitialLocalSession() {
   if (!state.localShellSupported || state.sessions.size > 0) return;
   await quickConnect(localResource());
@@ -3383,12 +3260,7 @@ function previewTerminalAppearance(values) {
 }
 
 function applyTerminalSettings(settings = state, { focus = true } = {}) {
-  for (const session of state.sessions.values()) {
-    if (!session.terminal) continue;
-    session.terminal.options.fontSize = settings.terminalFontSize;
-    session.terminal.options.fontFamily = settings.terminalFontFamily;
-    session.terminal.options.scrollback = settings.terminalScrollback;
-  }
+  terminalController.applySettings(settings);
   scheduleTerminalFit();
   if (focus) focusActiveTerminal();
 }
@@ -3410,9 +3282,7 @@ function adjustTerminalFontSize(delta) {
 }
 
 function focusActiveTerminal() {
-  const session = state.sessions.get(state.activeSessionId);
-  if (!session?.terminal) return;
-  requestAnimationFrame(() => session.terminal.focus());
+  terminalController.focusActive();
 }
 
 function restoreTerminalFocusAfterOverlay() {
@@ -3430,25 +3300,8 @@ function hasOpenBlockingOverlay() {
   ));
 }
 
-function fitActiveTerminal() {
-  const session = state.sessions.get(state.activeSessionId);
-  if (!session?.fitAddon || !session.terminal) return;
-  session.fitAddon.fit();
-}
-
 function scheduleTerminalFit() {
-  if (terminalFitFrame) cancelAnimationFrame(terminalFitFrame);
-  terminalFitFrame = requestAnimationFrame(() => {
-    terminalFitFrame = 0;
-    fitActiveTerminal();
-    resizeActiveSession();
-  });
-}
-
-function resizeActiveSession() {
-  const session = state.sessions.get(state.activeSessionId);
-  if (!session?.terminal || session.pending || session.closed) return;
-  apiResizeSSHSession(session.id, session.terminal.cols, session.terminal.rows).catch(() => {});
+  terminalController.scheduleFit();
 }
 
 function openEditContextMenu(event) {
