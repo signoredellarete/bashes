@@ -1,6 +1,6 @@
-export function resourcePanelData({ mode = 'host', parent = null, resource = null, catalog = [] } = {}) {
+export function resourcePanelData({ mode = 'host', resourceType = '', parent = null, resource = null, catalog = [] } = {}) {
   const editing = mode === 'edit';
-  const subsystem = mode === 'subsystem' || (editing && resource?.type !== 'host');
+  const subsystem = mode === 'subsystem' || (editing && resourceType !== 'host');
   const parentSummary = subsystem && parent
     ? `Parent: ${parent.hostname} (${parent.user}@${parent.ip || parent.hostname})`
     : '';

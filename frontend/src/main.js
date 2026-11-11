@@ -2914,6 +2914,7 @@ function openEditPanel() {
   if (!selected) return;
   resourcePanel.open(resourcePanelData({
     mode: 'edit',
+    resourceType: selected.type,
     parent: selected.parent,
     resource: selected.resource,
     catalog: resourceTagCatalog(),

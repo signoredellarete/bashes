@@ -12,10 +12,21 @@ describe('resource panel model', () => {
     });
   });
 
+  it('keeps a top-level host in host edit mode', () => {
+    const resource = { id: 'host-1', hostname: 'Host', ip: '10.0.0.1', port: 22, user: 'root', tags: [] };
+    expect(resourcePanelData({ mode: 'edit', resourceType: 'host', resource })).toMatchObject({
+      editId: 'host-1',
+      subsystem: false,
+      title: 'Edit host',
+      parentSummary: '',
+      values: { type: '', hostname: 'Host' },
+    });
+  });
+
   it('describes a nested subsystem edit', () => {
     const parent = { id: 'host-1', hostname: 'Host', ip: '10.0.0.1', user: 'root' };
     const resource = { id: 'vm-1', type: 'vm', hostname: 'VM', ip: '10.0.0.2', port: 2222, user: 'sid', tags: ['Lab'] };
-    expect(resourcePanelData({ mode: 'edit', parent, resource })).toMatchObject({
+    expect(resourcePanelData({ mode: 'edit', resourceType: 'vm', parent, resource })).toMatchObject({
       parentId: 'host-1',
       editId: 'vm-1',
       subsystem: true,
