@@ -21,4 +21,15 @@ describe('tag filter model', () => {
   it('normalizes an unsupported match mode to any', () => {
     expect(tagFilterData({ mode: 'unsupported' }).mode).toBe('any');
   });
+
+  it('updates the count when an existing tag is assigned to an untagged host', () => {
+    const data = tagFilterData({
+      catalog: ['Production'],
+      hosts: [{ id: 'host-1', tags: ['Production'] }],
+      activeFilters: ['production'],
+    });
+
+    expect(data.tags).toEqual([{ key: 'production', name: 'Production', count: 1 }]);
+    expect(data.activeFilters).toEqual(['production']);
+  });
 });

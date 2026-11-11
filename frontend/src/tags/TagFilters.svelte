@@ -8,7 +8,7 @@
   let tags = $state([]);
   let activeFilters = $state([]);
   let mode = $state('any');
-  let renderVersion = 0;
+  let renderVersion = $state(0);
 
   async function update(data = {}) {
     tags = data.tags ?? [];
@@ -35,27 +35,29 @@
     </div>
   </header>
   <div id="tag-filter-chips" class="tag-filter-chips">
-    {#each tags as tag (tag.key)}
-      <button
-        class:active={active(tag)}
-        class="tag-filter-chip"
-        type="button"
-        data-tag-key={tag.key}
-        data-tag-name={tag.name}
-        title={`${tag.count} connection${tag.count === 1 ? '' : 's'} tagged ${tag.name}`}
-        aria-pressed={active(tag)}
-        style={`--tag-hue: ${tagHue(tag.name)}`}
-        onclick={() => ontoggle?.(tag.key)}
-      >
-        <span class="tag-dot"></span>
-        <span>{tag.name}</span>
-        <small>{tag.count}</small>
-      </button>
-    {/each}
-    {#if activeFilters.length > 0}
-      <button class="clear-tag-filters" type="button" title="Clear tag filters" onclick={onclear}>
-        {@html iconX}<span>Clear</span>
-      </button>
-    {/if}
+    {#key renderVersion}
+      {#each tags as tag (tag.key)}
+        <button
+          class:active={active(tag)}
+          class="tag-filter-chip"
+          type="button"
+          data-tag-key={tag.key}
+          data-tag-name={tag.name}
+          title={`${tag.count} connection${tag.count === 1 ? '' : 's'} tagged ${tag.name}`}
+          aria-pressed={active(tag)}
+          style={`--tag-hue: ${tagHue(tag.name)}`}
+          onclick={() => ontoggle?.(tag.key)}
+        >
+          <span class="tag-dot"></span>
+          <span>{tag.name}</span>
+          <small>{tag.count}</small>
+        </button>
+      {/each}
+      {#if activeFilters.length > 0}
+        <button class="clear-tag-filters" type="button" title="Clear tag filters" onclick={onclear}>
+          {@html iconX}<span>Clear</span>
+        </button>
+      {/if}
+    {/key}
   </div>
 </section>

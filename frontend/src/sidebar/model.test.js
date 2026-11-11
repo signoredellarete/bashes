@@ -37,4 +37,14 @@ describe('sidebar tree model', () => {
     expect(compactResourceName('Host One')).toBe('HO');
     expect(resourceTooltip(hosts[0])).toBe('Host One - root@10.0.0.1:22 - Prod');
   });
+
+  it('filters a host immediately after a tag is assigned', () => {
+    const updatedHosts = [
+      ...hosts,
+      { id: 'host-2', hostname: 'Host Two', ip: '10.0.0.3', port: 22, user: 'root', tags: ['New'], subsystems: [] },
+    ];
+    const data = sidebarTreeData({ hosts: updatedHosts, activeTags: ['new'] });
+
+    expect(data.blocks.map((block) => block.id)).toEqual(['host-2']);
+  });
 });
