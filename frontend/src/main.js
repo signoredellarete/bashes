@@ -101,13 +101,12 @@ import { tunnelLabel, tunnelPanelData } from './tunnels/model.js';
 import { mountTunnelPanel } from './tunnels/mount.js';
 import {
   canonicalTag,
-  filterResourceTree,
   mergeTagCatalog,
   resourceTags,
-  tagHue,
-  visibleResourceTags,
 } from './resource-tags.js';
-import { isWebAppResource, webAppMatchesFilters } from './web-apps/model.js';
+import { isWebAppResource } from './web-apps/model.js';
+import { mountSidebarResources } from './sidebar/mount.js';
+import { resourceTooltip, sidebarTreeData } from './sidebar/model.js';
 import { mountWebAppAuthPanel } from './web-apps/auth-mount.js';
 import { webAppAuthPanelData } from './web-apps/auth-model.js';
 import { mountWebAppPanel } from './web-apps/panel-mount.js';
@@ -128,6 +127,7 @@ const terminalSettings = loadTerminalSettings(localStorage);
 const state = createAppState({ terminalSettings, storage: localStorage });
 
 let searchRenderFrame = 0;
+let sidebarRenderFrame = 0;
 let terminalFitFrame = 0;
 let tooltipTimer = 0;
 let hostSortable = null;
@@ -531,7 +531,6 @@ const tagFilters = mountTagFilters(document.querySelector('#tag-filters-root'), 
   },
   onclear: () => clearTagFilters(),
   onmode: (mode) => setTagFilterMode(mode),
-  onrender: () => initializeTagSorting(),
 });
 const resourcePanel = mountResourcePanel(document.querySelector('#resource-panel-root'), {
   onsubmit: (submission) => submitResource(submission),
@@ -555,6 +554,14 @@ const tunnelPanel = mountTunnelPanel(document.querySelector('#tunnel-panel-root'
   onsubmit: (submission) => submitTunnel(submission),
   onstop: (resourceId) => stopResourceTunnel(resourceId),
   onrequestclose: () => closeTunnelPanel(),
+});
+const sidebarResources = mountSidebarResources(document.querySelector('#hosts'), {
+  onselect: (resourceId) => selectSidebarResource(resourceId),
+  onactivate: (resourceId, type) => activateSidebarResource(resourceId, type),
+  ontooltip: (anchor, delay) => showTooltip(anchor, delay),
+  onhidetooltip: () => hideTooltip(),
+  ontagpopover: (anchor, resourceId) => toggleTagPopover(anchor, resourceId),
+  onrender: (data) => finishSidebarRender(data),
 });
 
 const stack = document.querySelector('#terminal-stack');
@@ -1417,150 +1424,53 @@ function scheduleHostRender() {
 }
 
 function renderHosts(filter = '') {
-  const container = document.querySelector('#hosts');
   closeTagPopover();
   clearDragOutline('hosts');
   hostSortable?.destroy();
   hostSortable = null;
   destroyTagSorting();
-  const query = filter.trim().toLowerCase();
   renderTagFilters();
-  const hasFilters = query !== '' || state.activeTagFilters.length > 0;
-  const canReorder = !hasFilters;
-  const elements = [];
-
-  if (state.localShellSupported) {
-    elements.push(resourceRow(localResource(), 'local', 0).element);
-  }
-  const filteredHosts = filterResourceTree(state.hosts, {
-    query,
+  void sidebarResources.update(sidebarTreeData({
+    hosts: state.hosts,
+    webApps: state.webApps,
+    topLevelOrder: state.topLevelOrder,
+    query: filter,
     activeTags: state.activeTagFilters,
-    mode: state.tagFilterMode,
-  });
-  const filteredWebApps = state.webApps.filter((webApp) => webAppMatchesFilters(webApp, {
-    query,
-    activeTags: state.activeTagFilters,
-    mode: state.tagFilterMode,
+    tagFilterMode: state.tagFilterMode,
+    localShellSupported: state.localShellSupported,
+    tunnels: state.tunnels.values(),
+    webAppRuntimes: state.webAppRuntimes,
+    selectedId: state.selectedId,
+    sidebarCollapsed: state.sidebarCollapsed,
   }));
-  const items = new Map();
-  for (const node of filteredHosts) {
-    const block = document.createElement('div');
-    block.className = 'host-block';
-    block.dataset.topLevelId = node.resource.id;
-    block.append(...resourceRows(node, 'host', 0).map((row) => row.element));
-    items.set(node.resource.id, block);
-  }
-  for (const webApp of filteredWebApps) {
-    const block = document.createElement('div');
-    block.className = 'host-block webapp-block';
-    block.dataset.topLevelId = webApp.id;
-    block.append(resourceRow(webApp, 'webapp', 0).element);
-    items.set(webApp.id, block);
-  }
-  for (const id of state.topLevelOrder) {
-    if (!items.has(id)) continue;
-    elements.push(items.get(id));
-    items.delete(id);
-  }
-  elements.push(...items.values());
-
-  if (hasFilters && filteredHosts.length === 0 && filteredWebApps.length === 0) {
-    const empty = document.createElement('p');
-    empty.className = 'host-filter-empty';
-    empty.textContent = 'No connection matches the current filters.';
-    elements.push(empty);
-  }
-  container.replaceChildren(...elements);
-  requestAnimationFrame(syncSidebarScrollbarInset);
-  if (canReorder && state.topLevelOrder.length > 1) initializeHostSorting(container);
 }
 
-function resourceRows(node, type, depth) {
-  const resource = node.resource;
-  const rows = [resourceRow(resource, type, depth)];
-  for (const child of node.children) {
-    rows.push(...resourceRows(child, child.resource.type, depth + 1));
-  }
-  return rows;
+function finishSidebarRender(data) {
+  if (sidebarRenderFrame) cancelAnimationFrame(sidebarRenderFrame);
+  sidebarRenderFrame = requestAnimationFrame(() => {
+    sidebarRenderFrame = 0;
+    syncSidebarScrollbarInset();
+    initializeTagSorting();
+    if (data.canReorder) initializeHostSorting(document.querySelector('#hosts'));
+  });
 }
 
-function resourceRow(resource, type, depth = 0) {
-  const row = document.createElement('div');
-  row.className = `host-row ${depth > 0 ? 'child' : ''}`;
-  if (isLocalResource(resource)) row.classList.add('local-row');
-  if (type === 'webapp') row.classList.add('webapp-row');
-  row.dataset.id = resource.id;
-  row.style.setProperty('--tree-offset', `${depth * 18}px`);
-  const name = resourceName(resource);
-  const target = resourceTarget(resource);
-  const tags = resourceTags(resource);
-  const tooltip = resourceTooltip(resource);
-  const tunnel = tunnelForResource(resource.id);
-  const webAppRuntime = type === 'webapp' ? state.webAppRuntimes.get(resource.id) : null;
-  const webAppTunnelActive = Boolean(webAppRuntime?.tunnelActive);
+function selectSidebarResource(resourceId) {
+  const selected = findResource(resourceId);
+  if (selected) selectResource(selected.resource);
+}
 
-  const selectButton = document.createElement('button');
-  selectButton.type = 'button';
-  selectButton.className = 'host-select';
-  if (tunnel || webAppTunnelActive) selectButton.classList.add('tunnel-active');
-  if (tags.length) selectButton.classList.add('has-tags');
-  selectButton.setAttribute('aria-label', tooltip);
-  selectButton.dataset.tooltip = tooltip;
-  selectButton.dataset.tooltipPlacement = 'right';
-  selectButton.innerHTML = `
-    <span class="type"></span>
-    <span class="compact-name" aria-hidden="true"></span>
-    <span class="details">
-      <span class="resource-name-line">
-        <strong></strong>
-      </span>
-      <small></small>
-    </span>
-    <span class="resource-tags" aria-label="Connection tags"></span>
-  `;
-  if (tunnel || webAppTunnelActive) {
-    const chip = document.createElement('span');
-    chip.className = 'smart-chip tunnel-chip';
-    chip.textContent = 'tun';
-    chip.setAttribute('aria-label', webAppTunnelActive
-      ? `SOCKS tunnel on 127.0.0.1:${webAppRuntime.socksPort}`
-      : tunnelLabel(tunnel.type));
-    selectButton.querySelector('.resource-name-line').append(chip);
+function activateSidebarResource(resourceId, type) {
+  const selected = findResource(resourceId);
+  if (!selected) return;
+  state.selectedId = resourceId;
+  if (type === 'webapp') {
+    selectResource(selected.resource);
+    launchWebApp(selected.resource);
+  } else {
+    createPendingTab(selected.resource);
+    quickConnect(selected.resource);
   }
-  selectButton.querySelector('.type').textContent = type === 'webapp' ? 'WebApp' : type;
-  selectButton.querySelector('.compact-name').textContent = compactResourceName(name);
-  selectButton.querySelector('strong').textContent = name;
-  selectButton.querySelector('small').textContent = target;
-  renderResourceTagPills(selectButton.querySelector('.resource-tags'), tags, resource.id);
-  if (!isLocalResource(resource)) {
-    const tagDropTarget = document.createElement('span');
-    tagDropTarget.className = 'resource-tag-drop-target';
-    tagDropTarget.dataset.resourceId = resource.id;
-    tagDropTarget.setAttribute('aria-hidden', 'true');
-    selectButton.append(tagDropTarget);
-  }
-  selectButton.addEventListener('click', () => {
-    selectResource(resource);
-  });
-  selectButton.addEventListener('dblclick', () => {
-    state.selectedId = resource.id;
-    if (type === 'webapp') {
-      selectResource(resource);
-      launchWebApp(resource);
-    } else {
-      createPendingTab(resource);
-      quickConnect(resource);
-    }
-  });
-  selectButton.addEventListener('mouseenter', () => showTooltip(selectButton, state.sidebarCollapsed ? 0 : TOOLTIP_DELAY));
-  selectButton.addEventListener('focus', () => showTooltip(selectButton, state.sidebarCollapsed ? 0 : TOOLTIP_DELAY));
-  selectButton.addEventListener('mouseleave', () => hideTooltip());
-  selectButton.addEventListener('blur', () => hideTooltip());
-  row.append(selectButton);
-
-  return {
-    element: row,
-  };
 }
 
 function renderTagFilters() {
@@ -1573,47 +1483,6 @@ function renderTagFilters() {
   });
   state.activeTagFilters = data.activeFilters;
   tagFilters.update(data);
-}
-
-function renderResourceTagPills(container, tags, resourceID) {
-  if (!container) return;
-  container.dataset.resourceId = resourceID;
-  if (tags.length === 0) return;
-  const { shown, hidden } = visibleResourceTags(tags);
-  container.dataset.visibleCount = String(shown.length + (hidden.length > 0 ? 1 : 0));
-  const pills = shown.map((tag) => {
-    const pill = document.createElement('span');
-    pill.className = `resource-tag${state.activeTagFilters.includes(tag.key) ? ' active' : ''}`;
-    pill.dataset.tagKey = tag.key;
-    pill.dataset.tagName = tag.name;
-    pill.textContent = tag.name;
-    pill.title = `Tag: ${tag.name}`;
-    applyTagPalette(pill, tag.name);
-    return pill;
-  });
-  if (hidden.length > 0) {
-    const overflow = document.createElement('span');
-    overflow.className = 'resource-tag overflow';
-    overflow.dataset.resourceId = resourceID;
-    overflow.textContent = `+${hidden.length}`;
-    overflow.title = hidden.map((tag) => tag.name).join(', ');
-    overflow.setAttribute('role', 'button');
-    overflow.setAttribute('tabindex', '0');
-    overflow.setAttribute('aria-label', `Show all ${tags.length} tags`);
-    overflow.setAttribute('aria-expanded', 'false');
-    overflow.addEventListener('click', (event) => {
-      event.stopPropagation();
-      toggleTagPopover(overflow, resourceID);
-    });
-    overflow.addEventListener('keydown', (event) => {
-      if (event.key !== 'Enter' && event.key !== ' ') return;
-      event.preventDefault();
-      event.stopPropagation();
-      toggleTagPopover(overflow, resourceID);
-    });
-    pills.push(overflow);
-  }
-  container.replaceChildren(...pills);
 }
 
 function toggleTagPopover(anchor, resourceID) {
@@ -1667,10 +1536,6 @@ function restoreTagPopover(resourceID) {
   const anchor = [...document.querySelectorAll('.resource-tag.overflow')]
     .find((element) => element.dataset.resourceId === resourceID);
   if (anchor) void openTagPopover(anchor, resourceID);
-}
-
-function applyTagPalette(element, name) {
-  element.style.setProperty('--tag-hue', String(tagHue(name)));
 }
 
 function initializeTagSorting() {
@@ -1954,16 +1819,6 @@ async function persistHostOrder(container) {
   renderSelection();
 }
 
-function compactResourceName(name) {
-  const clean = String(name ?? '').trim();
-  if (!clean) return '?';
-  const parts = clean.split(/[-_\s.]+/).filter(Boolean);
-  if (parts.length >= 2) {
-    return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-  }
-  return clean.slice(0, 2).toUpperCase();
-}
-
 function toggleSidebar() {
   state.sidebarCollapsed = !state.sidebarCollapsed;
   localStorage.setItem('bashes.sidebarCollapsed', String(state.sidebarCollapsed));
@@ -2028,11 +1883,6 @@ function hideTooltip() {
   }
   const tooltip = document.querySelector('#app-tooltip');
   if (tooltip) tooltip.hidden = true;
-}
-
-function resourceTooltip(resource) {
-  const tags = resourceTags(resource);
-  return `${resourceName(resource)} - ${resourceTarget(resource)}${tags.length ? ` - ${tags.map((tag) => tag.name).join(', ')}` : ''}`;
 }
 
 function webAppTabForResource(resourceID) {
@@ -2747,9 +2597,7 @@ function clamp(value, min, max) {
 }
 
 function renderSelection() {
-  document.querySelectorAll('.host-row').forEach((row) => {
-    row.classList.toggle('selected', row.dataset.id === state.selectedId);
-  });
+  sidebarResources.setSelection(state.selectedId);
 
   const selected = findResource(state.selectedId);
   const activeSession = state.sessions.get(state.activeSessionId);

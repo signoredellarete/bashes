@@ -112,6 +112,9 @@ Status on 2026-11-10 for branch `feature/v2-modular-architecture`:
   callbacks backed by a tested panel model;
 - the sidebar tag-filter strip owns ANY/ALL controls, chips and clear state in
   Svelte while retaining the existing SortableJS drag hooks;
+- the sidebar resource tree is rendered from a tested Svelte view model that
+  preserves hierarchy, top-level order, filters, tunnel chips, tooltips and the
+  existing SortableJS data hooks;
 - the selected Web App workbench is a Svelte feature backed by a pure view
   model; browser launch and tunnel operations remain application callbacks;
 - newly created hosts, nested systems and Web Apps enter the same selected and
