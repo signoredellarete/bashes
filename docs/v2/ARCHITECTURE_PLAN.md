@@ -121,6 +121,9 @@ Status on 2026-11-11 for branch `feature/v2-modular-architecture`:
 - the terminal tab strip is rendered by a tested Svelte view model and uses a
   dedicated SortableJS controller; a separate terminal controller owns xterm
   creation, input, clipboard, key repeat, disposal, focus, fit and PTY resize;
+- SSH key inventory, search, source diagnostics, generation, import, private-key
+  viewing and remote installation share one tested Svelte panel model while
+  native key operations and confirmation policy remain application callbacks;
 - the selected Web App workbench is a Svelte feature backed by a pure view
   model; browser launch and tunnel operations remain application callbacks;
 - newly created hosts, nested systems and Web Apps enter the same selected and
@@ -411,7 +414,7 @@ Exit condition: no native resource relies on frontend cleanup for correctness.
 - [x] Extract terminal tabs, xterm lifecycle, resizing and focus management.
 - [-] Extract the file-transfer modal shell around the existing Svelte file
   manager and transfer queue.
-- [ ] Extract SSH key inventory, generation, import and installation views.
+- [x] Extract SSH key inventory, generation, import and installation views.
 - [-] Preserve UI dimensions, colors, shortcuts, focus and modal behavior with
   focused automated and desktop preview tests.
 - [-] Split CSS by tokens, layout and feature while keeping one generated bundle.

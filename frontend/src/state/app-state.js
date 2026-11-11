@@ -6,6 +6,7 @@ export function createAppState({ terminalSettings, storage = globalThis.localSto
     tags: [],
     keys: [],
     keySources: [],
+    selectedKeyValue: '',
     keyInstallEnabled: true,
     keySettings: { customDirectory: '' },
     webAppBrowsers: [],
