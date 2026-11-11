@@ -123,6 +123,9 @@ Status on 2026-11-10 for branch `feature/v2-modular-architecture`:
 - Add/Edit Web App now uses the same reusable tag editor inside a dedicated
   Svelte panel; gateway selection and conditional tunnel/browser fields are
   produced by a tested view model while persistence remains in the backend;
+- the SSH Connect panel now owns authentication form state and key-source
+  rendering in Svelte, backed by tested password/key/path normalization while
+  session startup and host-key confirmation remain application callbacks;
 - plugin manifest validation, discovery, handshake and bounded process
   supervision are tested; the supervisor is part of application shutdown but
   has no user-facing installation or enablement path yet;

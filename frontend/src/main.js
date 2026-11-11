@@ -39,6 +39,9 @@ import {
   writeClipboardText as writeClipboard,
 } from './api/runtime.js';
 import { externalHttpURL } from './external-links.js';
+import { CUSTOM_KEY_PATH_HELP } from './connections/auth-model.js';
+import { connectPanelData } from './connections/connect-model.js';
+import { mountConnectPanel } from './connections/mount.js';
 import {
   LOCAL_RESOURCE_ID,
   findWorkspaceResource,
@@ -195,11 +198,7 @@ const {
   updateWebApp: apiUpdateWebApp,
   writeSSHSession: apiWriteSSHSession,
 } = backend;
-const customKeyPathHelp = [
-  'Select the private key file, not the .pub file.',
-  'Linux/macOS: ~/.ssh/id_ed25519',
-  'Windows: C:\\Users\\YourUser\\.ssh\\id_ed25519',
-].join('\n\n');
+const customKeyPathHelp = CUSTOM_KEY_PATH_HELP;
 const TABLER_ICONS = Object.freeze({
   'arrows-transfer-up': iconArrowsTransferUp,
   'arrow-left': iconArrowLeft,
@@ -394,28 +393,7 @@ app.innerHTML = `
     </form>
   </section>
 
-  <section id="connect-panel" class="slide-panel" hidden>
-    <div class="panel-scrim" data-close-connect></div>
-    <form id="connect-form" class="panel-card">
-      <header class="panel-header">
-        <div>
-          <p class="eyebrow">SSH</p>
-          <h3>Connect</h3>
-        </div>
-        <button class="close-panel" type="button" data-close-connect title="Close">${ICON_CLOSE}</button>
-      </header>
-
-      <p id="connect-summary" class="parent-summary"></p>
-      <p class="inline-status" id="connect-status" hidden></p>
-
-      ${authFieldsMarkup('session')}
-
-      <footer class="panel-actions">
-        <button class="secondary" type="button" data-close-connect>Cancel</button>
-        <button type="submit">Connect</button>
-      </footer>
-    </form>
-  </section>
+  <div id="connect-panel-root"></div>
 
   <section id="tunnel-panel" class="slide-panel" hidden>
     <div class="panel-scrim" data-close-tunnel></div>
@@ -674,6 +652,10 @@ const webAppPanel = mountWebAppPanel(document.querySelector('#webapp-panel-root'
   oncreatetag: (name) => createResourceTag(name),
   onrequestclose: () => closeWebAppPanel(),
 });
+const connectPanel = mountConnectPanel(document.querySelector('#connect-panel-root'), {
+  onsubmit: (submission) => submitConnect(submission),
+  onrequestclose: () => closeConnectPanel(),
+});
 
 const stack = document.querySelector('#terminal-stack');
 const hostsScroll = document.querySelector('#hosts-scroll');
@@ -733,11 +715,9 @@ document.querySelector('#decrease-terminal-font').addEventListener('click', () =
 document.querySelector('#increase-terminal-font').addEventListener('click', () => adjustTerminalFontSize(1));
 document.querySelector('#webapp-auth-form').addEventListener('submit', (event) => submitWebAppAuth(event));
 registerAuthChoiceSync(document.querySelector('#webapp-auth-form'));
-document.querySelector('#connect-form').addEventListener('submit', (event) => submitConnect(event));
 document.querySelector('#tunnel-form').addEventListener('submit', (event) => submitTunnel(event));
 document.querySelector('#tunnel-form').addEventListener('input', () => updateTunnelSummary());
 document.querySelector('#tunnel-form').elements.type.addEventListener('change', () => updateTunnelMode());
-registerAuthChoiceSync(document.querySelector('#connect-form'));
 registerAuthChoiceSync(document.querySelector('#tunnel-form'));
 document.querySelector('#stop-tunnel').addEventListener('click', () => stopSelectedTunnel());
 document.querySelector('#key-generate-form').addEventListener('submit', (event) => submitGenerateKey(event));
@@ -763,9 +743,6 @@ document.querySelector('#clear-key-directory').addEventListener('click', () => {
 document.querySelector('#rescan-key-sources').addEventListener('click', () => rescanKeySources());
 document.querySelectorAll('[data-close-webapp-auth]').forEach((element) => {
   element.addEventListener('click', () => closeWebAppAuthPanel());
-});
-document.querySelectorAll('[data-close-connect]').forEach((element) => {
-  element.addEventListener('click', () => closeConnectPanel());
 });
 document.querySelectorAll('[data-close-tunnel]').forEach((element) => {
   element.addEventListener('click', () => closeTunnelPanel());
@@ -1017,29 +994,22 @@ function closeWebAppPanel() {
   restoreTerminalFocusAfterOverlay();
 }
 
-async function submitConnect(event) {
-  event.preventDefault();
-  const selected = findResource(state.selectedId)?.resource;
+async function submitConnect({ resourceId, input }) {
+  const selected = findResource(resourceId)?.resource;
   if (!selected) return;
   if (isLocalResource(selected)) {
     await quickConnect(selected);
     closeConnectPanel();
     return;
   }
-
-  const form = event.currentTarget;
   await withBusy(async () => {
     const target = `${selected.user}@${selected.ip || selected.hostname}:${selected.port}`;
-    const auth = authInputFromForm(form);
-    setConnectStatus('', '');
+    connectPanel.setStatus('', '');
     writeNotice(`Connecting to ${target} ...`);
     try {
       const sessionID = await startSSHSessionWithHostKeyPrompt({
+        ...input,
         resourceId: selected.id,
-        ...auth,
-        trustHostKey: form.elements.trustHostKey.checked,
-        cols: 120,
-        rows: 32,
       }, selected, 'Trust and connect');
       await attachStartedSession(sessionID, selected);
       closeConnectPanel();
@@ -1047,9 +1017,9 @@ async function submitConnect(event) {
       resizeActiveSession();
     } catch (error) {
       const message = connectErrorMessage(error, selected);
-      setConnectStatus(message, 'error');
+      connectPanel.setStatus(message, 'error');
       writeNotice(message);
-      if (isAuthError(error)) focusConnectPasswordInput(form);
+      if (isAuthError(error)) connectPanel.focusAuth();
     }
   });
 }
@@ -2617,25 +2587,26 @@ async function openConnectPanel(statusMessage = '', statusKind = '') {
   }
 
   await loadKeys();
-  const panel = document.querySelector('#connect-panel');
-  const form = document.querySelector('#connect-form');
-  form.reset();
-  form.elements.trustHostKey.checked = trustHostKeyFromPreference(selected);
-  renderKeyOptions(form.elements.keyName, true);
-  applyConnectDefaults(form, selected);
-  await applySavedPasswordDefault(form, selected);
-  const realSessionCount = realSessionsForResource(selected.id).length;
-  document.querySelector('#connect-summary').textContent =
-    `${realSessionCount > 0 ? 'New session: ' : ''}${selected.user}@${selected.ip || selected.hostname}:${selected.port}`;
-  form.querySelector('button[type="submit"]').textContent = 'Connect';
-  setConnectStatus(statusMessage, statusKind);
-  if (statusKind === 'error' && isAuthMessage(statusMessage) && (!selected.auth?.method || selected.auth.method === 'password')) {
-    form.elements.authMethod.value = 'password';
-    updateAuthFields(form);
+  let hasSavedPassword = false;
+  if (selected.auth?.method === 'password') {
+    try {
+      hasSavedPassword = await apiHasSavedPassword(selected.id);
+    } catch {
+      // The keyring error is reported if the user explicitly requests password storage.
+    }
   }
-  panel.hidden = false;
-  requestAnimationFrame(() => panel.classList.add('open'));
-  focusConnectPasswordInput(form);
+  const realSessionCount = realSessionsForResource(selected.id).length;
+  connectPanel.open(connectPanelData({
+    resource: selected,
+    keys: state.keys,
+    sessionCount: realSessionCount,
+    hasSavedPassword,
+    statusMessage,
+    statusKind,
+    forcePassword: statusKind === 'error'
+      && isAuthMessage(statusMessage)
+      && (!selected.auth?.method || selected.auth.method === 'password'),
+  }));
 }
 
 function focusConnectPasswordInput(form) {
@@ -2658,10 +2629,7 @@ function focusConnectPasswordInput(form) {
 }
 
 function closeConnectPanel() {
-  const panel = document.querySelector('#connect-panel');
-  panel.classList.remove('open');
-  panel.hidden = true;
-  setConnectStatus('', '');
+  connectPanel.close();
   restoreTerminalFocusAfterOverlay();
 }
 
@@ -3715,15 +3683,6 @@ function setKeyInstallStatus(message, kind) {
   status.dataset.kind = kind;
 }
 
-function setConnectStatus(message, kind) {
-  const status = document.querySelector('#connect-status');
-  if (!status) return;
-  status.textContent = message;
-  status.title = message;
-  status.hidden = !message;
-  status.dataset.kind = kind;
-}
-
 async function startSSHSessionWithHostKeyPrompt(input, resource, confirmLabel = 'Trust and continue') {
   try {
     return await apiStartSSHSession(input);
@@ -3991,6 +3950,7 @@ async function withBusy(task) {
   tagPanel.setBusy(true);
   resourcePanel.setBusy(true);
   webAppPanel.setBusy(true);
+  connectPanel.setBusy(true);
   try {
     return await task();
   } catch (error) {
@@ -4002,6 +3962,7 @@ async function withBusy(task) {
     tagPanel.setBusy(false);
     resourcePanel.setBusy(false);
     webAppPanel.setBusy(false);
+    connectPanel.setBusy(false);
   }
 }
 
