@@ -55,12 +55,16 @@
 .tag-editor-panel .resource-selected-tag button {
   display: grid;
   width: 14px;
+  min-width: 14px;
   height: 14px;
+  min-height: 14px;
+  flex: 0 0 14px;
   place-items: center;
   border: 0;
   background: transparent;
   color: inherit;
   cursor: pointer;
+  line-height: 0;
   padding: 0;
 }
 
@@ -69,8 +73,10 @@
   opacity: 0.65;
 }
 
-.resource-selected-tag .ti {
-  font-size: 11px;
+.tag-editor-panel .resource-selected-tag button > svg {
+  display: block;
+  width: 11px;
+  height: 11px;
 }
 
 .tag-editor-panel .resource-tag-query {
