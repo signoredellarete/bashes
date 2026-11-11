@@ -392,10 +392,21 @@ Exit condition: no native resource relies on frontend cleanup for correctness.
 ### Phase 3: Frontend modularization
 
 - [x] Introduce state stores and the terminal registry.
-- [-] Move one complete feature at a time from `main.js` to Svelte components.
+- [x] Extract Settings, shared overlays, Tag Manager and sidebar tag filters.
+- [x] Extract Add/Edit Host, Subsystem and Web App panels with one shared tag
+  editor.
+- [x] Extract Connect, SSH Tunnel and Web App gateway authentication with one
+  shared credentials component.
+- [x] Extract the selected Web App workspace and runtime controls.
+- [-] Extract the sidebar resource tree, ordering and tag drag/drop behavior.
+- [ ] Extract terminal tabs, xterm lifecycle, resizing and focus management.
+- [-] Extract the file-transfer modal shell around the existing Svelte file
+  manager and transfer queue.
+- [ ] Extract SSH key inventory, generation, import and installation views.
 - [-] Preserve UI dimensions, colors, shortcuts, focus and modal behavior with
-  focused tests.
-- [ ] Split CSS by tokens, layout and feature while keeping one generated bundle.
+  focused automated and desktop preview tests.
+- [-] Split CSS by tokens, layout and feature while keeping one generated bundle.
+- [ ] Reduce `main.js` to application bootstrap and feature orchestration only.
 
 Exit condition: `main.js` is bootstrap code rather than the application.
 
