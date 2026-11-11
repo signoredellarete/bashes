@@ -1,0 +1,12 @@
+.webapp-panel-card {
+  height: 100vh;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.conditional-fields {
+  display: grid;
+  gap: 10px;
+  border-left: 2px solid #d9deeb;
+  padding-left: 10px;
+}

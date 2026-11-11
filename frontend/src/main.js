@@ -105,6 +105,8 @@ import {
   visibleResourceTags,
 } from './resource-tags.js';
 import { isWebAppResource, webAppMatchesFilters } from './web-apps/model.js';
+import { mountWebAppPanel } from './web-apps/panel-mount.js';
+import { webAppPanelData } from './web-apps/panel-model.js';
 import { mountWebAppWorkspace } from './web-apps/workspace-mount.js';
 import { webAppWorkspaceData } from './web-apps/workspace-model.js';
 import './terminal-fonts.css';
@@ -113,6 +115,7 @@ import './app/overlays/overlays.css';
 import './tags/filters.css';
 import './tags/editor.css';
 import './tags/panel.css';
+import './web-apps/panel.css';
 import './web-apps/workspace.css';
 
 const terminalSettings = loadTerminalSettings(localStorage);
@@ -369,86 +372,7 @@ app.innerHTML = `
 
   <div id="resource-panel-root"></div>
 
-  <section id="webapp-panel" class="slide-panel" hidden>
-    <div class="panel-scrim" data-close-webapp></div>
-    <form id="webapp-form" class="panel-card webapp-panel-card tag-editor-panel">
-      <header class="panel-header">
-        <div>
-          <p class="eyebrow">Web App</p>
-          <h3 id="webapp-panel-title">Add Web App</h3>
-        </div>
-        <button class="close-panel" type="button" data-close-webapp title="Close">${ICON_CLOSE}</button>
-      </header>
-
-      <label>
-        <span>Name</span>
-        <input name="name" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required />
-      </label>
-      <label>
-        <span>URL</span>
-        <input class="monospace-input" name="url" type="url" placeholder="https://app.internal.example" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required />
-      </label>
-      <label>
-        <span>Connection</span>
-        <select name="connectionMode">
-          <option value="direct">Direct</option>
-          <option value="tunnel">SSH tunnel</option>
-        </select>
-      </label>
-      <section id="webapp-tunnel-fields" class="conditional-fields" hidden>
-        <label>
-          <span>SSH Gateway</span>
-          <select name="gatewayResourceId"></select>
-        </label>
-        <div class="form-grid">
-          <label>
-            <span>SOCKS Port</span>
-            <select name="portMode">
-              <option value="automatic">Automatic</option>
-              <option value="manual">Manual</option>
-            </select>
-          </label>
-          <label id="webapp-manual-port-field" hidden>
-            <span>Local Port</span>
-            <input name="localSocksPort" type="number" min="1" max="65535" value="1080" />
-          </label>
-        </div>
-      </section>
-      <label>
-        <span>Browser Session</span>
-        <select name="browserMode">
-          <option value="standard">Standard</option>
-          <option value="private">Private</option>
-        </select>
-      </label>
-      <section id="webapp-persistence-fields" class="conditional-fields">
-        <label class="checkbox-row"><input name="keepCookies" type="checkbox" checked /><span>Keep cookies</span></label>
-        <label class="checkbox-row"><input name="keepLocalStorage" type="checkbox" checked /><span>Keep local storage</span></label>
-        <label class="checkbox-row"><input name="restoreSession" type="checkbox" checked /><span>Restore browser session</span></label>
-        <label class="checkbox-row"><input name="clearCacheOnClose" type="checkbox" checked /><span>Clear browser cache on close</span></label>
-      </section>
-      <section class="resource-tag-editor" aria-labelledby="webapp-tags-label">
-        <header>
-          <strong id="webapp-tags-label">Tags</strong>
-          <span>type to search, Enter to add</span>
-        </header>
-        <div class="resource-tag-input">
-          <div id="webapp-selected-tags" class="resource-selected-tags"></div>
-          <input id="webapp-tag-query" class="resource-tag-query" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="prod, milano..." aria-label="Search or create Web App tags" />
-        </div>
-        <div class="resource-tag-suggestion-box">
-          <span id="webapp-tag-suggestion-label">Existing tags</span>
-          <div id="webapp-tag-options" class="resource-tag-options"></div>
-        </div>
-      </section>
-
-      <footer class="panel-actions resource-panel-actions">
-        <span id="webapp-tag-summary">No tags on this Web App</span>
-        <button class="secondary" type="button" data-close-webapp>Cancel</button>
-        <button id="webapp-submit" type="submit">Save Web App</button>
-      </footer>
-    </form>
-  </section>
+  <div id="webapp-panel-root"></div>
 
   <section id="webapp-auth-panel" class="slide-panel" hidden>
     <div class="panel-scrim" data-close-webapp-auth></div>
@@ -745,6 +669,11 @@ const resourcePanel = mountResourcePanel(document.querySelector('#resource-panel
   oncreatetag: (name) => createResourceTag(name),
   onrequestclose: () => closeResourcePanel(),
 });
+const webAppPanel = mountWebAppPanel(document.querySelector('#webapp-panel-root'), {
+  onsubmit: (submission) => submitWebApp(submission),
+  oncreatetag: (name) => createResourceTag(name),
+  onrequestclose: () => closeWebAppPanel(),
+});
 
 const stack = document.querySelector('#terminal-stack');
 const hostsScroll = document.querySelector('#hosts-scroll');
@@ -802,17 +731,8 @@ document.querySelector('#delete-resource').addEventListener('click', () => delet
 document.querySelector('#message-log-button').addEventListener('click', () => showMessageLog());
 document.querySelector('#decrease-terminal-font').addEventListener('click', () => adjustTerminalFontSize(-1));
 document.querySelector('#increase-terminal-font').addEventListener('click', () => adjustTerminalFontSize(1));
-document.querySelector('#webapp-form').addEventListener('submit', (event) => submitWebApp(event));
-document.querySelector('#webapp-form').elements.connectionMode.addEventListener('change', () => updateWebAppFormVisibility());
-document.querySelector('#webapp-form').elements.portMode.addEventListener('change', () => updateWebAppFormVisibility());
-document.querySelector('#webapp-form').elements.browserMode.addEventListener('change', () => updateWebAppFormVisibility());
 document.querySelector('#webapp-auth-form').addEventListener('submit', (event) => submitWebAppAuth(event));
 registerAuthChoiceSync(document.querySelector('#webapp-auth-form'));
-document.querySelector('#webapp-tag-query').addEventListener('input', (event) => {
-  state.webAppTagQuery = event.currentTarget.value;
-  renderWebAppTagOptions();
-});
-document.querySelector('#webapp-tag-query').addEventListener('keydown', (event) => handleWebAppTagInput(event));
 document.querySelector('#connect-form').addEventListener('submit', (event) => submitConnect(event));
 document.querySelector('#tunnel-form').addEventListener('submit', (event) => submitTunnel(event));
 document.querySelector('#tunnel-form').addEventListener('input', () => updateTunnelSummary());
@@ -841,9 +761,6 @@ document.querySelector('#clear-key-directory').addEventListener('click', () => {
   document.querySelector('#key-directory-form').elements.directory.value = '';
 });
 document.querySelector('#rescan-key-sources').addEventListener('click', () => rescanKeySources());
-document.querySelectorAll('[data-close-webapp]').forEach((element) => {
-  element.addEventListener('click', () => closeWebAppPanel());
-});
 document.querySelectorAll('[data-close-webapp-auth]').forEach((element) => {
   element.addEventListener('click', () => closeWebAppAuthPanel());
 });
@@ -1028,17 +945,12 @@ async function createResourceTag(name) {
   return created;
 }
 
-async function submitWebApp(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const input = webAppInput(form);
-  const editingID = form.dataset.webAppId || '';
-
+async function submitWebApp({ editId, input }) {
   await withBusy(async () => {
     let createdWebAppID = '';
-    if (editingID) {
-      await apiUpdateWebApp(editingID, input);
-      const tab = webAppTabForResource(editingID);
+    if (editId) {
+      await apiUpdateWebApp(editId, input);
+      const tab = webAppTabForResource(editId);
       if (tab) {
         tab.title = input.name;
         tab.target = input.connectionMode === 'tunnel' ? `${input.url} via SSH` : input.url;
@@ -1058,28 +970,6 @@ async function submitWebApp(event) {
     }
     renderTabs();
   });
-}
-
-function webAppInput(form) {
-  const connectionMode = form.elements.connectionMode.value;
-  const portMode = form.elements.portMode.value;
-  const browserMode = form.elements.browserMode.value;
-  return {
-    name: form.elements.name.value.trim(),
-    url: form.elements.url.value.trim(),
-    tags: [...state.webAppDraftTags],
-    connectionMode,
-    gatewayResourceId: connectionMode === 'tunnel' ? form.elements.gatewayResourceId.value : '',
-    portMode: connectionMode === 'tunnel' ? portMode : '',
-    localSocksPort: connectionMode === 'tunnel' && portMode === 'manual'
-      ? Number.parseInt(form.elements.localSocksPort.value, 10)
-      : 0,
-    browserMode,
-    keepCookies: browserMode === 'standard' && form.elements.keepCookies.checked,
-    keepLocalStorage: browserMode === 'standard' && form.elements.keepLocalStorage.checked,
-    restoreSession: browserMode === 'standard' && form.elements.restoreSession.checked,
-    clearCacheOnClose: browserMode === 'standard' && form.elements.clearCacheOnClose.checked,
-  };
 }
 
 function toggleAddResourceMenu() {
@@ -1115,77 +1005,16 @@ async function openWebAppPanel(webApp = null) {
     return;
   }
 
-  const panel = document.querySelector('#webapp-panel');
-  const form = document.querySelector('#webapp-form');
-  form.reset();
-  form.dataset.webAppId = webApp?.id ?? '';
-  document.querySelector('#webapp-panel-title').textContent = webApp ? 'Edit Web App' : 'Add Web App';
-  document.querySelector('#webapp-submit').textContent = webApp ? 'Save Changes' : 'Save Web App';
-  renderWebAppGatewayOptions(form.elements.gatewayResourceId, webApp?.gatewayResourceId ?? '');
-  renderWebAppTagOptions(webApp?.tags ?? []);
-
-  if (webApp) {
-    form.elements.name.value = webApp.name;
-    form.elements.url.value = webApp.url;
-    form.elements.connectionMode.value = webApp.connectionMode;
-    form.elements.portMode.value = webApp.portMode || 'automatic';
-    form.elements.localSocksPort.value = String(webApp.localSocksPort || 1080);
-    form.elements.browserMode.value = webApp.browserMode || 'standard';
-    form.elements.keepCookies.checked = Boolean(webApp.keepCookies);
-    form.elements.keepLocalStorage.checked = Boolean(webApp.keepLocalStorage);
-    form.elements.restoreSession.checked = Boolean(webApp.restoreSession);
-    form.elements.clearCacheOnClose.checked = Boolean(webApp.clearCacheOnClose);
-  } else {
-    form.elements.connectionMode.value = 'direct';
-    form.elements.portMode.value = 'automatic';
-    form.elements.browserMode.value = 'standard';
-    form.elements.keepCookies.checked = true;
-    form.elements.keepLocalStorage.checked = true;
-    form.elements.restoreSession.checked = true;
-    form.elements.clearCacheOnClose.checked = true;
-  }
-  updateWebAppFormVisibility();
-  panel.hidden = false;
-  requestAnimationFrame(() => panel.classList.add('open'));
-  form.elements.name.focus();
+  webAppPanel.open(webAppPanelData({
+    webApp,
+    hosts: state.hosts,
+    catalog: resourceTagCatalog(),
+  }));
 }
 
 function closeWebAppPanel() {
-  const panel = document.querySelector('#webapp-panel');
-  panel.classList.remove('open');
-  panel.hidden = true;
-  document.querySelector('#webapp-form').dataset.webAppId = '';
+  webAppPanel.close();
   restoreTerminalFocusAfterOverlay();
-}
-
-function updateWebAppFormVisibility() {
-  const form = document.querySelector('#webapp-form');
-  const tunnel = form.elements.connectionMode.value === 'tunnel';
-  const manualPort = tunnel && form.elements.portMode.value === 'manual';
-  const standard = form.elements.browserMode.value === 'standard';
-  document.querySelector('#webapp-tunnel-fields').hidden = !tunnel;
-  document.querySelector('#webapp-manual-port-field').hidden = !manualPort;
-  document.querySelector('#webapp-persistence-fields').hidden = !standard;
-  form.elements.gatewayResourceId.required = tunnel;
-  form.elements.localSocksPort.required = manualPort;
-}
-
-function renderWebAppGatewayOptions(select, selectedID = '') {
-  const options = [];
-  const append = (resource, depth) => {
-    const option = document.createElement('option');
-    option.value = resource.id;
-    option.textContent = `${'  '.repeat(depth)}${resource.hostname} (${resource.user}@${resource.ip || resource.hostname})`;
-    options.push(option);
-    for (const child of resource.subsystems ?? []) append(child, depth + 1);
-  };
-  state.hosts.forEach((host) => append(host, 0));
-  select.replaceChildren(...options);
-  if (selectedID && [...select.options].some((option) => option.value === selectedID)) select.value = selectedID;
-}
-
-function renderWebAppTagOptions(selectedTags) {
-  renderDraftTagOptions('webapp', selectedTags);
 }
 
 async function submitConnect(event) {
@@ -1748,155 +1577,8 @@ function removeSessionFromUI(sessionID) {
   focusActiveTerminal();
 }
 
-const draftTagEditors = {
-  webapp: {
-    draftKey: 'webAppDraftTags',
-    queryKey: 'webAppTagQuery',
-    options: '#webapp-tag-options',
-    selected: '#webapp-selected-tags',
-    query: '#webapp-tag-query',
-    suggestionLabel: '#webapp-tag-suggestion-label',
-    summary: '#webapp-tag-summary',
-    emptySummary: 'No tags on this Web App',
-    countLabel: 'on this Web App',
-  },
-};
-
 function resourceTagCatalog() {
   return mergeTagCatalog(state.tags, [...state.hosts, ...state.webApps]);
-}
-
-function renderDraftTagOptions(editorName, selectedTags) {
-  const editor = draftTagEditors[editorName];
-  if (selectedTags !== undefined) {
-    const seen = new Set();
-    state[editor.draftKey] = (selectedTags ?? []).reduce((tags, value) => {
-      const name = String(value ?? '').trim();
-      const key = canonicalTag(name);
-      if (!key || seen.has(key)) return tags;
-      seen.add(key);
-      tags.push(name);
-      return tags;
-    }, []);
-    state[editor.queryKey] = '';
-    document.querySelector(editor.query).value = '';
-  }
-
-  const container = document.querySelector(editor.options);
-  const selectedContainer = document.querySelector(editor.selected);
-  const queryInput = document.querySelector(editor.query);
-  const suggestionLabel = document.querySelector(editor.suggestionLabel);
-  const summary = document.querySelector(editor.summary);
-  const draftTags = state[editor.draftKey];
-  const selected = new Set(draftTags.map(canonicalTag));
-  const tags = mergeTagCatalog(state.tags, [...state.hosts, ...state.webApps]);
-  const query = canonicalTag(state[editor.queryKey]);
-  const suggestions = tags.filter((tag) => !selected.has(tag.key) && (!query || tag.key.includes(query)));
-
-  selectedContainer.replaceChildren(...draftTags.map((tagName) => {
-    const chip = document.createElement('span');
-    chip.className = 'resource-selected-tag';
-    applyTagPalette(chip, tagName);
-    const name = document.createElement('span');
-    name.textContent = tagName;
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.title = `Remove ${tagName}`;
-    remove.setAttribute('aria-label', `Remove ${tagName}`);
-    remove.append(iconElement('x'));
-    remove.addEventListener('click', () => removeDraftTag(editorName, tagName));
-    chip.append(name, remove);
-    return chip;
-  }));
-
-  queryInput.placeholder = draftTags.length === 0 ? 'prod, milano...' : 'Add another...';
-  suggestionLabel.textContent = query ? 'Matching tags' : 'Existing tags';
-  summary.textContent = draftTags.length === 0
-    ? editor.emptySummary
-    : `${draftTags.length} tag${draftTags.length === 1 ? '' : 's'} ${editor.countLabel}`;
-
-  const options = suggestions.map((tag) => {
-    const option = document.createElement('button');
-    option.type = 'button';
-    option.className = 'resource-tag-option';
-    option.title = `${tag.count} system${tag.count === 1 ? '' : 's'} tagged ${tag.name}`;
-    applyTagPalette(option, tag.name);
-    option.textContent = tag.name;
-    option.addEventListener('click', () => addDraftTag(editorName, tag.name));
-    return option;
-  });
-
-  const exactMatch = tags.some((tag) => tag.key === query);
-  if (query && !exactMatch && !selected.has(query)) {
-    const create = document.createElement('button');
-    create.type = 'button';
-    create.className = 'resource-tag-create';
-    create.append(iconElement('plus'));
-    const label = document.createElement('span');
-    label.textContent = `Create "${state[editor.queryKey].trim()}"`;
-    create.append(label);
-    create.addEventListener('click', () => createDraftTag(editorName, state[editor.queryKey]));
-    options.push(create);
-  }
-
-  if (options.length === 0) {
-    const empty = document.createElement('p');
-    empty.className = 'resource-tag-options-empty';
-    empty.textContent = tags.length === selected.size ? 'All existing tags already added.' : 'No matching tags.';
-    container.replaceChildren(empty);
-    return;
-  }
-
-  container.replaceChildren(...options);
-}
-
-function handleWebAppTagInput(event) {
-  handleDraftTagInput(event, 'webapp');
-}
-
-function handleDraftTagInput(event, editorName) {
-  const editor = draftTagEditors[editorName];
-  const draftTags = state[editor.draftKey];
-  if (event.key === 'Enter') {
-    const query = event.currentTarget.value.trim();
-    if (!query) return;
-    event.preventDefault();
-    const existing = mergeTagCatalog(state.tags, [...state.hosts, ...state.webApps]).find((tag) => tag.key === canonicalTag(query));
-    if (existing) addDraftTag(editorName, existing.name);
-    else createDraftTag(editorName, query);
-  } else if (event.key === 'Backspace' && !event.currentTarget.value && draftTags.length > 0) {
-    event.preventDefault();
-    removeDraftTag(editorName, draftTags.at(-1));
-  }
-}
-
-function addDraftTag(editorName, name) {
-  const editor = draftTagEditors[editorName];
-  const key = canonicalTag(name);
-  if (!key || state[editor.draftKey].some((tag) => canonicalTag(tag) === key)) return;
-  state[editor.draftKey].push(String(name).trim());
-  state[editor.queryKey] = '';
-  const input = document.querySelector(editor.query);
-  input.value = '';
-  renderDraftTagOptions(editorName);
-  input.focus();
-}
-
-function removeDraftTag(editorName, name) {
-  const editor = draftTagEditors[editorName];
-  const key = canonicalTag(name);
-  state[editor.draftKey] = state[editor.draftKey].filter((tag) => canonicalTag(tag) !== key);
-  renderDraftTagOptions(editorName);
-  document.querySelector(editor.query).focus();
-}
-
-async function createDraftTag(editorName, name) {
-  const normalized = String(name ?? '').trim();
-  if (!normalized) return;
-  const created = await withBusy(() => apiCreateTag(normalized));
-  if (!created) return;
-  state.tags = [...state.tags, created];
-  addDraftTag(editorName, created);
 }
 
 function scheduleHostRender() {
@@ -4308,6 +3990,7 @@ async function withBusy(task) {
   renderSelection();
   tagPanel.setBusy(true);
   resourcePanel.setBusy(true);
+  webAppPanel.setBusy(true);
   try {
     return await task();
   } catch (error) {
@@ -4318,6 +4001,7 @@ async function withBusy(task) {
     renderSelection();
     tagPanel.setBusy(false);
     resourcePanel.setBusy(false);
+    webAppPanel.setBusy(false);
   }
 }
 

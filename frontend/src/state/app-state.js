@@ -23,8 +23,6 @@ export function createAppState({ terminalSettings, storage = globalThis.localSto
     editContextTarget: null,
     activeTagFilters: [],
     tagFilterMode: 'any',
-    webAppDraftTags: [],
-    webAppTagQuery: '',
     lastSessionByResource: new Map(),
     sessionFocusHistory: [],
     messageLog: [],

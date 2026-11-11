@@ -1176,13 +1176,6 @@ html.sorting-tags * {
   background: #101418;
 }
 
-.conditional-fields {
-  display: grid;
-  gap: 10px;
-  border-left: 2px solid #d9deeb;
-  padding-left: 10px;
-}
-
 #settings-form {
   max-height: 100vh;
   overflow-y: auto;
@@ -1261,12 +1254,6 @@ html.sorting-tags * {
   background: #f4f6f8;
   overflow: hidden;
   padding: 0;
-}
-
-.webapp-panel-card {
-  height: 100vh;
-  min-height: 0;
-  overflow-y: auto;
 }
 
 .resource-panel-header {

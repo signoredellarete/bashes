@@ -120,6 +120,9 @@ Status on 2026-11-10 for branch `feature/v2-modular-architecture`:
 - Add/Edit Host and Subsystem now use a Svelte panel with component-local form
   state and a reusable, tested tag editor; backend mutations remain application
   callbacks and the legacy JSON contract is unchanged;
+- Add/Edit Web App now uses the same reusable tag editor inside a dedicated
+  Svelte panel; gateway selection and conditional tunnel/browser fields are
+  produced by a tested view model while persistence remains in the backend;
 - plugin manifest validation, discovery, handshake and bounded process
   supervision are tested; the supervisor is part of application shutdown but
   has no user-facing installation or enablement path yet;
