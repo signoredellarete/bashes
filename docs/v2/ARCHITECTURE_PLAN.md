@@ -115,6 +115,9 @@ Status on 2026-11-10 for branch `feature/v2-modular-architecture`:
 - the sidebar resource tree is rendered from a tested Svelte view model that
   preserves hierarchy, top-level order, filters, tunnel chips, tooltips and the
   existing SortableJS data hooks;
+- sidebar card ordering and tag assignment/removal now have one lifecycle-aware
+  SortableJS controller, so rerenders destroy stale drag instances before the
+  Svelte tree is rebound;
 - the selected Web App workbench is a Svelte feature backed by a pure view
   model; browser launch and tunnel operations remain application callbacks;
 - newly created hosts, nested systems and Web Apps enter the same selected and
@@ -401,7 +404,7 @@ Exit condition: no native resource relies on frontend cleanup for correctness.
 - [x] Extract Connect, SSH Tunnel and Web App gateway authentication with one
   shared credentials component.
 - [x] Extract the selected Web App workspace and runtime controls.
-- [-] Extract the sidebar resource tree, ordering and tag drag/drop behavior.
+- [x] Extract the sidebar resource tree, ordering and tag drag/drop behavior.
 - [ ] Extract terminal tabs, xterm lifecycle, resizing and focus management.
 - [-] Extract the file-transfer modal shell around the existing Svelte file
   manager and transfer queue.

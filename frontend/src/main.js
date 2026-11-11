@@ -107,6 +107,7 @@ import {
 import { isWebAppResource } from './web-apps/model.js';
 import { mountSidebarResources } from './sidebar/mount.js';
 import { resourceTooltip, sidebarTreeData } from './sidebar/model.js';
+import { createSidebarSorting } from './sidebar/sorting.js';
 import { mountWebAppAuthPanel } from './web-apps/auth-mount.js';
 import { webAppAuthPanelData } from './web-apps/auth-model.js';
 import { mountWebAppPanel } from './web-apps/panel-mount.js';
@@ -130,12 +131,7 @@ let searchRenderFrame = 0;
 let sidebarRenderFrame = 0;
 let terminalFitFrame = 0;
 let tooltipTimer = 0;
-let hostSortable = null;
 let tabSortable = null;
-let tagCatalogSortable = null;
-let tagRemoveSortable = null;
-let activeTagDropTarget = null;
-let resourceTagSortables = [];
 let suppressTagFilterClickUntil = 0;
 let tagPopover = null;
 let tagPopoverRequest = 0;
@@ -562,6 +558,14 @@ const sidebarResources = mountSidebarResources(document.querySelector('#hosts'),
   onhidetooltip: () => hideTooltip(),
   ontagpopover: (anchor, resourceId) => toggleTagPopover(anchor, resourceId),
   onrender: (data) => finishSidebarRender(data),
+});
+const sidebarSorting = createSidebarSorting({
+  onReorder: (order) => persistHostOrder(order),
+  onTagAssignment: (resourceId, tagName, assigned) => updateResourceTagAssignment(resourceId, tagName, assigned),
+  onHideTooltip: () => hideTooltip(),
+  onClearDragOutline: (kind) => clearDragOutline(kind),
+  onClearAllDragOutlines: () => clearAllDragOutlines(),
+  onSuppressTagFilter: () => { suppressTagFilterClickUntil = Date.now() + 120; },
 });
 
 const stack = document.querySelector('#terminal-stack');
@@ -1426,9 +1430,7 @@ function scheduleHostRender() {
 function renderHosts(filter = '') {
   closeTagPopover();
   clearDragOutline('hosts');
-  hostSortable?.destroy();
-  hostSortable = null;
-  destroyTagSorting();
+  sidebarSorting.destroy();
   renderTagFilters();
   void sidebarResources.update(sidebarTreeData({
     hosts: state.hosts,
@@ -1450,8 +1452,7 @@ function finishSidebarRender(data) {
   sidebarRenderFrame = requestAnimationFrame(() => {
     sidebarRenderFrame = 0;
     syncSidebarScrollbarInset();
-    initializeTagSorting();
-    if (data.canReorder) initializeHostSorting(document.querySelector('#hosts'));
+    sidebarSorting.initialize({ container: document.querySelector('#hosts'), canReorder: data.canReorder });
   });
 }
 
@@ -1517,8 +1518,8 @@ async function openTagPopover(anchor, resourceID) {
     resourceId: resourceID,
     tags,
     oncancel: () => closeTagPopover(),
-    onDragStart: () => beginTagSorting('assigned'),
-    onDragEnd: () => finishTagSorting(),
+    onDragStart: () => sidebarSorting.beginTagSorting('assigned'),
+    onDragEnd: () => sidebarSorting.finishTagSorting(),
   });
 }
 
@@ -1536,126 +1537,6 @@ function restoreTagPopover(resourceID) {
   const anchor = [...document.querySelectorAll('.resource-tag.overflow')]
     .find((element) => element.dataset.resourceId === resourceID);
   if (anchor) void openTagPopover(anchor, resourceID);
-}
-
-function initializeTagSorting() {
-  const groupName = 'bashes-resource-tags';
-  const catalog = document.querySelector('#tag-filter-chips');
-  const removeZone = document.querySelector('#tag-remove-zone');
-
-  if (catalog.querySelector('.tag-filter-chip')) {
-    tagCatalogSortable = Sortable.create(catalog, {
-      animation: 150,
-      draggable: '.tag-filter-chip',
-      sort: false,
-      group: { name: groupName, pull: 'clone', put: false, revertClone: true },
-      forceFallback: true,
-      fallbackOnBody: true,
-      fallbackTolerance: 4,
-      ghostClass: 'tag-drag-ghost',
-      chosenClass: 'tag-drag-chosen',
-      fallbackClass: 'tag-drag-mirror',
-      onStart() {
-        beginTagSorting('catalog');
-      },
-      onMove(event) {
-        setActiveTagDropTarget(event.to.closest?.('.resource-tag-drop-target'));
-        return true;
-      },
-      onEnd() {
-        suppressTagFilterClickUntil = Date.now() + 120;
-        finishTagSorting();
-      },
-    });
-  }
-
-  document.querySelectorAll('.resource-tag-drop-target').forEach((target) => {
-    resourceTagSortables.push(Sortable.create(target, {
-      sort: false,
-      group: {
-        name: groupName,
-        pull: false,
-        put: (_to, from) => from.el?.id === 'tag-filter-chips',
-      },
-      onAdd(event) {
-        const resourceID = event.to.dataset.resourceId;
-        const tagName = event.item.dataset.tagName;
-        event.item.remove();
-        finishTagSorting();
-        void updateResourceTagAssignment(resourceID, tagName, true);
-      },
-    }));
-  });
-
-  document.querySelectorAll('.resource-tags').forEach((container) => {
-    if (!container.querySelector('.resource-tag:not(.overflow)')) return;
-    resourceTagSortables.push(Sortable.create(container, {
-      animation: 150,
-      draggable: '.resource-tag:not(.overflow)',
-      sort: false,
-      group: { name: groupName, pull: 'clone', put: false, revertClone: true },
-      forceFallback: true,
-      fallbackOnBody: true,
-      fallbackTolerance: 4,
-      ghostClass: 'tag-drag-ghost',
-      chosenClass: 'tag-drag-chosen',
-      fallbackClass: 'tag-drag-mirror',
-      onStart() {
-        beginTagSorting('assigned');
-      },
-      onMove(event) {
-        setActiveTagDropTarget(event.to.closest?.('.tag-remove-zone'));
-        return true;
-      },
-      onEnd() {
-        finishTagSorting();
-      },
-    }));
-  });
-
-  tagRemoveSortable = Sortable.create(removeZone, {
-    sort: false,
-    group: {
-      name: groupName,
-      pull: false,
-      put: (_to, from) => from.el?.classList.contains('resource-tags'),
-    },
-    onAdd(event) {
-      const resourceID = event.from.dataset.resourceId;
-      const tagName = event.item.dataset.tagName;
-      event.item.remove();
-      finishTagSorting();
-      void updateResourceTagAssignment(resourceID, tagName, false);
-    },
-  });
-}
-
-function destroyTagSorting() {
-  tagCatalogSortable?.destroy();
-  tagCatalogSortable = null;
-  tagRemoveSortable?.destroy();
-  tagRemoveSortable = null;
-  resourceTagSortables.forEach((sortable) => sortable.destroy());
-  resourceTagSortables = [];
-  finishTagSorting();
-}
-
-function beginTagSorting(kind) {
-  hideTooltip();
-  clearAllDragOutlines();
-  document.documentElement.classList.add('sorting-tags', `sorting-${kind}-tag`);
-}
-
-function finishTagSorting() {
-  setActiveTagDropTarget(null);
-  document.documentElement.classList.remove('sorting-tags', 'sorting-catalog-tag', 'sorting-assigned-tag');
-}
-
-function setActiveTagDropTarget(target) {
-  if (activeTagDropTarget === target) return;
-  activeTagDropTarget?.classList.remove('active');
-  activeTagDropTarget = target;
-  activeTagDropTarget?.classList.add('active');
 }
 
 async function updateResourceTagAssignment(resourceID, tagName, assigned) {
@@ -1777,36 +1658,7 @@ function clearTagPanelSelection() {
   renderTagPanel();
 }
 
-function initializeHostSorting(container) {
-  hostSortable = Sortable.create(container, {
-    animation: 170,
-    easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
-    draggable: '.host-block',
-    filter: '.resource-tag, .resource-tag-drop-target',
-    preventOnFilter: false,
-    forceFallback: true,
-    fallbackOnBody: true,
-    fallbackTolerance: 4,
-    ghostClass: 'host-drag-ghost',
-    chosenClass: 'host-drag-chosen',
-    fallbackClass: 'host-drag-mirror',
-    onUnchoose() {
-      clearDragOutline('hosts');
-    },
-    onStart() {
-      hideTooltip();
-      document.documentElement.classList.add('sorting-hosts');
-    },
-    onEnd() {
-      clearDragOutline('hosts');
-      document.documentElement.classList.remove('sorting-hosts');
-      persistHostOrder(container);
-    },
-  });
-}
-
-async function persistHostOrder(container) {
-  const order = [...container.querySelectorAll(':scope > .host-block')].map((block) => block.dataset.topLevelId);
+async function persistHostOrder(order) {
   const previousOrder = state.topLevelOrder;
   if (order.length !== previousOrder.length || order.every((id, index) => id === previousOrder[index])) return;
 
@@ -2233,7 +2085,7 @@ function schedulePointerDragOutline(event) {
     return;
   }
   const host = event.target.closest?.('.host-block');
-  if (hostSortable && host) scheduleDragOutline('hosts', host);
+  if (sidebarSorting.hostSortingActive() && host) scheduleDragOutline('hosts', host);
 }
 
 function scheduleDragOutline(kind, target) {
