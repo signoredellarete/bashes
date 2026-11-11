@@ -126,6 +126,9 @@ Status on 2026-11-10 for branch `feature/v2-modular-architecture`:
 - the SSH Connect panel now owns authentication form state and key-source
   rendering in Svelte, backed by tested password/key/path normalization while
   session startup and host-key confirmation remain application callbacks;
+- the SSH Tunnel panel now owns SOCKS/local/remote form state, command previews,
+  per-host defaults and active status in Svelte; it shares the authentication
+  fields with Connect while native tunnel lifecycle remains application-owned;
 - plugin manifest validation, discovery, handshake and bounded process
   supervision are tested; the supervisor is part of application shutdown but
   has no user-facing installation or enablement path yet;

@@ -99,6 +99,8 @@ import { createOrderedWriter } from './ordered-writer.js';
 import { pasteIntoTerminal } from './terminal-paste.js';
 import { revealSidebarResource, sidebarListInset } from './sidebar-scroll.js';
 import { loadTunnelPreference, saveTunnelPreference } from './tunnel-preferences.js';
+import { tunnelLabel, tunnelPanelData } from './tunnels/model.js';
+import { mountTunnelPanel } from './tunnels/mount.js';
 import {
   canonicalTag,
   filterResourceTree,
@@ -395,57 +397,7 @@ app.innerHTML = `
 
   <div id="connect-panel-root"></div>
 
-  <section id="tunnel-panel" class="slide-panel" hidden>
-    <div class="panel-scrim" data-close-tunnel></div>
-    <form id="tunnel-form" class="panel-card">
-      <header class="panel-header">
-        <div>
-          <p class="eyebrow">SSH Tunnel</p>
-          <h3 id="tunnel-title">SOCKS Proxy</h3>
-        </div>
-        <button class="close-panel" type="button" data-close-tunnel title="Close">${ICON_CLOSE}</button>
-      </header>
-
-      <p id="tunnel-summary" class="parent-summary"></p>
-      <p id="tunnel-status" class="tunnel-status" hidden></p>
-
-      <label>
-        <span>Mode</span>
-        <select name="type">
-          <option value="socks">SOCKS proxy (-D)</option>
-          <option value="local">Local forward (-L)</option>
-          <option value="remote">Remote forward (-R)</option>
-        </select>
-      </label>
-      <div class="form-grid">
-        <label>
-          <span id="tunnel-bind-label">Bind</span>
-          <input name="localHost" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" value="127.0.0.1" />
-        </label>
-        <label>
-          <span id="tunnel-port-label">Port</span>
-          <input name="localPort" type="number" min="1" max="65535" value="1080" required />
-        </label>
-      </div>
-      <div id="tunnel-target-fields" class="form-grid" hidden>
-        <label>
-          <span id="tunnel-target-host-label">Target Host</span>
-          <input name="remoteHost" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" value="127.0.0.1" />
-        </label>
-        <label>
-          <span id="tunnel-target-port-label">Target Port</span>
-          <input name="remotePort" type="number" min="1" max="65535" value="80" />
-        </label>
-      </div>
-      ${authFieldsMarkup('tunnel')}
-
-      <footer class="panel-actions">
-        <button class="secondary" type="button" data-close-tunnel>Close</button>
-        <button id="stop-tunnel" class="secondary" type="button" disabled>Stop</button>
-        <button id="start-tunnel" type="submit">Start Tunnel</button>
-      </footer>
-    </form>
-  </section>
+  <div id="tunnel-panel-root"></div>
 
   <div id="settings-root"></div>
   <div id="app-overlays-root"></div>
@@ -656,6 +608,11 @@ const connectPanel = mountConnectPanel(document.querySelector('#connect-panel-ro
   onsubmit: (submission) => submitConnect(submission),
   onrequestclose: () => closeConnectPanel(),
 });
+const tunnelPanel = mountTunnelPanel(document.querySelector('#tunnel-panel-root'), {
+  onsubmit: (submission) => submitTunnel(submission),
+  onstop: (resourceId) => stopResourceTunnel(resourceId),
+  onrequestclose: () => closeTunnelPanel(),
+});
 
 const stack = document.querySelector('#terminal-stack');
 const hostsScroll = document.querySelector('#hosts-scroll');
@@ -715,11 +672,6 @@ document.querySelector('#decrease-terminal-font').addEventListener('click', () =
 document.querySelector('#increase-terminal-font').addEventListener('click', () => adjustTerminalFontSize(1));
 document.querySelector('#webapp-auth-form').addEventListener('submit', (event) => submitWebAppAuth(event));
 registerAuthChoiceSync(document.querySelector('#webapp-auth-form'));
-document.querySelector('#tunnel-form').addEventListener('submit', (event) => submitTunnel(event));
-document.querySelector('#tunnel-form').addEventListener('input', () => updateTunnelSummary());
-document.querySelector('#tunnel-form').elements.type.addEventListener('change', () => updateTunnelMode());
-registerAuthChoiceSync(document.querySelector('#tunnel-form'));
-document.querySelector('#stop-tunnel').addEventListener('click', () => stopSelectedTunnel());
 document.querySelector('#key-generate-form').addEventListener('submit', (event) => submitGenerateKey(event));
 document.querySelector('#key-import-form').addEventListener('submit', (event) => submitImportKeyPair(event));
 document.querySelector('#key-directory-form').addEventListener('submit', (event) => submitKeyDirectory(event));
@@ -743,9 +695,6 @@ document.querySelector('#clear-key-directory').addEventListener('click', () => {
 document.querySelector('#rescan-key-sources').addEventListener('click', () => rescanKeySources());
 document.querySelectorAll('[data-close-webapp-auth]').forEach((element) => {
   element.addEventListener('click', () => closeWebAppAuthPanel());
-});
-document.querySelectorAll('[data-close-tunnel]').forEach((element) => {
-  element.addEventListener('click', () => closeTunnelPanel());
 });
 document.querySelectorAll('[data-close-keys]').forEach((element) => {
   element.addEventListener('click', () => closeKeysPanel());
@@ -1024,9 +973,8 @@ async function submitConnect({ resourceId, input }) {
   });
 }
 
-async function submitTunnel(event) {
-  event.preventDefault();
-  const selected = findResource(state.selectedId)?.resource;
+async function submitTunnel({ resourceId, input }) {
+  const selected = findResource(resourceId)?.resource;
   if (!selected) return;
   if (isLocalResource(selected)) return;
 
@@ -1036,26 +984,12 @@ async function submitTunnel(event) {
     renderTunnelStatus();
     return;
   }
-
-  const form = event.currentTarget;
   await withBusy(async () => {
-    const auth = authInputFromForm(form);
-    const tunnelInput = {
-      resourceId: selected.id,
-      type: form.elements.type.value,
-      localHost: form.elements.localHost.value.trim(),
-      localPort: Number.parseInt(form.elements.localPort.value, 10),
-      remoteHost: form.elements.remoteHost.value.trim(),
-      remotePort: Number.parseInt(form.elements.remotePort.value, 10),
-      ...auth,
-      trustHostKey: form.elements.trustHostKey.checked,
-    };
     try {
-      const tunnel = await startSSHTunnelWithHostKeyPrompt(tunnelInput, selected);
+      const tunnel = await startSSHTunnelWithHostKeyPrompt(input, selected);
       state.tunnels.set(tunnel.tunnelId, tunnel);
-      saveTunnelPreference(localStorage, selected.id, tunnelInput);
-      form.dataset.hadSavedPassword = String(auth.savePassword === true);
-      showSavedPassword(form.elements.password, auth.savePassword === true);
+      saveTunnelPreference(localStorage, selected.id, input);
+      tunnelPanel.markPasswordSaved(input.savePassword === true);
       await refreshHosts();
       renderHosts(searchInput.value);
       renderTunnelStatus();
@@ -1433,9 +1367,8 @@ function closeAppModal() {
   appOverlays.closeApp();
 }
 
-async function stopSelectedTunnel() {
-  const selected = findResource(state.selectedId)?.resource;
-  const tunnel = selected ? tunnelForResource(selected.id) : null;
+async function stopResourceTunnel(resourceId) {
+  const tunnel = tunnelForResource(resourceId);
   if (!tunnel) return;
   await withBusy(async () => {
     await stopTunnel(tunnel.tunnelId);
@@ -2640,93 +2573,27 @@ async function openTunnelPanel() {
 
   await loadKeys();
   await loadTunnels();
-  const panel = document.querySelector('#tunnel-panel');
-  const form = document.querySelector('#tunnel-form');
-  form.reset();
   const preference = loadTunnelPreference(localStorage, selected.id);
-  form.elements.type.value = preference?.type || 'socks';
-  form.elements.localHost.value = preference?.localHost || '127.0.0.1';
-  form.elements.localPort.value = String(preference?.localPort || 1080);
-  form.elements.remoteHost.value = preference?.remoteHost || '127.0.0.1';
-  form.elements.remotePort.value = String(preference?.remotePort || 80);
-  form.elements.trustHostKey.checked = trustHostKeyFromPreference(selected);
-  renderKeyOptions(form.elements.keyName, true);
-  applyConnectDefaults(form, selected);
-  await applySavedPasswordDefault(form, selected);
-  updateTunnelMode();
-  renderTunnelStatus();
-  panel.hidden = false;
-  requestAnimationFrame(() => panel.classList.add('open'));
-  form.elements.localPort.focus();
+  let hasSavedPassword = false;
+  if (selected.auth?.method === 'password') {
+    try {
+      hasSavedPassword = await apiHasSavedPassword(selected.id);
+    } catch {
+      // The keyring error is reported if the user explicitly requests password storage.
+    }
+  }
+  tunnelPanel.open(tunnelPanelData({
+    resource: selected,
+    keys: state.keys,
+    preference,
+    hasSavedPassword,
+    tunnel: tunnelForResource(selected.id),
+  }));
 }
 
 function closeTunnelPanel() {
-  const panel = document.querySelector('#tunnel-panel');
-  panel.classList.remove('open');
-  panel.hidden = true;
+  tunnelPanel.close();
   restoreTerminalFocusAfterOverlay();
-}
-
-function updateTunnelSummary() {
-  const selected = findResource(state.selectedId)?.resource;
-  const form = document.querySelector('#tunnel-form');
-  const summary = document.querySelector('#tunnel-summary');
-  if (!selected || !form || !summary) return;
-
-  const type = form.elements.type.value || 'socks';
-  const bind = form.elements.localHost.value.trim() || '127.0.0.1';
-  const port = form.elements.localPort.value || '1080';
-  const targetHost = form.elements.remoteHost.value.trim() || '127.0.0.1';
-  const targetPort = form.elements.remotePort.value || (type === 'remote' ? '3000' : '80');
-  const login = `${selected.user}@${selected.ip || selected.hostname}`;
-
-  if (type === 'local') {
-    summary.textContent = `ssh -L ${bind}:${port}:${targetHost}:${targetPort} ${login}`;
-    return;
-  }
-  if (type === 'remote') {
-    summary.textContent = `ssh -R ${bind}:${port}:${targetHost}:${targetPort} ${login}`;
-    return;
-  }
-  summary.textContent = `ssh -D ${bind}:${port} ${login}`;
-}
-
-function updateTunnelMode() {
-  const form = document.querySelector('#tunnel-form');
-  if (!form) return;
-
-  const type = form.elements.type.value || 'socks';
-  const title = document.querySelector('#tunnel-title');
-  const bindLabel = document.querySelector('#tunnel-bind-label');
-  const portLabel = document.querySelector('#tunnel-port-label');
-  const targetFields = document.querySelector('#tunnel-target-fields');
-  const targetHostLabel = document.querySelector('#tunnel-target-host-label');
-  const targetPortLabel = document.querySelector('#tunnel-target-port-label');
-
-  targetFields.hidden = type === 'socks';
-  if (type === 'local') {
-    title.textContent = 'Local Forward';
-    bindLabel.textContent = 'Local Bind';
-    portLabel.textContent = 'Local Port';
-    targetHostLabel.textContent = 'Remote Host';
-    targetPortLabel.textContent = 'Remote Port';
-    if (!form.elements.localPort.value || form.elements.localPort.value === '1080') form.elements.localPort.value = '8080';
-    if (!form.elements.remotePort.value) form.elements.remotePort.value = '80';
-  } else if (type === 'remote') {
-    title.textContent = 'Remote Forward';
-    bindLabel.textContent = 'Remote Bind';
-    portLabel.textContent = 'Remote Port';
-    targetHostLabel.textContent = 'Local Host';
-    targetPortLabel.textContent = 'Local Port';
-    if (!form.elements.localPort.value || form.elements.localPort.value === '1080') form.elements.localPort.value = '8080';
-    if (!form.elements.remotePort.value) form.elements.remotePort.value = '3000';
-  } else {
-    title.textContent = 'SOCKS Proxy';
-    bindLabel.textContent = 'Bind';
-    portLabel.textContent = 'Port';
-    if (!form.elements.localPort.value) form.elements.localPort.value = '1080';
-  }
-  updateTunnelSummary();
 }
 
 async function openKeysPanel({ allowInstall = true } = {}) {
@@ -3823,25 +3690,9 @@ function keyInstallErrorMessage(error, resource) {
 }
 
 function renderTunnelStatus() {
-  const status = document.querySelector('#tunnel-status');
-  const stop = document.querySelector('#stop-tunnel');
-  const start = document.querySelector('#start-tunnel');
-  if (!status || !stop || !start) return;
-
   const selected = findResource(state.selectedId)?.resource;
   const tunnel = selected && !isLocalResource(selected) ? tunnelForResource(selected.id) : null;
-  status.hidden = !tunnel;
-  status.textContent = tunnel
-    ? `${tunnelLabel(tunnel.type)} active on ${tunnel.localAddress} -> ${tunnel.forwardTarget || tunnel.target}`
-    : '';
-  stop.disabled = state.busy || !tunnel;
-  start.disabled = state.busy || Boolean(tunnel);
-}
-
-function tunnelLabel(type) {
-  if (type === 'local') return 'Local tunnel';
-  if (type === 'remote') return 'Remote tunnel';
-  return 'SOCKS tunnel';
+  tunnelPanel.setTunnel(tunnel);
 }
 
 function findResource(id) {
@@ -3951,6 +3802,7 @@ async function withBusy(task) {
   resourcePanel.setBusy(true);
   webAppPanel.setBusy(true);
   connectPanel.setBusy(true);
+  tunnelPanel.setBusy(true);
   try {
     return await task();
   } catch (error) {
@@ -3963,6 +3815,7 @@ async function withBusy(task) {
     resourcePanel.setBusy(false);
     webAppPanel.setBusy(false);
     connectPanel.setBusy(false);
+    tunnelPanel.setBusy(false);
   }
 }
 
