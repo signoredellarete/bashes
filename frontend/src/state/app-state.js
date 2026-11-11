@@ -11,7 +11,6 @@ export function createAppState({ terminalSettings, storage = globalThis.localSto
     webAppBrowsers: [],
     webAppBrowserSettings: { preferredBrowserId: '', customBrowserPath: '' },
     webAppRuntimes: new Map(),
-    webAppAuthTarget: null,
     tunnels: new Map(),
     localShellSupported: false,
     selectedId: null,

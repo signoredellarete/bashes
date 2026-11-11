@@ -129,6 +129,9 @@ Status on 2026-11-10 for branch `feature/v2-modular-architecture`:
 - the SSH Tunnel panel now owns SOCKS/local/remote form state, command previews,
   per-host defaults and active status in Svelte; it shares the authentication
   fields with Connect while native tunnel lifecycle remains application-owned;
+- Web App gateway authentication now uses the same shared credentials component
+  and tested normalization as SSH sessions and tunnels, with browser launch and
+  host-key confirmation still delegated to application callbacks;
 - plugin manifest validation, discovery, handshake and bounded process
   supervision are tested; the supervisor is part of application shutdown but
   has no user-facing installation or enablement path yet;

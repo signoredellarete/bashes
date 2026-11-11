@@ -39,7 +39,6 @@ import {
   writeClipboardText as writeClipboard,
 } from './api/runtime.js';
 import { externalHttpURL } from './external-links.js';
-import { CUSTOM_KEY_PATH_HELP } from './connections/auth-model.js';
 import { connectPanelData } from './connections/connect-model.js';
 import { mountConnectPanel } from './connections/mount.js';
 import {
@@ -62,7 +61,6 @@ import { mountTagPanel } from './tags/mount.js';
 import { mountTagFilters } from './tags/filters-mount.js';
 import { tagFilterData } from './tags/filter-model.js';
 import { tagPanelData as createTagPanelData } from './tags/panel-model.js';
-import { passwordFieldValue, placeCaretAfterSavedPassword, showSavedPassword } from './password-field.js';
 import {
   errorDetail,
   isAuthError,
@@ -110,6 +108,8 @@ import {
   visibleResourceTags,
 } from './resource-tags.js';
 import { isWebAppResource, webAppMatchesFilters } from './web-apps/model.js';
+import { mountWebAppAuthPanel } from './web-apps/auth-mount.js';
+import { webAppAuthPanelData } from './web-apps/auth-model.js';
 import { mountWebAppPanel } from './web-apps/panel-mount.js';
 import { webAppPanelData } from './web-apps/panel-model.js';
 import { mountWebAppWorkspace } from './web-apps/workspace-mount.js';
@@ -200,7 +200,6 @@ const {
   updateWebApp: apiUpdateWebApp,
   writeSSHSession: apiWriteSSHSession,
 } = backend;
-const customKeyPathHelp = CUSTOM_KEY_PATH_HELP;
 const TABLER_ICONS = Object.freeze({
   'arrows-transfer-up': iconArrowsTransferUp,
   'arrow-left': iconArrowLeft,
@@ -241,48 +240,6 @@ const iconElement = (icon, className = '') => {
 };
 const iconMarkup = (icon, className = '') => iconElement(icon, className).outerHTML;
 const ICON_CLOSE = iconMarkup('x');
-
-function authFieldsMarkup(context) {
-  return `
-    <label>
-      <span>Authentication</span>
-      <select name="authMethod">
-        <option value="agent">Agent / system keys</option>
-        <option value="password">Password</option>
-        <option value="key">Existing key</option>
-        <option value="path">Key file</option>
-      </select>
-    </label>
-    <label data-auth-field="key">
-      <span>Existing Key</span>
-      <select name="keyName"></select>
-    </label>
-    <label data-auth-field="password">
-      <span>Password</span>
-      <input name="password" type="password" autocomplete="current-password" />
-    </label>
-    <label class="checkbox-row" data-auth-field="password">
-      <input name="savePassword" type="checkbox" />
-      <span>Save password in system keyring</span>
-    </label>
-    <label data-auth-field="path">
-      <span class="field-label-with-help">
-        Custom Key Path
-        <span class="field-help-trigger" role="button" tabindex="0" aria-label="Custom key path help" aria-expanded="false">?</span>
-        <span class="field-help-popover">${customKeyPathHelp}</span>
-      </span>
-      <input name="privateKeyPath" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="optional private key path" />
-    </label>
-    <label data-auth-field="key-passphrase">
-      <span>Key Passphrase</span>
-      <input name="privateKeyPassphrase" type="password" autocomplete="off" />
-    </label>
-    <label class="checkbox-row">
-      <input name="trustHostKey" type="checkbox" />
-      <span>Skip host key verification for this ${context} (insecure)</span>
-    </label>
-  `;
-}
 
 const app = document.querySelector('#app');
 
@@ -375,25 +332,7 @@ app.innerHTML = `
 
   <div id="webapp-panel-root"></div>
 
-  <section id="webapp-auth-panel" class="slide-panel" hidden>
-    <div class="panel-scrim" data-close-webapp-auth></div>
-    <form id="webapp-auth-form" class="panel-card">
-      <header class="panel-header">
-        <div>
-          <p class="eyebrow">Web App Tunnel</p>
-          <h3>Connect Gateway</h3>
-        </div>
-        <button class="close-panel" type="button" data-close-webapp-auth title="Close">${ICON_CLOSE}</button>
-      </header>
-      <p id="webapp-auth-summary" class="parent-summary"></p>
-      <p id="webapp-auth-status" class="inline-status" hidden></p>
-      ${authFieldsMarkup('Web App tunnel')}
-      <footer class="panel-actions">
-        <button class="secondary" type="button" data-close-webapp-auth>Cancel</button>
-        <button type="submit">Open Web App</button>
-      </footer>
-    </form>
-  </section>
+  <div id="webapp-auth-panel-root"></div>
 
   <div id="connect-panel-root"></div>
 
@@ -604,6 +543,10 @@ const webAppPanel = mountWebAppPanel(document.querySelector('#webapp-panel-root'
   oncreatetag: (name) => createResourceTag(name),
   onrequestclose: () => closeWebAppPanel(),
 });
+const webAppAuthPanel = mountWebAppAuthPanel(document.querySelector('#webapp-auth-panel-root'), {
+  onsubmit: (submission) => submitWebAppAuth(submission),
+  onrequestclose: () => closeWebAppAuthPanel(),
+});
 const connectPanel = mountConnectPanel(document.querySelector('#connect-panel-root'), {
   onsubmit: (submission) => submitConnect(submission),
   onrequestclose: () => closeConnectPanel(),
@@ -670,8 +613,6 @@ document.querySelector('#delete-resource').addEventListener('click', () => delet
 document.querySelector('#message-log-button').addEventListener('click', () => showMessageLog());
 document.querySelector('#decrease-terminal-font').addEventListener('click', () => adjustTerminalFontSize(-1));
 document.querySelector('#increase-terminal-font').addEventListener('click', () => adjustTerminalFontSize(1));
-document.querySelector('#webapp-auth-form').addEventListener('submit', (event) => submitWebAppAuth(event));
-registerAuthChoiceSync(document.querySelector('#webapp-auth-form'));
 document.querySelector('#key-generate-form').addEventListener('submit', (event) => submitGenerateKey(event));
 document.querySelector('#key-import-form').addEventListener('submit', (event) => submitImportKeyPair(event));
 document.querySelector('#key-directory-form').addEventListener('submit', (event) => submitKeyDirectory(event));
@@ -693,9 +634,6 @@ document.querySelector('#clear-key-directory').addEventListener('click', () => {
   document.querySelector('#key-directory-form').elements.directory.value = '';
 });
 document.querySelector('#rescan-key-sources').addEventListener('click', () => rescanKeySources());
-document.querySelectorAll('[data-close-webapp-auth]').forEach((element) => {
-  element.addEventListener('click', () => closeWebAppAuthPanel());
-});
 document.querySelectorAll('[data-close-keys]').forEach((element) => {
   element.addEventListener('click', () => closeKeysPanel());
 });
@@ -1106,13 +1044,13 @@ async function launchWebApp(webApp, auth = null, { promptAuth = true } = {}) {
         const message = connectErrorMessage(error, gateway);
         if (promptAuth) await openWebAppAuthPanel(webApp, gateway, message);
         else {
-          setWebAppAuthStatus(message, 'error');
-          focusConnectPasswordInput(document.querySelector('#webapp-auth-form'));
+          webAppAuthPanel.setStatus(message, 'error');
+          webAppAuthPanel.focusAuth();
         }
         return false;
       }
       if (gateway && !promptAuth) {
-        setWebAppAuthStatus(connectErrorMessage(error, gateway), 'error');
+        webAppAuthPanel.setStatus(connectErrorMessage(error, gateway), 'error');
         return false;
       }
       writeNotice(gateway ? connectErrorMessage(error, gateway) : `Could not open ${webApp.name}: ${detail}`, 'error');
@@ -1134,55 +1072,40 @@ async function launchWebAppWithHostKeyPrompt(input, gateway) {
 
 async function openWebAppAuthPanel(webApp, gateway, message = '') {
   await loadKeys();
-  state.webAppAuthTarget = { webApp, gateway };
-  const panel = document.querySelector('#webapp-auth-panel');
-  const form = document.querySelector('#webapp-auth-form');
-  form.reset();
-  renderKeyOptions(form.elements.keyName, true);
-  applyConnectDefaults(form, gateway);
-  await applySavedPasswordDefault(form, gateway);
-  form.elements.trustHostKey.checked = trustHostKeyFromPreference(gateway);
-  document.querySelector('#webapp-auth-summary').textContent =
-    `${webApp.name} via ${gateway.user}@${gateway.ip || gateway.hostname}:${gateway.port}`;
-  setWebAppAuthStatus(message, message ? 'error' : '');
-  panel.hidden = false;
-  requestAnimationFrame(() => panel.classList.add('open'));
-  focusConnectPasswordInput(form);
+  let hasSavedPassword = false;
+  if (gateway.auth?.method === 'password') {
+    try {
+      hasSavedPassword = await apiHasSavedPassword(gateway.id);
+    } catch {
+      // The keyring error is reported if the user explicitly requests password storage.
+    }
+  }
+  webAppAuthPanel.open(webAppAuthPanelData({
+    webApp,
+    gateway,
+    keys: state.keys,
+    hasSavedPassword,
+    message,
+  }));
 }
 
-async function submitWebAppAuth(event) {
-  event.preventDefault();
-  const target = state.webAppAuthTarget;
-  if (!target) return;
-  const form = event.currentTarget;
-  setWebAppAuthStatus('', '');
+async function submitWebAppAuth({ webAppId, gatewayId, auth }) {
+  const webApp = findResource(webAppId)?.resource;
+  const gateway = findResource(gatewayId)?.resource;
+  if (!webApp || !gateway) return;
+  webAppAuthPanel.setStatus('', '');
   try {
-    const opened = await launchWebApp(target.webApp, {
-      ...authInputFromForm(form),
-      trustHostKey: form.elements.trustHostKey.checked,
-    }, { promptAuth: false });
+    const opened = await launchWebApp(webApp, auth, { promptAuth: false });
     if (opened) closeWebAppAuthPanel();
   } catch (error) {
-    const message = connectErrorMessage(error, target.gateway);
-    setWebAppAuthStatus(message, 'error');
-    if (isAuthError(error)) focusConnectPasswordInput(form);
+    const message = connectErrorMessage(error, gateway);
+    webAppAuthPanel.setStatus(message, 'error');
+    if (isAuthError(error)) webAppAuthPanel.focusAuth();
   }
 }
 
-function setWebAppAuthStatus(message, kind) {
-  const status = document.querySelector('#webapp-auth-status');
-  status.textContent = message;
-  status.title = message;
-  status.dataset.kind = kind;
-  status.hidden = !message;
-}
-
 function closeWebAppAuthPanel() {
-  const panel = document.querySelector('#webapp-auth-panel');
-  panel.classList.remove('open');
-  panel.hidden = true;
-  state.webAppAuthTarget = null;
-  setWebAppAuthStatus('', '');
+  webAppAuthPanel.close();
   restoreTerminalFocusAfterOverlay();
 }
 
@@ -2542,25 +2465,6 @@ async function openConnectPanel(statusMessage = '', statusKind = '') {
   }));
 }
 
-function focusConnectPasswordInput(form) {
-  window.setTimeout(() => {
-    requestAnimationFrame(() => {
-      const method = form.elements.authMethod?.value || 'agent';
-      const target = method === 'password'
-        ? form.elements.password
-        : method === 'key'
-          ? form.elements.keyName
-          : method === 'path'
-            ? form.elements.privateKeyPath
-            : form.elements.authMethod;
-      target?.focus();
-      if (!(method === 'password' && placeCaretAfterSavedPassword(target))) {
-        target?.select?.();
-      }
-    });
-  }, 0);
-}
-
 function closeConnectPanel() {
   connectPanel.close();
   restoreTerminalFocusAfterOverlay();
@@ -3139,152 +3043,6 @@ function keyOptionLabel(key) {
   return key.name;
 }
 
-function registerAuthChoiceSync(form) {
-  if (!form?.elements?.authMethod) return;
-
-  form.elements.authMethod.addEventListener('change', () => {
-    updateAuthFields(form);
-  });
-
-  form.elements.privateKeyPath?.addEventListener('input', () => {
-    if (form.elements.privateKeyPath.value.trim()) {
-      form.elements.authMethod.value = 'path';
-      form.elements.keyName.value = '';
-      updateAuthFields(form);
-    }
-  });
-
-  form.elements.keyName?.addEventListener('change', () => {
-    if (form.elements.keyName.value) {
-      form.elements.authMethod.value = 'key';
-      form.elements.privateKeyPath.value = '';
-      updateAuthFields(form);
-    }
-  });
-
-  updateAuthFields(form);
-}
-
-function updateAuthFields(form) {
-  const method = form.elements.authMethod?.value || 'agent';
-  form.querySelectorAll('[data-auth-field]').forEach((field) => {
-    const type = field.dataset.authField;
-    field.hidden = !(type === method || (type === 'key-passphrase' && (method === 'key' || method === 'path')));
-  });
-}
-
-function authInputFromForm(form) {
-  const method = form.elements.authMethod?.value || 'agent';
-  if (method === 'password') {
-    const savePassword = form.elements.savePassword.checked;
-    return {
-      password: passwordFieldValue(form.elements.password, form.dataset.hadSavedPassword === 'true'),
-      managePassword: savePassword || form.dataset.hadSavedPassword === 'true',
-      savePassword,
-      keyName: '',
-      privateKeyPath: '',
-      privateKeyPassphrase: '',
-    };
-  }
-
-  if (method === 'path') {
-    const privateKeyPath = form.elements.privateKeyPath.value.trim();
-    return {
-      keyName: '',
-      privateKeyPath,
-      privateKeyPassphrase: form.elements.privateKeyPassphrase.value,
-    };
-  }
-
-  if (method === 'agent') {
-    return {
-      keyName: '',
-      privateKeyPath: '',
-      privateKeyPassphrase: '',
-    };
-  }
-
-  const keyChoice = selectedKeyChoice(form.elements.keyName);
-  if (keyChoice && keyChoice.source !== 'bashes') {
-    return {
-      keyName: '',
-      privateKeyPath: keyChoice.privateKey,
-      privateKeyPassphrase: form.elements.privateKeyPassphrase.value,
-    };
-  }
-  if (keyChoice?.source === 'bashes') {
-    return {
-      keyName: keyChoice.name,
-      privateKeyPath: '',
-      privateKeyPassphrase: form.elements.privateKeyPassphrase.value,
-    };
-  }
-
-  return {
-    keyName: '',
-    privateKeyPath: '',
-    privateKeyPassphrase: '',
-  };
-}
-
-function applyConnectDefaults(form, resource) {
-  const auth = resource?.auth;
-  form.elements.authMethod.value = 'agent';
-  form.elements.keyName.value = '';
-  form.elements.privateKeyPath.value = '';
-  form.elements.password.value = '';
-  showSavedPassword(form.elements.password, false);
-  form.elements.savePassword.checked = false;
-  form.elements.privateKeyPassphrase.value = '';
-  if (!auth) {
-    updateAuthFields(form);
-    return;
-  }
-
-  if (auth.method === 'password') {
-    form.elements.authMethod.value = 'password';
-  }
-  if (auth.method === 'key' && auth.keyName) {
-    const value = `bashes:${auth.keyName}`;
-    const hasKey = [...form.elements.keyName.options].some((option) => option.value === value);
-    if (hasKey) {
-      form.elements.authMethod.value = 'key';
-      form.elements.keyName.value = value;
-      form.elements.privateKeyPath.value = '';
-    }
-  }
-  if (auth.method === 'path' && auth.privateKeyPath) {
-    const value = `path:${auth.privateKeyPath}`;
-    const hasPath = [...form.elements.keyName.options].some((option) => option.value === value);
-    if (hasPath) {
-      form.elements.authMethod.value = 'key';
-      form.elements.keyName.value = value;
-      form.elements.privateKeyPath.value = '';
-    } else {
-      form.elements.authMethod.value = 'path';
-      form.elements.keyName.value = '';
-      form.elements.privateKeyPath.value = auth.privateKeyPath;
-    }
-  }
-  updateAuthFields(form);
-}
-
-async function applySavedPasswordDefault(form, resource) {
-  if (!form?.elements?.savePassword) return;
-  form.elements.savePassword.checked = false;
-  form.dataset.hadSavedPassword = 'false';
-  showSavedPassword(form.elements.password, false);
-  if (resource?.auth?.method !== 'password') return;
-  try {
-    const hasSavedPassword = await apiHasSavedPassword(resource.id);
-    form.elements.savePassword.checked = hasSavedPassword;
-    form.dataset.hadSavedPassword = String(hasSavedPassword);
-    showSavedPassword(form.elements.password, hasSavedPassword);
-  } catch {
-    // The keyring error is reported if the user explicitly requests password storage.
-  }
-}
-
 function selectedKeyChoice(select) {
   if (!select?.value) return null;
   const key = state.keys.find((item) => keyChoiceValue(item) === select.value);
@@ -3801,6 +3559,7 @@ async function withBusy(task) {
   tagPanel.setBusy(true);
   resourcePanel.setBusy(true);
   webAppPanel.setBusy(true);
+  webAppAuthPanel.setBusy(true);
   connectPanel.setBusy(true);
   tunnelPanel.setBusy(true);
   try {
@@ -3814,6 +3573,7 @@ async function withBusy(task) {
     tagPanel.setBusy(false);
     resourcePanel.setBusy(false);
     webAppPanel.setBusy(false);
+    webAppAuthPanel.setBusy(false);
     connectPanel.setBusy(false);
     tunnelPanel.setBusy(false);
   }
