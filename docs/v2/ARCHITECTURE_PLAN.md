@@ -117,6 +117,9 @@ Status on 2026-11-10 for branch `feature/v2-modular-architecture`:
 - newly created hosts, nested systems and Web Apps enter the same selected and
   pending-tab state as a direct card click, while edits preserve the current
   selection; the sidebar minimally scrolls the new card into view;
+- Add/Edit Host and Subsystem now use a Svelte panel with component-local form
+  state and a reusable, tested tag editor; backend mutations remain application
+  callbacks and the legacy JSON contract is unchanged;
 - plugin manifest validation, discovery, handshake and bounded process
   supervision are tested; the supervisor is part of application shutdown but
   has no user-facing installation or enablement path yet;

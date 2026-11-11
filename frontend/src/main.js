@@ -51,6 +51,8 @@ import {
 } from './features/resources/model.js';
 import { createAppState } from './state/app-state.js';
 import { mountAppOverlays } from './app/overlays/mount.js';
+import { mountResourcePanel } from './resources/mount.js';
+import { resourcePanelData } from './resources/panel-model.js';
 import { mountSettingsPanel } from './settings/mount.js';
 import { settingsPanelData as createSettingsPanelData } from './settings/model.js';
 import { mountTagPanel } from './tags/mount.js';
@@ -109,6 +111,7 @@ import './terminal-fonts.css';
 import './styles.css';
 import './app/overlays/overlays.css';
 import './tags/filters.css';
+import './tags/editor.css';
 import './tags/panel.css';
 import './web-apps/workspace.css';
 
@@ -364,74 +367,7 @@ app.innerHTML = `
     </footer>
   </main>
 
-  <section id="resource-panel" class="slide-panel" hidden>
-    <div class="panel-scrim" data-close-panel></div>
-    <form id="resource-form" class="panel-card resource-panel-card tag-editor-panel">
-      <header class="panel-header resource-panel-header">
-        <span class="resource-panel-heading-icon">${iconMarkup('server-2', 'resource-panel-icon')}</span>
-        <div class="resource-panel-heading">
-          <h3 id="resource-panel-title">Add host</h3>
-          <p id="resource-panel-subtitle">SSH session</p>
-        </div>
-        <button class="close-panel" type="button" data-close-panel title="Close">${ICON_CLOSE}</button>
-      </header>
-
-      <div class="resource-form-body">
-        <p id="parent-host-summary" class="parent-summary" hidden></p>
-
-        <label id="subsystem-type-field" hidden>
-          <span>Type</span>
-          <select name="type">
-            <option value="vm">VM</option>
-            <option value="lxc">LXC</option>
-            <option value="docker">Docker</option>
-          </select>
-        </label>
-
-        <label>
-          <span>Display name</span>
-          <input name="hostname" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required />
-        </label>
-        <div class="resource-endpoint-grid">
-          <label>
-            <span>Hostname / IP</span>
-            <input class="monospace-input" name="ip" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required />
-          </label>
-          <label>
-            <span>Port</span>
-            <input class="monospace-input" name="port" type="number" min="1" max="65535" value="22" required />
-          </label>
-        </div>
-        <label>
-          <span>Username</span>
-          <input class="monospace-input" name="user" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required />
-        </label>
-
-        <div class="resource-form-separator"></div>
-
-        <section class="resource-tag-editor" aria-labelledby="resource-tags-label">
-          <header>
-            <strong id="resource-tags-label">Tags</strong>
-            <span>type to search, Enter to add</span>
-          </header>
-          <div class="resource-tag-input">
-            <div id="resource-selected-tags" class="resource-selected-tags"></div>
-            <input id="resource-tag-query" class="resource-tag-query" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="prod, milano..." aria-label="Search or create tags" />
-          </div>
-          <div class="resource-tag-suggestion-box">
-            <span id="resource-tag-suggestion-label">Existing tags</span>
-            <div id="resource-tag-options" class="resource-tag-options"></div>
-          </div>
-        </section>
-      </div>
-
-      <footer class="panel-actions resource-panel-actions">
-        <span id="resource-tag-summary">No tags on this system</span>
-        <button class="secondary" type="button" data-close-panel>Cancel</button>
-        <button id="resource-submit" type="submit">Save host</button>
-      </footer>
-    </form>
-  </section>
+  <div id="resource-panel-root"></div>
 
   <section id="webapp-panel" class="slide-panel" hidden>
     <div class="panel-scrim" data-close-webapp></div>
@@ -804,6 +740,11 @@ const tagFilters = mountTagFilters(document.querySelector('#tag-filters-root'), 
   onmode: (mode) => setTagFilterMode(mode),
   onrender: () => initializeTagSorting(),
 });
+const resourcePanel = mountResourcePanel(document.querySelector('#resource-panel-root'), {
+  onsubmit: (submission) => submitResource(submission),
+  oncreatetag: (name) => createResourceTag(name),
+  onrequestclose: () => closeResourcePanel(),
+});
 
 const stack = document.querySelector('#terminal-stack');
 const hostsScroll = document.querySelector('#hosts-scroll');
@@ -861,18 +802,12 @@ document.querySelector('#delete-resource').addEventListener('click', () => delet
 document.querySelector('#message-log-button').addEventListener('click', () => showMessageLog());
 document.querySelector('#decrease-terminal-font').addEventListener('click', () => adjustTerminalFontSize(-1));
 document.querySelector('#increase-terminal-font').addEventListener('click', () => adjustTerminalFontSize(1));
-document.querySelector('#resource-form').addEventListener('submit', (event) => submitResource(event));
 document.querySelector('#webapp-form').addEventListener('submit', (event) => submitWebApp(event));
 document.querySelector('#webapp-form').elements.connectionMode.addEventListener('change', () => updateWebAppFormVisibility());
 document.querySelector('#webapp-form').elements.portMode.addEventListener('change', () => updateWebAppFormVisibility());
 document.querySelector('#webapp-form').elements.browserMode.addEventListener('change', () => updateWebAppFormVisibility());
 document.querySelector('#webapp-auth-form').addEventListener('submit', (event) => submitWebAppAuth(event));
 registerAuthChoiceSync(document.querySelector('#webapp-auth-form'));
-document.querySelector('#resource-tag-query').addEventListener('input', (event) => {
-  state.resourceTagQuery = event.currentTarget.value;
-  renderResourceTagOptions();
-});
-document.querySelector('#resource-tag-query').addEventListener('keydown', (event) => handleResourceTagInput(event));
 document.querySelector('#webapp-tag-query').addEventListener('input', (event) => {
   state.webAppTagQuery = event.currentTarget.value;
   renderWebAppTagOptions();
@@ -906,9 +841,6 @@ document.querySelector('#clear-key-directory').addEventListener('click', () => {
   document.querySelector('#key-directory-form').elements.directory.value = '';
 });
 document.querySelector('#rescan-key-sources').addEventListener('click', () => rescanKeySources());
-document.querySelectorAll('[data-close-panel]').forEach((element) => {
-  element.addEventListener('click', () => closeResourcePanel());
-});
 document.querySelectorAll('[data-close-webapp]').forEach((element) => {
   element.addEventListener('click', () => closeWebAppPanel());
 });
@@ -1058,25 +990,19 @@ async function loadTunnels() {
   renderHosts(searchInput.value);
 }
 
-async function submitResource(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const editing = state.drawerMode === 'edit' ? findResource(state.editResourceId) : null;
-  const type = state.drawerMode === 'subsystem' || editing?.type !== 'host' ? form.elements.type.value : '';
-  const input = endpointInput(form, type);
-
+async function submitResource({ mode, parentId, editId, input }) {
   return await withBusy(async () => {
     let createdResourceID = '';
-    if (state.drawerMode === 'edit') {
-      const resource = findResource(state.editResourceId)?.resource;
-      await apiUpdateResource(state.editResourceId, input);
-      for (const session of sessionsForResource(state.editResourceId)) {
+    if (mode === 'edit') {
+      const resource = findResource(editId)?.resource;
+      await apiUpdateResource(editId, input);
+      for (const session of sessionsForResource(editId)) {
         session.title = input.hostname;
         session.target = `${input.user}@${input.ip || input.hostname}:${input.port}`;
       }
       writeNotice(`Updated ${resource?.hostname ?? 'resource'}.`);
-    } else if (state.drawerMode === 'subsystem') {
-      const subsystem = await apiAddSubsystem(state.drawerHostId, input);
+    } else if (mode === 'subsystem') {
+      const subsystem = await apiAddSubsystem(parentId, input);
       createdResourceID = subsystem.id;
       writeNotice(`Added ${subsystem.type} ${subsystem.hostname}.`);
     } else {
@@ -1093,6 +1019,13 @@ async function submitResource(event) {
     }
     renderTabs();
   });
+}
+
+async function createResourceTag(name) {
+  const created = await withBusy(() => apiCreateTag(name));
+  if (!created) return '';
+  state.tags = [...state.tags, created];
+  return created;
 }
 
 async function submitWebApp(event) {
@@ -1815,29 +1748,7 @@ function removeSessionFromUI(sessionID) {
   focusActiveTerminal();
 }
 
-function endpointInput(form, type) {
-  return {
-    hostname: form.elements.hostname.value.trim(),
-    ip: form.elements.ip.value.trim(),
-    port: Number.parseInt(form.elements.port.value, 10),
-    user: form.elements.user.value.trim(),
-    tags: [...state.resourceDraftTags],
-    ...(type ? { type } : {}),
-  };
-}
-
 const draftTagEditors = {
-  resource: {
-    draftKey: 'resourceDraftTags',
-    queryKey: 'resourceTagQuery',
-    options: '#resource-tag-options',
-    selected: '#resource-selected-tags',
-    query: '#resource-tag-query',
-    suggestionLabel: '#resource-tag-suggestion-label',
-    summary: '#resource-tag-summary',
-    emptySummary: 'No tags on this system',
-    countLabel: 'on this system',
-  },
   webapp: {
     draftKey: 'webAppDraftTags',
     queryKey: 'webAppTagQuery',
@@ -1851,8 +1762,8 @@ const draftTagEditors = {
   },
 };
 
-function renderResourceTagOptions(selectedTags) {
-  renderDraftTagOptions('resource', selectedTags);
+function resourceTagCatalog() {
+  return mergeTagCatalog(state.tags, [...state.hosts, ...state.webApps]);
 }
 
 function renderDraftTagOptions(editorName, selectedTags) {
@@ -1937,10 +1848,6 @@ function renderDraftTagOptions(editorName, selectedTags) {
   }
 
   container.replaceChildren(...options);
-}
-
-function handleResourceTagInput(event) {
-  handleDraftTagInput(event, 'resource');
 }
 
 function handleWebAppTagInput(event) {
@@ -2995,95 +2902,26 @@ function clearAllDragOutlines() {
 }
 
 function openResourcePanel(mode, hostID = '') {
-  const panel = document.querySelector('#resource-panel');
-  const form = document.querySelector('#resource-form');
-  const typeField = document.querySelector('#subsystem-type-field');
-  const parentSummary = document.querySelector('#parent-host-summary');
-  const title = document.querySelector('#resource-panel-title');
-  const subtitle = document.querySelector('#resource-panel-subtitle');
-  const submit = document.querySelector('#resource-submit');
-
-  state.drawerMode = mode;
-  state.drawerHostId = hostID;
-  state.editResourceId = null;
-  form.reset();
-  form.elements.port.value = '22';
-  renderResourceTagOptions([]);
-
-  const subsystemMode = mode === 'subsystem';
-  typeField.hidden = !subsystemMode;
-  parentSummary.hidden = !subsystemMode;
-  if (subsystemMode) {
-    title.textContent = 'Add subsystem';
-    subtitle.textContent = 'SSH session';
-    submit.textContent = 'Save subsystem';
-    const parent = findResource(hostID)?.resource;
-    parentSummary.textContent = parent ? `Parent: ${parent.hostname} (${parent.user}@${parent.ip || parent.hostname})` : '';
-  } else {
-    title.textContent = 'Add host';
-    subtitle.textContent = 'SSH session';
-    submit.textContent = 'Save host';
-    parentSummary.textContent = '';
-  }
-
-  panel.hidden = false;
-  requestAnimationFrame(() => panel.classList.add('open'));
-  form.elements.hostname.focus();
+  resourcePanel.open(resourcePanelData({
+    mode,
+    parent: mode === 'subsystem' ? findResource(hostID)?.resource : null,
+    catalog: resourceTagCatalog(),
+  }));
 }
 
 function openEditPanel() {
   const selected = findResource(state.selectedId);
   if (!selected) return;
-
-  const panel = document.querySelector('#resource-panel');
-  const form = document.querySelector('#resource-form');
-  const typeField = document.querySelector('#subsystem-type-field');
-  const parentSummary = document.querySelector('#parent-host-summary');
-  const title = document.querySelector('#resource-panel-title');
-  const subtitle = document.querySelector('#resource-panel-subtitle');
-  const submit = document.querySelector('#resource-submit');
-  const resource = selected.resource;
-  const subsystemMode = selected.type !== 'host';
-
-  state.drawerMode = 'edit';
-  state.drawerHostId = selected.parent?.id ?? '';
-  state.editResourceId = resource.id;
-
-  form.reset();
-  form.elements.hostname.value = resource.hostname;
-  form.elements.ip.value = resource.ip;
-  form.elements.port.value = String(resource.port);
-  form.elements.user.value = resource.user;
-  renderResourceTagOptions(resourceTags(resource).map((tag) => tag.name));
-  typeField.hidden = !subsystemMode;
-  parentSummary.hidden = !subsystemMode;
-  if (subsystemMode) {
-    form.elements.type.value = resource.type;
-    title.textContent = 'Edit subsystem';
-    subtitle.textContent = 'SSH session';
-    submit.textContent = 'Save changes';
-    parentSummary.textContent = selected.parent
-      ? `Parent: ${selected.parent.hostname} (${selected.parent.user}@${selected.parent.ip || selected.parent.hostname})`
-      : '';
-  } else {
-    title.textContent = 'Edit host';
-    subtitle.textContent = 'SSH session';
-    submit.textContent = 'Save changes';
-    parentSummary.textContent = '';
-  }
-
-  panel.hidden = false;
-  requestAnimationFrame(() => panel.classList.add('open'));
-  form.elements.hostname.focus();
+  resourcePanel.open(resourcePanelData({
+    mode: 'edit',
+    parent: selected.parent,
+    resource: selected.resource,
+    catalog: resourceTagCatalog(),
+  }));
 }
 
 function closeResourcePanel() {
-  const panel = document.querySelector('#resource-panel');
-  panel.classList.remove('open');
-  panel.hidden = true;
-  state.drawerMode = null;
-  state.drawerHostId = null;
-  state.editResourceId = null;
+  resourcePanel.close();
   restoreTerminalFocusAfterOverlay();
 }
 
@@ -4468,6 +4306,7 @@ async function withBusy(task) {
   state.busy = true;
   renderSelection();
   tagPanel.setBusy(true);
+  resourcePanel.setBusy(true);
   try {
     return await task();
   } catch (error) {
@@ -4477,6 +4316,7 @@ async function withBusy(task) {
     state.busy = false;
     renderSelection();
     tagPanel.setBusy(false);
+    resourcePanel.setBusy(false);
   }
 }
 
