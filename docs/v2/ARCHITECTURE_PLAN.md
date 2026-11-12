@@ -38,14 +38,14 @@ The guiding product rule is:
 
 ## Implementation status
 
-Status on 2026-11-11 for branch `feature/v2-modular-architecture`:
+Status on 2026-11-12 for branch `feature/v2-modular-architecture`:
 
 | Phase | Status | Current result |
 | --- | --- | --- |
 | 0 - Baseline and contracts | Complete | Desktop adapters, error/event contracts and architecture guards are in place. |
 | 1 - Backend application boundaries | Complete | Data and connection workflows are independent of Wails and native operations use injectable adapters. |
 | 2 - Runtime manager | Complete | Native runtimes have backend ownership, common lifecycle state and deterministic cleanup tests. |
-| 3 - Frontend modularization | In progress | Desktop APIs and shared application/resource state are extracted; feature UI still remains in `main.js`. |
+| 3 - Frontend modularization | In progress | Desktop APIs, shared state and the main feature surfaces are extracted; bootstrap orchestration and CSS separation remain. |
 | 4 - Transfer reliability | Not started | Planned after the application boundaries are stable. |
 | 5 - Plugin foundation | In progress | Manifest, discovery, protocol and supervisor exist without user-facing enablement. |
 | 6 - First optional plugin | Not started | Depends on the completed plugin permission and installation model. |
@@ -124,6 +124,9 @@ Status on 2026-11-11 for branch `feature/v2-modular-architecture`:
 - SSH key inventory, search, source diagnostics, generation, import, private-key
   viewing and remote installation share one tested Svelte panel model while
   native key operations and confirmation policy remain application callbacks;
+- the file-transfer window shell owns its Svelte markup, visibility, title,
+  drag and resize behavior behind a tested geometry model; workspace lifetime,
+  background jobs and the existing SVAR manager remain application-owned;
 - the selected Web App workbench is a Svelte feature backed by a pure view
   model; browser launch and tunnel operations remain application callbacks;
 - newly created hosts, nested systems and Web Apps enter the same selected and
@@ -412,7 +415,7 @@ Exit condition: no native resource relies on frontend cleanup for correctness.
 - [x] Extract the selected Web App workspace and runtime controls.
 - [x] Extract the sidebar resource tree, ordering and tag drag/drop behavior.
 - [x] Extract terminal tabs, xterm lifecycle, resizing and focus management.
-- [-] Extract the file-transfer modal shell around the existing Svelte file
+- [x] Extract the file-transfer modal shell around the existing Svelte file
   manager and transfer queue.
 - [x] Extract SSH key inventory, generation, import and installation views.
 - [-] Preserve UI dimensions, colors, shortcuts, focus and modal behavior with

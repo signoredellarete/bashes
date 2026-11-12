@@ -114,6 +114,7 @@ import {
   sshKeysPanelData,
 } from './ssh-keys/model.js';
 import { mountSSHKeysPanel } from './ssh-keys/mount.js';
+import { mountFileTransferShell } from './file-transfer/shell-mount.js';
 import { mountWebAppAuthPanel } from './web-apps/auth-mount.js';
 import { webAppAuthPanelData } from './web-apps/auth-model.js';
 import { mountWebAppPanel } from './web-apps/panel-mount.js';
@@ -239,7 +240,6 @@ const iconElement = (icon, className = '') => {
   return element;
 };
 const iconMarkup = (icon, className = '') => iconElement(icon, className).outerHTML;
-const ICON_CLOSE = iconMarkup('x');
 
 const app = document.querySelector('#app');
 
@@ -341,23 +341,7 @@ app.innerHTML = `
   <div id="settings-root" class="overlay-root"></div>
   <div id="app-overlays-root" class="overlay-root"></div>
 
-  <section id="file-transfer-modal" class="file-transfer-modal" hidden>
-    <div class="file-transfer-scrim"></div>
-    <section class="file-transfer-card">
-      <header class="file-transfer-header">
-        <div>
-          <p class="eyebrow">File Transfer</p>
-          <h3 id="file-transfer-title">Files</h3>
-        </div>
-        <div class="file-transfer-header-actions">
-          <button id="file-transfer-background" class="secondary" type="button" title="Send transfer window to background">Background</button>
-          <button class="close-panel" type="button" data-close-file-transfer title="Close">${ICON_CLOSE}</button>
-        </div>
-      </header>
-      <div id="file-transfer-root" class="file-transfer-root"></div>
-      <div id="file-transfer-resize-handle" class="file-transfer-resize-handle" title="Resize" aria-hidden="true"></div>
-    </section>
-  </section>
+  <div id="file-transfer-shell-root" class="overlay-root"></div>
 
   <div id="ssh-keys-panel-root" class="overlay-root"></div>
 
@@ -375,6 +359,10 @@ const settingsPanel = mountSettingsPanel(document.querySelector('#settings-root'
   onpreview: (values) => previewTerminalAppearance(values),
   onsave: (values) => submitSettings(values),
   onrequestclose: () => closeSettingsPanel(),
+});
+const fileTransferShell = mountFileTransferShell(document.querySelector('#file-transfer-shell-root'), {
+  onrequestclose: () => closeFileTransferModal(),
+  onbackground: () => backgroundFileTransferModal(),
 });
 const appOverlays = mountAppOverlays(document.querySelector('#app-overlays-root'), {
   onclosed: () => restoreTerminalFocusAfterOverlay(),
@@ -483,7 +471,7 @@ const terminalController = createTerminalController({
 
 window.addEventListener('resize', () => {
   scheduleTerminalFit();
-  clampFileTransferModalSize();
+  fileTransferShell.clampSize();
   syncSidebarScrollbarInset();
 });
 
@@ -534,12 +522,6 @@ document.querySelector('#delete-resource').addEventListener('click', () => delet
 document.querySelector('#message-log-button').addEventListener('click', () => showMessageLog());
 document.querySelector('#decrease-terminal-font').addEventListener('click', () => adjustTerminalFontSize(-1));
 document.querySelector('#increase-terminal-font').addEventListener('click', () => adjustTerminalFontSize(1));
-document.querySelectorAll('[data-close-file-transfer]').forEach((element) => {
-  element.addEventListener('click', () => closeFileTransferModal());
-});
-document.querySelector('#file-transfer-background').addEventListener('click', () => backgroundFileTransferModal());
-registerFileTransferModalResize();
-registerFileTransferModalDrag();
 document.querySelectorAll('.field-help-trigger').forEach((button) => {
   button.addEventListener('click', (event) => toggleFieldHelp(event));
   button.addEventListener('keydown', (event) => {
@@ -1944,12 +1926,9 @@ async function openFileTransferModal() {
   if (!selected) return;
   if (isLocalResource(selected)) return;
 
-  const panel = document.querySelector('#file-transfer-modal');
-  const title = document.querySelector('#file-transfer-title');
-  const root = document.querySelector('#file-transfer-root');
-  title.textContent = `${selected.user}@${selected.ip || selected.hostname}:${selected.port}`;
-  panel.hidden = false;
-  requestAnimationFrame(() => panel.classList.add('open'));
+  const root = fileTransferShell.workspaceRoot();
+  if (!root) return;
+  fileTransferShell.open(`${selected.user}@${selected.ip || selected.hostname}:${selected.port}`);
 
   let workspace = state.fileTransferWorkspaces.get(selected.id);
   if (!workspace) {
@@ -1994,9 +1973,7 @@ function backgroundFileTransferModal() {
 }
 
 function hideFileTransferModal() {
-  const panel = document.querySelector('#file-transfer-modal');
-  panel.classList.remove('open');
-  panel.hidden = true;
+  fileTransferShell.hide();
   restoreTerminalFocusAfterOverlay();
 }
 
@@ -2046,106 +2023,6 @@ function closeAllFileTransferWorkspaces() {
     destroyFileTransferWorkspace(resourceId);
   }
   hideFileTransferModal();
-}
-
-function registerFileTransferModalResize() {
-  const card = document.querySelector('.file-transfer-card');
-  const handle = document.querySelector('#file-transfer-resize-handle');
-  if (!card || !handle) return;
-
-  let resizeState = null;
-  handle.addEventListener('pointerdown', (event) => {
-    event.preventDefault();
-    resizeState = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      width: card.offsetWidth,
-      height: card.offsetHeight,
-    };
-    handle.setPointerCapture(event.pointerId);
-    document.body.classList.add('resizing-file-transfer');
-  });
-
-  handle.addEventListener('pointermove', (event) => {
-    if (!resizeState || resizeState.pointerId !== event.pointerId) return;
-    resizeFileTransferModal(
-      resizeState.width + event.clientX - resizeState.startX,
-      resizeState.height + event.clientY - resizeState.startY,
-    );
-  });
-
-  const stopResize = (event) => {
-    if (!resizeState || resizeState.pointerId !== event.pointerId) return;
-    resizeState = null;
-    document.body.classList.remove('resizing-file-transfer');
-  };
-  handle.addEventListener('pointerup', stopResize);
-  handle.addEventListener('pointercancel', stopResize);
-}
-
-function registerFileTransferModalDrag() {
-  const card = document.querySelector('.file-transfer-card');
-  const header = document.querySelector('.file-transfer-header');
-  if (!card || !header) return;
-
-  let dragState = null;
-  header.addEventListener('pointerdown', (event) => {
-    if (event.target.closest('button, input, select, textarea, a')) return;
-    event.preventDefault();
-    const rect = card.getBoundingClientRect();
-    dragState = {
-      pointerId: event.pointerId,
-      offsetX: event.clientX - rect.left,
-      offsetY: event.clientY - rect.top,
-      width: rect.width,
-      height: rect.height,
-    };
-    card.style.position = 'fixed';
-    card.style.left = `${rect.left}px`;
-    card.style.top = `${rect.top}px`;
-    card.style.margin = '0';
-    header.setPointerCapture(event.pointerId);
-    document.body.classList.add('dragging-file-transfer');
-  });
-
-  header.addEventListener('pointermove', (event) => {
-    if (!dragState || dragState.pointerId !== event.pointerId) return;
-    const maxLeft = Math.max(18, window.innerWidth - dragState.width - 18);
-    const maxTop = Math.max(18, window.innerHeight - dragState.height - 18);
-    card.style.left = `${clamp(event.clientX - dragState.offsetX, 18, maxLeft)}px`;
-    card.style.top = `${clamp(event.clientY - dragState.offsetY, 18, maxTop)}px`;
-  });
-
-  const stopDrag = (event) => {
-    if (!dragState || dragState.pointerId !== event.pointerId) return;
-    dragState = null;
-    document.body.classList.remove('dragging-file-transfer');
-  };
-  header.addEventListener('pointerup', stopDrag);
-  header.addEventListener('pointercancel', stopDrag);
-}
-
-function resizeFileTransferModal(width, height) {
-  const card = document.querySelector('.file-transfer-card');
-  if (!card) return;
-  const minWidth = Math.min(720, window.innerWidth - 36);
-  const minHeight = Math.min(460, window.innerHeight - 36);
-  const maxWidth = window.innerWidth - 36;
-  const maxHeight = window.innerHeight - 36;
-  card.style.width = `${clamp(width, minWidth, maxWidth)}px`;
-  card.style.height = `${clamp(height, minHeight, maxHeight)}px`;
-}
-
-function clampFileTransferModalSize() {
-  const panel = document.querySelector('#file-transfer-modal');
-  const card = document.querySelector('.file-transfer-card');
-  if (!panel || panel.hidden || !card || !card.style.width) return;
-  resizeFileTransferModal(card.offsetWidth, card.offsetHeight);
-}
-
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max);
 }
 
 function renderSelection() {
