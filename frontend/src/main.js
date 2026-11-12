@@ -328,18 +328,18 @@ app.innerHTML = `
     </footer>
   </main>
 
-  <div id="resource-panel-root"></div>
+  <div id="resource-panel-root" class="overlay-root"></div>
 
-  <div id="webapp-panel-root"></div>
+  <div id="webapp-panel-root" class="overlay-root"></div>
 
-  <div id="webapp-auth-panel-root"></div>
+  <div id="webapp-auth-panel-root" class="overlay-root"></div>
 
-  <div id="connect-panel-root"></div>
+  <div id="connect-panel-root" class="overlay-root"></div>
 
-  <div id="tunnel-panel-root"></div>
+  <div id="tunnel-panel-root" class="overlay-root"></div>
 
-  <div id="settings-root"></div>
-  <div id="app-overlays-root"></div>
+  <div id="settings-root" class="overlay-root"></div>
+  <div id="app-overlays-root" class="overlay-root"></div>
 
   <section id="file-transfer-modal" class="file-transfer-modal" hidden>
     <div class="file-transfer-scrim"></div>
@@ -359,9 +359,9 @@ app.innerHTML = `
     </section>
   </section>
 
-  <div id="ssh-keys-panel-root"></div>
+  <div id="ssh-keys-panel-root" class="overlay-root"></div>
 
-  <div id="tag-panel-root"></div>
+  <div id="tag-panel-root" class="overlay-root"></div>
 
   <div id="app-tooltip" class="app-tooltip" role="tooltip" hidden></div>
   <div id="edit-context-menu" class="edit-context-menu" hidden>
