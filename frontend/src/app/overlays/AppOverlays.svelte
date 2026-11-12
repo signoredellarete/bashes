@@ -10,6 +10,7 @@
   let confirmTitle = $state('');
   let confirmMessage = $state('');
   let confirmLabel = $state('Confirm');
+  let confirmDanger = $state(true);
   let confirmResolver = null;
   let confirmCancelButton;
 
@@ -34,6 +35,7 @@
     confirmTitle = options.title ?? '';
     confirmMessage = options.message ?? '';
     confirmLabel = options.confirmLabel ?? 'Confirm';
+    confirmDanger = options.danger !== false;
     confirmVisible = true;
     await tick();
     requestAnimationFrame(() => {
@@ -126,7 +128,7 @@
     <p id="confirm-message">{confirmMessage}</p>
     <footer class="confirm-actions">
       <button bind:this={confirmCancelButton} id="confirm-cancel" class="secondary" type="button" onclick={() => resolveConfirm(false)}>Cancel</button>
-      <button id="confirm-accept" class="danger" type="button" onclick={() => resolveConfirm(true)}>{confirmLabel}</button>
+      <button id="confirm-accept" class:danger={confirmDanger} type="button" onclick={() => resolveConfirm(true)}>{confirmLabel}</button>
     </footer>
   </div>
 </section>

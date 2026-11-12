@@ -1129,8 +1129,8 @@ function confirmDeleteResource(selected) {
   });
 }
 
-function openConfirmModal({ kicker = 'Confirm', title, message, confirmLabel = 'Confirm' }) {
-  return appOverlays.confirm({ kicker, title, message, confirmLabel });
+function openConfirmModal({ kicker = 'Confirm', title, message, confirmLabel = 'Confirm', danger = true }) {
+  return appOverlays.confirm({ kicker, title, message, confirmLabel, danger });
 }
 
 function resolveConfirmModal(confirmed) {
@@ -1953,9 +1953,17 @@ async function openFileTransferModal() {
   showFileTransferWorkspace(selected.id);
 }
 
-function closeFileTransferModal() {
+async function closeFileTransferModal() {
   const workspace = state.fileTransferWorkspaces.get(state.activeFileTransferResourceId);
   if (workspace?.active) {
+    const keepRunning = await openConfirmModal({
+      kicker: 'File Transfer',
+      title: 'Transfer in progress',
+      message: 'A file transfer is still running. Keep it running in the background?',
+      confirmLabel: 'Run in background',
+      danger: false,
+    });
+    if (!keepRunning) return;
     backgroundFileTransferModal();
     writeNotice('File transfer continues in background.');
     return;
