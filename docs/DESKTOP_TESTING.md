@@ -31,7 +31,7 @@ On Ubuntu/Debian-like systems, Wails commonly reports:
 sudo apt install build-essential libgtk-3-dev libwebkit2gtk-4.0-dev pkg-config npm
 ```
 
-Important: on newer Ubuntu releases, `libwebkit2gtk-4.0-dev` may not be available. For example, Ubuntu 25.04 exposes `libwebkit2gtk-4.1-dev` and `libwebkitgtk-6.0-dev` in `apt-cache`, while Wails v2.12 still reports `libwebkit2gtk-4.0-dev`. In that case, do not force unrelated packages blindly. Check Wails documentation and distro package availability, then install the WebKitGTK package compatible with the Wails version being used.
+Important: on newer Ubuntu releases, `libwebkit2gtk-4.0-dev` may not be available. For example, Ubuntu 25.04 exposes `libwebkit2gtk-4.1-dev` and `libwebkitgtk-6.0-dev` in `apt-cache`, while the default Wails v2 build still uses WebKitGTK 4.0 unless the `webkit2_41` build tag is selected. In that case, do not force unrelated packages blindly. Check Wails documentation and distro package availability, then install the WebKitGTK package compatible with the selected build tag.
 
 ## Risks Of Installing WebKitGTK Dev Packages
 
@@ -188,7 +188,7 @@ It runs automatically on pushes to `main`, on tags matching `v*`, and can also b
 5. Wait for the desktop build jobs to finish.
 6. Download `bashes-linux-amd64`, `bashes-darwin-universal`, `bashes-windows-amd64` or experimental ARM artifacts from the workflow run page.
 
-The workflow uses `ubuntu-22.04` because Wails v2.12 expects `libwebkit2gtk-4.0-dev`, which is available there but may be missing on newer Ubuntu releases.
+The WebKitGTK 4.0 workflow target uses `ubuntu-22.04`, where `libwebkit2gtk-4.0-dev` is available; newer Ubuntu releases may only provide WebKitGTK 4.1.
 
 ## Data Testing
 

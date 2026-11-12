@@ -57,7 +57,7 @@ npm_config_cache=/home/ubuntu/git/bashes/.cache/npm \
 
 ## Wails Status
 
-The local Wails CLI is `v2.12.0`.
+The local Wails CLI is `v2.17.1`.
 
 `wails doctor` reports that this server is missing the required Linux package `libwebkit2gtk-4.0-dev`. Because this host is shared with other applications, do not install system packages unless that becomes explicitly necessary.
 
