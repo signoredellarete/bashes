@@ -23,6 +23,7 @@
   } from './api.js';
 
   export let resource;
+  export let onconfirmcancel = null;
 
   const roots = [
     { id: '/local', type: 'folder', lazy: true },
@@ -59,6 +60,7 @@
   let dragGhostY = 0;
   let activeJobState = false;
   let showHiddenFiles = false;
+  let cancelingJobIds = new Set();
 
   $: publishActiveTransferState(hasActiveJobs(jobs));
 
@@ -342,6 +344,11 @@
 
   function upsertJob(job) {
     if (!job?.jobId) return;
+    if (job.status !== 'queued' && job.status !== 'running' && cancelingJobIds.has(job.jobId)) {
+      const next = new Set(cancelingJobIds);
+      next.delete(job.jobId);
+      cancelingJobIds = next;
+    }
     updateJobSpeed(job);
     const next = jobs.filter((item) => item.jobId !== job.jobId);
     next.unshift(job);
@@ -394,11 +401,23 @@
     status = `${action} ${formatBytes(job.transferredBytes)}${job.totalBytes ? ` / ${formatBytes(job.totalBytes)}` : ''}`;
   }
 
-  async function cancelTransferJob(jobId) {
-    await runOperation(async () => {
-      await cancelJob(jobId);
-      status = 'Cancel requested';
-    });
+  async function cancelTransferJob(job) {
+    if (!job?.jobId || cancelingJobIds.has(job.jobId)) return;
+    const confirmed = await onconfirmcancel?.(job);
+    if (confirmed === false) return;
+
+    cancelingJobIds = new Set([...cancelingJobIds, job.jobId]);
+    status = 'Canceling transfer...';
+    error = '';
+    try {
+      await cancelJob(job.jobId);
+      status = 'Cancel requested. Waiting for the current I/O operation to stop...';
+    } catch (err) {
+      const next = new Set(cancelingJobIds);
+      next.delete(job.jobId);
+      cancelingJobIds = next;
+      error = String(err?.message ?? err);
+    }
   }
 
   function hasActiveJobs(items) {
@@ -850,7 +869,9 @@
           <div class="transfer-job-footer">
             <span>{formatBytes(job.transferredBytes)}{job.totalBytes ? ` / ${formatBytes(job.totalBytes)}` : ''} · {formatSpeed(job)}</span>
             {#if job.status === 'queued' || job.status === 'running'}
-              <button type="button" onclick={() => cancelTransferJob(job.jobId)}>Cancel</button>
+              <button type="button" disabled={cancelingJobIds.has(job.jobId)} onclick={() => cancelTransferJob(job)}>
+                {cancelingJobIds.has(job.jobId) ? 'Canceling...' : 'Cancel'}
+              </button>
             {:else}
               {#if job.error}<span class="transfer-job-error" title={job.error}>{job.error}</span>{/if}
               <button type="button" onclick={() => dismissJob(job.jobId)}>Close</button>

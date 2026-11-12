@@ -1945,12 +1945,28 @@ async function openFileTransferModal() {
       active: false,
       element,
       resource: selected,
-      unmount: mountFileTransfer(element, { resource: selected }),
+      unmount: mountFileTransfer(element, {
+        resource: selected,
+        onconfirmcancel: (job) => confirmFileTransferCancellation(job),
+      }),
     };
     state.fileTransferWorkspaces.set(selected.id, workspace);
   }
 
   showFileTransferWorkspace(selected.id);
+}
+
+function confirmFileTransferCancellation(job) {
+  const pathParts = String(job?.current || job?.sourceIds?.[0] || job?.sourcePaths?.[0] || 'this transfer')
+    .split(/[\\/]/)
+    .filter(Boolean);
+  const name = pathParts[pathParts.length - 1];
+  return openConfirmModal({
+    kicker: 'File Transfer',
+    title: 'Cancel transfer?',
+    message: `${name || 'This file'} is still being transferred. The partial destination file may be removed.`,
+    confirmLabel: 'Cancel transfer',
+  });
 }
 
 async function closeFileTransferModal() {
