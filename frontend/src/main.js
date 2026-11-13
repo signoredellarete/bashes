@@ -542,7 +542,9 @@ window.addEventListener('pointerup', () => clearAllDragOutlines());
 window.addEventListener('pointercancel', () => clearAllDragOutlines());
 window.addEventListener('blur', () => clearAllDragOutlines());
 window.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && appOverlays.isConfirmOpen()) {
+  if (event.key === 'Escape' && appOverlays.isFileConflictOpen()) {
+    appOverlays.resolveFileConflict(null);
+  } else if (event.key === 'Escape' && appOverlays.isConfirmOpen()) {
     resolveConfirmModal(false);
   } else if (event.key === 'Escape' && appOverlays.isAppOpen()) {
     closeAppModal();
@@ -1948,6 +1950,11 @@ async function openFileTransferModal() {
       unmount: mountFileTransfer(element, {
         resource: selected,
         onconfirmcancel: (job) => confirmFileTransferCancellation(job),
+        onresolveconflict: (conflict, index, total) => appOverlays.fileConflict({
+          ...conflict,
+          index,
+          total,
+        }),
       }),
     };
     state.fileTransferWorkspaces.set(selected.id, workspace);

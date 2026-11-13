@@ -189,3 +189,105 @@ func TestAtomicFileTransferRejectsConflictWithoutChangingDestination(t *testing.
 		t.Fatalf("target content = %q, want unchanged target", data)
 	}
 }
+
+func TestFileTransferCopyConflictsDescribeExistingDestination(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "destination"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "source.txt"), []byte("source"), 0o600); err != nil {
+		t.Fatalf("WriteFile(source) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "destination", "source.txt"), []byte("existing"), 0o600); err != nil {
+		t.Fatalf("WriteFile(destination) error = %v", err)
+	}
+
+	session := &fileTransferSession{localRoot: root}
+	conflicts, err := session.copyConflicts(FileTransferCopyInput{
+		IDs:      []string{"/local/source.txt"},
+		TargetID: "/local/destination",
+	})
+	if err != nil {
+		t.Fatalf("copyConflicts() error = %v", err)
+	}
+	if len(conflicts) != 1 {
+		t.Fatalf("copyConflicts() count = %d, want 1", len(conflicts))
+	}
+	want := FileTransferConflict{
+		SourceID: "/local/source.txt",
+		TargetID: "/local/destination/source.txt",
+		Name:     "source.txt",
+		Type:     "file",
+	}
+	if conflicts[0] != want {
+		t.Fatalf("copyConflicts()[0] = %#v, want %#v", conflicts[0], want)
+	}
+}
+
+func TestAtomicDestinationPolicySkipsExistingDestination(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target.txt")
+	if err := os.WriteFile(target, []byte("existing"), 0o600); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+
+	session := &fileTransferSession{localRoot: root}
+	writerCalled := false
+	copied, err := session.withAtomicDestinationPolicy("local", "target.txt", "skip", func(string) error {
+		writerCalled = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("withAtomicDestinationPolicy() error = %v", err)
+	}
+	if copied || writerCalled {
+		t.Fatalf("withAtomicDestinationPolicy() = (%t, writer %t), want skipped", copied, writerCalled)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("ReadFile(target) error = %v", err)
+	}
+	if string(data) != "existing" {
+		t.Fatalf("target content = %q, want unchanged destination", data)
+	}
+}
+
+func TestAtomicDestinationPolicyOverwritesAndRemovesBackup(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target.txt")
+	if err := os.WriteFile(target, []byte("existing"), 0o600); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+
+	session := &fileTransferSession{
+		localRoot: root,
+		now:       func() time.Time { return time.Unix(0, 1234) },
+	}
+	copied, err := session.withAtomicDestinationPolicy("local", "target.txt", "overwrite", func(relative string) error {
+		temporary, pathErr := session.localPath(relative)
+		if pathErr != nil {
+			return pathErr
+		}
+		return os.WriteFile(temporary, []byte("replacement"), 0o600)
+	})
+	if err != nil {
+		t.Fatalf("withAtomicDestinationPolicy() error = %v", err)
+	}
+	if !copied {
+		t.Fatal("withAtomicDestinationPolicy() copied = false, want true")
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("ReadFile(target) error = %v", err)
+	}
+	if string(data) != "replacement" {
+		t.Fatalf("target content = %q, want replacement", data)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("ReadDir() error = %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "target.txt" {
+		t.Fatalf("destination directory = %v, want only target.txt", entries)
+	}
+}

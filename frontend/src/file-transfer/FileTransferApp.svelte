@@ -4,9 +4,12 @@
 	import { onRuntimeEvent, RUNTIME_EVENT } from '../api/runtime.js';
 	import { isAuthError, isCredentialStoreError, isHostKeyMismatchError, isUnknownHostKeyError } from '../ssh-errors.js';
 	import { visibleFileEntries } from './file-visibility.js';
+	import { resolveConflictActions } from './conflict-policy.js';
 	import { normalizeRemoteStartId, remotePathChain } from './remote-path.js';
   import {
 		cancelJob,
+		checkCopyConflicts,
+		checkUploadConflicts,
 		closeFileTransfer,
     createItem,
 		deleteItems,
@@ -24,6 +27,7 @@
 
   export let resource;
   export let onconfirmcancel = null;
+  export let onresolveconflict = null;
 
   const roots = [
     { id: '/local', type: 'folder', lazy: true },
@@ -195,7 +199,8 @@
     await runOperation(async () => {
       if (event.file?.file) {
         const paths = await resolveDroppedFilePaths([event.file.file]);
-        const job = await startUploadJob(session.sessionId, paths, event.parent, false);
+        const job = await startUploadWithConflictPolicy(paths, event.parent);
+        if (!job) return;
         trackJob(job, [event.parent]);
         status = `Uploading ${event.file.name}`;
         return;
@@ -245,7 +250,8 @@
         return;
       }
       const parents = unique([...event.ids.map(parentId), event.target]);
-      const job = await startCopyJob(session.sessionId, event.ids, event.target, move);
+      const job = await startCopyWithConflictPolicy(event.ids, event.target, move);
+      if (!job) return;
       trackJob(job, parents);
       status = `${move ? 'Moving' : 'Copying'} ${event.ids.length} item${event.ids.length === 1 ? '' : 's'}`;
     });
@@ -254,7 +260,8 @@
   async function handleDownloadFile(event) {
     await runOperation(async () => {
       if (event.id.startsWith('/remote/')) {
-        const job = await startCopyJob(session.sessionId, [event.id], '/local', false);
+        const job = await startCopyWithConflictPolicy([event.id], '/local', false);
+        if (!job) return;
         trackJob(job, ['/local']);
         status = `Downloading ${basename(event.id)} to local root`;
       } else {
@@ -315,6 +322,32 @@
     } finally {
       busy = false;
     }
+  }
+
+  async function startCopyWithConflictPolicy(ids, targetId, move) {
+    const conflicts = await checkCopyConflicts(session.sessionId, ids, targetId, move);
+    const conflictActions = await collectConflictActions(conflicts);
+    if (conflictActions === null) {
+      status = 'Transfer canceled';
+      return null;
+    }
+    return await startCopyJob(session.sessionId, ids, targetId, move, conflictActions);
+  }
+
+  async function startUploadWithConflictPolicy(paths, targetId) {
+    const conflicts = await checkUploadConflicts(session.sessionId, paths, targetId);
+    const conflictActions = await collectConflictActions(conflicts);
+    if (conflictActions === null) {
+      status = 'Transfer canceled';
+      return null;
+    }
+    return await startUploadJob(session.sessionId, paths, targetId, false, conflictActions);
+  }
+
+  async function collectConflictActions(conflicts) {
+    if (!conflicts?.length) return {};
+    if (!onresolveconflict) throw new Error('Destination conflict requires a user decision.');
+    return await resolveConflictActions(conflicts, onresolveconflict);
   }
 
   function registerJobEvents() {
@@ -653,7 +686,8 @@
     }
     await runOperation(async () => {
       const parents = unique([...drag.ids.map(parentId), target]);
-      const job = await startCopyJob(session.sessionId, drag.ids, target, drag.shiftKey);
+      const job = await startCopyWithConflictPolicy(drag.ids, target, drag.shiftKey);
+      if (!job) return;
       trackJob(job, parents);
       status = `${drag.shiftKey ? 'Moving' : 'Copying'} ${drag.ids.length} item${drag.ids.length === 1 ? '' : 's'}`;
     });
@@ -732,7 +766,8 @@
           return;
         }
         const parents = unique([...ids.map(parentId), target]);
-        const job = await startCopyJob(session.sessionId, ids, target, event.shiftKey);
+        const job = await startCopyWithConflictPolicy(ids, target, event.shiftKey);
+        if (!job) return;
         trackJob(job, parents);
         status = `${event.shiftKey ? 'Moving' : 'Copying'} ${ids.length} item${ids.length === 1 ? '' : 's'}`;
       });
@@ -743,7 +778,8 @@
     if (files.length) {
       await runOperation(async () => {
         const paths = await resolveDroppedFilePaths(files);
-        const job = await startUploadJob(session.sessionId, paths, target, false);
+        const job = await startUploadWithConflictPolicy(paths, target);
+        if (!job) return;
         trackJob(job, [target]);
         status = `Uploading ${files.length} file${files.length === 1 ? '' : 's'}`;
       });

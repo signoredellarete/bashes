@@ -14,6 +14,17 @@
   let confirmResolver = null;
   let confirmCancelButton;
 
+  let conflictVisible = $state(false);
+  let conflictOpened = $state(false);
+  let conflictName = $state('');
+  let conflictTarget = $state('');
+  let conflictType = $state('file');
+  let conflictIndex = $state(1);
+  let conflictTotal = $state(1);
+  let conflictApplyRemaining = $state(false);
+  let conflictResolver = null;
+  let conflictSkipButton;
+
   let appVisible = $state(false);
   let appOpened = $state(false);
   let appKicker = $state('Bashes');
@@ -57,6 +68,36 @@
     const resolve = confirmResolver;
     confirmResolver = null;
     resolve?.(confirmed);
+  }
+
+  async function fileConflict(options = {}) {
+    if (conflictResolver) conflictResolver(null);
+    conflictName = options.name ?? 'Item';
+    conflictTarget = options.targetId ?? '';
+    conflictType = options.type === 'folder' ? 'folder' : 'file';
+    conflictIndex = options.index ?? 1;
+    conflictTotal = options.total ?? 1;
+    conflictApplyRemaining = false;
+    conflictVisible = true;
+    await tick();
+    requestAnimationFrame(() => {
+      conflictOpened = true;
+      conflictSkipButton?.focus();
+    });
+    return new Promise((resolve) => {
+      conflictResolver = resolve;
+    });
+  }
+
+  function resolveFileConflict(action) {
+    if (!conflictVisible) return;
+    conflictOpened = false;
+    conflictVisible = false;
+    onclosed?.();
+
+    const resolve = conflictResolver;
+    conflictResolver = null;
+    resolve?.(action ? { action, applyToRemaining: conflictApplyRemaining } : null);
   }
 
   async function show(options = {}) {
@@ -106,10 +147,13 @@
   onMount(() => onready?.({
     confirm,
     resolveConfirm,
+    fileConflict,
+    resolveFileConflict,
     show,
     closeApp,
     notify,
     isConfirmOpen: () => confirmVisible,
+    isFileConflictOpen: () => conflictVisible,
     isAppOpen: () => appVisible,
   }));
 
@@ -129,6 +173,27 @@
     <footer class="confirm-actions">
       <button bind:this={confirmCancelButton} id="confirm-cancel" class="secondary" type="button" onclick={() => resolveConfirm(false)}>Cancel</button>
       <button id="confirm-accept" class:danger={confirmDanger} type="button" onclick={() => resolveConfirm(true)}>{confirmLabel}</button>
+    </footer>
+  </div>
+</section>
+
+<section id="file-conflict-modal" class:open={conflictOpened} class="file-conflict-modal" hidden={!conflictVisible}>
+  <div class="file-conflict-scrim" aria-hidden="true"></div>
+  <div class="file-conflict-card" role="dialog" aria-modal="true" aria-labelledby="file-conflict-title" aria-describedby="file-conflict-message">
+    <header>
+      <p class="eyebrow">File Transfer · Conflict {conflictIndex} of {conflictTotal}</p>
+      <h3 id="file-conflict-title">{conflictType === 'folder' ? 'Folder' : 'File'} already exists</h3>
+    </header>
+    <p id="file-conflict-message"><strong>{conflictName}</strong> already exists at the destination.</p>
+    {#if conflictTarget}<code class="file-conflict-target" title={conflictTarget}>{conflictTarget}</code>{/if}
+    <label class="file-conflict-remaining">
+      <input bind:checked={conflictApplyRemaining} type="checkbox" />
+      <span>Apply this decision to remaining conflicts</span>
+    </label>
+    <footer class="file-conflict-actions">
+      <button class="secondary" type="button" onclick={() => resolveFileConflict(null)}>Cancel transfer</button>
+      <button bind:this={conflictSkipButton} class="secondary" type="button" onclick={() => resolveFileConflict('skip')}>Skip</button>
+      <button class="danger" type="button" onclick={() => resolveFileConflict('overwrite')}>Overwrite</button>
     </footer>
   </div>
 </section>

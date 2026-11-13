@@ -428,7 +428,7 @@ Exit condition: `main.js` is bootstrap code rather than the application.
 ### Phase 4: Transfer reliability
 
 - [ ] Add structured SFTP errors, retry and ETA.
-- [ ] Define explicit destination conflict policies.
+- [x] Define explicit destination conflict policies.
 - [ ] Add bounded recursive traversal and explicit symlink/special-file behavior.
 - [ ] Add rollback/preservation rules for replacement.
 - [ ] Design remote editing with revision/conflict checks before implementation.

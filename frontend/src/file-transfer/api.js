@@ -54,12 +54,20 @@ export async function copyItems(sessionID, ids, targetId, move = false) {
   return await appAPI('CopyFileTransferItems')({ sessionId: sessionID, ids, targetId, move });
 }
 
-export async function startCopyJob(sessionID, ids, targetId, move = false) {
-  return await appAPI('StartFileTransferCopyJob')({ sessionId: sessionID, ids, targetId, move });
+export async function checkCopyConflicts(sessionID, ids, targetId, move = false) {
+  return await appAPI('CheckFileTransferCopyConflicts')({ sessionId: sessionID, ids, targetId, move });
 }
 
-export async function startUploadJob(sessionID, paths, targetId, move = false) {
-  return await appAPI('StartFileTransferUploadJob')({ sessionId: sessionID, paths, targetId, move });
+export async function startCopyJob(sessionID, ids, targetId, move = false, conflictActions = {}) {
+  return await appAPI('StartFileTransferCopyJob')({ sessionId: sessionID, ids, targetId, move, conflictActions });
+}
+
+export async function checkUploadConflicts(sessionID, paths, targetId) {
+  return await appAPI('CheckFileTransferUploadConflicts')({ sessionId: sessionID, paths, targetId, move: false });
+}
+
+export async function startUploadJob(sessionID, paths, targetId, move = false, conflictActions = {}) {
+  return await appAPI('StartFileTransferUploadJob')({ sessionId: sessionID, paths, targetId, move, conflictActions });
 }
 
 export async function startOpenJob(sessionID, id) {

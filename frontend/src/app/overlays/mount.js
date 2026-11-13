@@ -10,10 +10,13 @@ export function mountAppOverlays(target, callbacks) {
   return {
     confirm: (options) => controller?.confirm(options),
     resolveConfirm: (confirmed) => controller?.resolveConfirm(confirmed),
+    fileConflict: (options) => controller?.fileConflict(options),
+    resolveFileConflict: (action) => controller?.resolveFileConflict(action),
     show: (options) => controller?.show(options),
     closeApp: () => controller?.closeApp(),
     notify: (message, level) => controller?.notify(message, level),
     isConfirmOpen: () => controller?.isConfirmOpen() ?? false,
+    isFileConflictOpen: () => controller?.isFileConflictOpen() ?? false,
     isAppOpen: () => controller?.isAppOpen() ?? false,
   };
 }

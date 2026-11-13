@@ -69,17 +69,26 @@ type FileTransferDeleteInput struct {
 }
 
 type FileTransferCopyInput struct {
-	SessionID string   `json:"sessionId"`
-	IDs       []string `json:"ids"`
-	TargetID  string   `json:"targetId"`
-	Move      bool     `json:"move"`
+	SessionID       string            `json:"sessionId"`
+	IDs             []string          `json:"ids"`
+	TargetID        string            `json:"targetId"`
+	Move            bool              `json:"move"`
+	ConflictActions map[string]string `json:"conflictActions,omitempty"`
 }
 
 type FileTransferUploadInput struct {
-	SessionID string   `json:"sessionId"`
-	Paths     []string `json:"paths"`
-	TargetID  string   `json:"targetId"`
-	Move      bool     `json:"move"`
+	SessionID       string            `json:"sessionId"`
+	Paths           []string          `json:"paths"`
+	TargetID        string            `json:"targetId"`
+	Move            bool              `json:"move"`
+	ConflictActions map[string]string `json:"conflictActions,omitempty"`
+}
+
+type FileTransferConflict struct {
+	SourceID string `json:"sourceId"`
+	TargetID string `json:"targetId"`
+	Name     string `json:"name"`
+	Type     string `json:"type"`
 }
 
 type FileTransferOpenInput struct {
@@ -247,6 +256,22 @@ func (a *App) DeleteFileTransferItems(input FileTransferDeleteInput) error {
 		}
 	}
 	return nil
+}
+
+func (a *App) CheckFileTransferCopyConflicts(input FileTransferCopyInput) ([]FileTransferConflict, error) {
+	session, err := a.fileTransfer(input.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	return session.copyConflicts(input)
+}
+
+func (a *App) CheckFileTransferUploadConflicts(input FileTransferUploadInput) ([]FileTransferConflict, error) {
+	session, err := a.fileTransfer(input.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	return session.uploadConflicts(input)
 }
 
 func (a *App) CopyFileTransferItems(input FileTransferCopyInput) error {
@@ -709,6 +734,120 @@ func (s *fileTransferSession) remove(id string) error {
 	}
 }
 
+type fileTransferCopyPlan struct {
+	sourceID    string
+	sourceScope string
+	sourceRel   string
+	targetScope string
+	targetRel   string
+	size        int64
+}
+
+func fileTransferCopyPlans(input FileTransferCopyInput) ([]fileTransferCopyPlan, error) {
+	targetScope, targetRel, err := parseTransferID(input.TargetID)
+	if err != nil {
+		return nil, err
+	}
+
+	plans := make([]fileTransferCopyPlan, 0, len(input.IDs))
+	for _, sourceID := range input.IDs {
+		sourceScope, sourceRel, err := parseTransferID(sourceID)
+		if err != nil {
+			return nil, err
+		}
+		if sourceRel == "" {
+			return nil, errors.New("cannot transfer file transfer root")
+		}
+		plan := fileTransferCopyPlan{
+			sourceID:    sourceID,
+			sourceScope: sourceScope,
+			sourceRel:   sourceRel,
+			targetScope: targetScope,
+			targetRel:   path.Join(targetRel, path.Base(sourceRel)),
+		}
+		if err := validateCopyDestination(plan.sourceScope, plan.sourceRel, plan.targetScope, plan.targetRel); err != nil {
+			return nil, err
+		}
+		plans = append(plans, plan)
+	}
+	return plans, nil
+}
+
+func (s *fileTransferSession) copyConflicts(input FileTransferCopyInput) ([]FileTransferConflict, error) {
+	plans, err := fileTransferCopyPlans(input)
+	if err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	conflicts := make([]FileTransferConflict, 0)
+	for _, plan := range plans {
+		exists, err := s.pathExists(plan.targetScope, plan.targetRel)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			continue
+		}
+		info, err := s.stat(plan.sourceScope, plan.sourceRel)
+		if err != nil {
+			return nil, err
+		}
+		itemType := "file"
+		if info.IsDir() {
+			itemType = "folder"
+		}
+		conflicts = append(conflicts, FileTransferConflict{
+			SourceID: plan.sourceID,
+			TargetID: transferID(plan.targetScope, plan.targetRel),
+			Name:     path.Base(plan.targetRel),
+			Type:     itemType,
+		})
+	}
+	return conflicts, nil
+}
+
+func (s *fileTransferSession) uploadConflicts(input FileTransferUploadInput) ([]FileTransferConflict, error) {
+	targetScope, targetRel, err := parseTransferID(input.TargetID)
+	if err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	conflicts := make([]FileTransferConflict, 0)
+	for _, sourcePath := range input.Paths {
+		sourcePath = strings.TrimSpace(sourcePath)
+		if sourcePath == "" {
+			continue
+		}
+		info, err := os.Stat(sourcePath)
+		if err != nil {
+			return nil, err
+		}
+		targetRelPath := path.Join(targetRel, filepath.Base(sourcePath))
+		exists, err := s.pathExists(targetScope, targetRelPath)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			continue
+		}
+		itemType := "file"
+		if info.IsDir() {
+			itemType = "folder"
+		}
+		conflicts = append(conflicts, FileTransferConflict{
+			SourceID: sourcePath,
+			TargetID: transferID(targetScope, targetRelPath),
+			Name:     filepath.Base(sourcePath),
+			Type:     itemType,
+		})
+	}
+	return conflicts, nil
+}
+
 func (s *fileTransferSession) copy(sourceID string, targetID string, move bool) error {
 	sourceScope, sourceRel, err := parseTransferID(sourceID)
 	if err != nil {
@@ -741,51 +880,21 @@ func (s *fileTransferSession) copy(sourceID string, targetID string, move bool) 
 }
 
 func (s *fileTransferSession) copyJob(ctx context.Context, job *transfer.Job, input FileTransferCopyInput, emit func(bool)) error {
-	targetScope, targetRel, err := parseTransferID(input.TargetID)
+	plans, err := fileTransferCopyPlans(input)
 	if err != nil {
 		return err
-	}
-
-	type plannedCopy struct {
-		sourceID    string
-		sourceScope string
-		sourceRel   string
-		targetScope string
-		targetRel   string
-	}
-
-	plans := make([]plannedCopy, 0, len(input.IDs))
-	for _, sourceID := range input.IDs {
-		sourceScope, sourceRel, err := parseTransferID(sourceID)
-		if err != nil {
-			return err
-		}
-		if sourceRel == "" {
-			return errors.New("cannot transfer file transfer root")
-		}
-		plans = append(plans, plannedCopy{
-			sourceID:    sourceID,
-			sourceScope: sourceScope,
-			sourceRel:   sourceRel,
-			targetScope: targetScope,
-			targetRel:   path.Join(targetRel, path.Base(sourceRel)),
-		})
-	}
-	for _, plan := range plans {
-		if err := validateCopyDestination(plan.sourceScope, plan.sourceRel, plan.targetScope, plan.targetRel); err != nil {
-			return err
-		}
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	var total int64
-	for _, plan := range plans {
-		size, err := s.transferSizeUnlocked(plan.sourceScope, plan.sourceRel)
+	for index := range plans {
+		size, err := s.transferSizeUnlocked(plans[index].sourceScope, plans[index].sourceRel)
 		if err != nil {
 			return err
 		}
+		plans[index].size = size
 		total += size
 	}
 	job.Update(func(info *FileTransferJobInfo) {
@@ -797,8 +906,19 @@ func (s *fileTransferSession) copyJob(ctx context.Context, job *transfer.Job, in
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := s.copyItemAtomicWithProgress(ctx, job, plan.sourceScope, plan.sourceRel, plan.targetScope, plan.targetRel, emit); err != nil {
+		copied, err := s.copyItemAtomicWithProgress(
+			ctx, job, plan.sourceScope, plan.sourceRel, plan.targetScope, plan.targetRel,
+			conflictAction(input.ConflictActions, plan.targetScope, plan.targetRel), emit,
+		)
+		if err != nil {
 			return err
+		}
+		if !copied {
+			job.Update(func(info *FileTransferJobInfo) {
+				info.TotalBytes -= plan.size
+			})
+			emit(true)
+			continue
 		}
 		if input.Move {
 			if err := s.removeUnlocked(plan.sourceScope, plan.sourceRel); err != nil {
@@ -819,11 +939,13 @@ func (s *fileTransferSession) uploadJob(ctx context.Context, job *transfer.Job, 
 	defer s.mu.Unlock()
 
 	var total int64
+	sizes := make(map[string]int64, len(sourcePaths))
 	for _, sourcePath := range sourcePaths {
 		size, err := localAbsoluteTransferSize(sourcePath)
 		if err != nil {
 			return err
 		}
+		sizes[sourcePath] = size
 		total += size
 	}
 	job.Update(func(info *FileTransferJobInfo) {
@@ -836,8 +958,19 @@ func (s *fileTransferSession) uploadJob(ctx context.Context, job *transfer.Job, 
 			return err
 		}
 		name := filepath.Base(sourcePath)
-		if err := s.copyAbsoluteLocalAtomicWithProgress(ctx, job, sourcePath, targetScope, path.Join(targetRel, name), emit); err != nil {
+		targetRelPath := path.Join(targetRel, name)
+		copied, err := s.copyAbsoluteLocalAtomicWithProgress(
+			ctx, job, sourcePath, targetScope, targetRelPath,
+			conflictAction(input.ConflictActions, targetScope, targetRelPath), emit,
+		)
+		if err != nil {
 			return err
+		}
+		if !copied {
+			job.Update(func(info *FileTransferJobInfo) {
+				info.TotalBytes -= sizes[sourcePath]
+			})
+			emit(true)
 		}
 	}
 	return nil
@@ -852,25 +985,36 @@ func (s *fileTransferSession) copyItemAtomic(ctx context.Context, sourceScope, s
 	})
 }
 
-func (s *fileTransferSession) copyItemAtomicWithProgress(ctx context.Context, job *transfer.Job, sourceScope, sourceRel, targetScope, targetRel string, emit func(bool)) error {
-	return s.withAtomicDestination(targetScope, targetRel, func(tempRel string) error {
+func (s *fileTransferSession) copyItemAtomicWithProgress(ctx context.Context, job *transfer.Job, sourceScope, sourceRel, targetScope, targetRel, action string, emit func(bool)) (bool, error) {
+	return s.withAtomicDestinationPolicy(targetScope, targetRel, action, func(tempRel string) error {
 		return s.copyUnlockedWithProgress(ctx, job, sourceScope, sourceRel, targetScope, tempRel, emit)
 	})
 }
 
-func (s *fileTransferSession) copyAbsoluteLocalAtomicWithProgress(ctx context.Context, job *transfer.Job, sourcePath, targetScope, targetRel string, emit func(bool)) error {
-	return s.withAtomicDestination(targetScope, targetRel, func(tempRel string) error {
+func (s *fileTransferSession) copyAbsoluteLocalAtomicWithProgress(ctx context.Context, job *transfer.Job, sourcePath, targetScope, targetRel, action string, emit func(bool)) (bool, error) {
+	return s.withAtomicDestinationPolicy(targetScope, targetRel, action, func(tempRel string) error {
 		return s.copyAbsoluteLocalWithProgress(ctx, job, sourcePath, targetScope, tempRel, emit)
 	})
 }
 
 func (s *fileTransferSession) withAtomicDestination(scope, targetRel string, write func(tempRel string) error) error {
+	_, err := s.withAtomicDestinationPolicy(scope, targetRel, "", write)
+	return err
+}
+
+func (s *fileTransferSession) withAtomicDestinationPolicy(scope, targetRel, action string, write func(tempRel string) error) (bool, error) {
 	exists, err := s.pathExists(scope, targetRel)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if exists {
-		return fmt.Errorf("destination already exists: %s", transferID(scope, targetRel))
+		switch action {
+		case "skip":
+			return false, nil
+		case "overwrite":
+		default:
+			return false, fmt.Errorf("destination already exists: %s", transferID(scope, targetRel))
+		}
 	}
 
 	now := s.now
@@ -889,20 +1033,61 @@ func (s *fileTransferSession) withAtomicDestination(scope, targetRel string, wri
 	}()
 
 	if err := write(tempRel); err != nil {
-		return err
+		return false, err
 	}
 	exists, err = s.pathExists(scope, targetRel)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if exists {
-		return fmt.Errorf("destination appeared during transfer: %s", transferID(scope, targetRel))
+		switch action {
+		case "skip":
+			return false, nil
+		case "overwrite":
+			if err := s.replacePath(scope, tempRel, targetRel); err != nil {
+				return false, err
+			}
+			committed = true
+			return true, nil
+		default:
+			return false, fmt.Errorf("destination appeared during transfer: %s", transferID(scope, targetRel))
+		}
 	}
 	if err := s.renamePath(scope, tempRel, targetRel); err != nil {
-		return err
+		return false, err
 	}
 	committed = true
+	return true, nil
+}
+
+func (s *fileTransferSession) replacePath(scope, temporaryRel, targetRel string) error {
+	now := s.now
+	if now == nil {
+		now = time.Now
+	}
+	backupRel := path.Join(
+		path.Dir(targetRel),
+		fmt.Sprintf(".%s.bashes-replaced-%d", path.Base(targetRel), now().UnixNano()),
+	)
+	if err := s.renamePath(scope, targetRel, backupRel); err != nil {
+		return fmt.Errorf("stage existing destination: %w", err)
+	}
+	if err := s.renamePath(scope, temporaryRel, targetRel); err != nil {
+		if restoreErr := s.renamePath(scope, backupRel, targetRel); restoreErr != nil {
+			return fmt.Errorf("replace destination: %w; restore original: %v", err, restoreErr)
+		}
+		return fmt.Errorf("replace destination: %w", err)
+	}
+	_ = s.removeUnlocked(scope, backupRel)
 	return nil
+}
+
+func conflictAction(actions map[string]string, scope, targetRel string) string {
+	action := strings.ToLower(strings.TrimSpace(actions[transferID(scope, targetRel)]))
+	if action == "overwrite" || action == "skip" {
+		return action
+	}
+	return ""
 }
 
 func (s *fileTransferSession) pathExists(scope, rel string) (bool, error) {

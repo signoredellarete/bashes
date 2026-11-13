@@ -1,9 +1,11 @@
 .confirm-modal[hidden],
+.file-conflict-modal[hidden],
 .app-modal[hidden] {
   display: none;
 }
 
 .confirm-modal,
+.file-conflict-modal,
 .app-modal {
   position: fixed;
   inset: 0;
@@ -16,11 +18,16 @@
   z-index: 40;
 }
 
+.file-conflict-modal {
+  z-index: 41;
+}
+
 .app-modal {
   z-index: 42;
 }
 
 .confirm-scrim,
+.file-conflict-scrim,
 .app-modal-scrim {
   position: fixed;
   inset: 0;
@@ -30,6 +37,7 @@
 }
 
 .confirm-card,
+.file-conflict-card,
 .app-modal-card {
   position: relative;
   z-index: 1;
@@ -52,11 +60,19 @@
   min-width: 0;
 }
 
+.file-conflict-card {
+  box-sizing: border-box;
+  width: min(460px, calc(100vw - 36px));
+  max-width: 100%;
+  min-width: 0;
+}
+
 .app-modal-card {
   width: min(460px, calc(100vw - 36px));
 }
 
 .confirm-modal.open .confirm-card,
+.file-conflict-modal.open .file-conflict-card,
 .app-modal.open .app-modal-card {
   transform: translateY(0) scale(1);
   opacity: 1;
@@ -64,6 +80,8 @@
 
 .confirm-card h3,
 .confirm-card p,
+.file-conflict-card h3,
+.file-conflict-card p,
 .app-modal-card h3,
 .app-modal-card p,
 .app-modal-card dl {
@@ -71,6 +89,7 @@
 }
 
 .confirm-card h3,
+.file-conflict-card h3,
 .app-modal-card h3 {
   color: #1f2933;
   font-size: 16px;
@@ -91,7 +110,43 @@
   word-break: break-word;
 }
 
+#file-conflict-message {
+  color: #53606f;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.file-conflict-target {
+  min-width: 0;
+  border: 1px solid #dce1e6;
+  border-radius: 5px;
+  background: #f5f7f9;
+  color: #53606f;
+  font-size: 11px;
+  overflow: hidden;
+  padding: 6px 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-conflict-remaining {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #2f3945;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.file-conflict-remaining input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+}
+
 .confirm-actions,
+.file-conflict-actions,
 .app-modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -99,6 +154,7 @@
 }
 
 .confirm-actions button,
+.file-conflict-actions button,
 .app-modal-actions button {
   min-height: 28px;
   border: 1px solid #495479;
@@ -111,18 +167,21 @@
 }
 
 .confirm-actions .secondary,
+.file-conflict-actions .secondary,
 .app-modal-actions .secondary {
   border-color: #b9c1ca;
   background: #fff;
   color: #2f3945;
 }
 
-.confirm-actions .danger {
+.confirm-actions .danger,
+.file-conflict-actions .danger {
   border-color: #a33d32;
   background: #a33d32;
 }
 
-.confirm-actions .danger:hover {
+.confirm-actions .danger:hover,
+.file-conflict-actions .danger:hover {
   background: #8b332a;
 }
 
