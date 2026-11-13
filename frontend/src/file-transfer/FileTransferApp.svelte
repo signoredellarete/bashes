@@ -831,56 +831,58 @@
 {/if}
 
 <div class="transfer-shell" class:busy class:dragging bind:this={transferShell}>
-  <div class="transfer-status">
-    <span>{status}</span>
-    <div class="transfer-status-actions">
-      {#if session}
-        <label class="transfer-hidden-toggle">
-          <input
-            type="checkbox"
-            checked={showHiddenFiles}
-            onchange={changeHiddenFileVisibility}
-            disabled={busy}
-          />
-          <span>Show hidden files</span>
-        </label>
-      {/if}
-      {#if busy}<strong>Working...</strong>{/if}
+  <div class="transfer-chrome">
+    <div class="transfer-status">
+      <span>{status}</span>
+      <div class="transfer-status-actions">
+        {#if session}
+          <label class="transfer-hidden-toggle">
+            <input
+              type="checkbox"
+              checked={showHiddenFiles}
+              onchange={changeHiddenFileVisibility}
+              disabled={busy}
+            />
+            <span>Show hidden files</span>
+          </label>
+        {/if}
+        {#if busy}<strong>Working...</strong>{/if}
+      </div>
     </div>
+    {#if error}
+      <div class="transfer-error" role="alert">
+        <span>{error}</span>
+        <button type="button" onclick={() => (error = '')} title="Dismiss error" aria-label="Dismiss error">&#10005;</button>
+      </div>
+    {/if}
+    {#if jobs.length}
+      <div class="transfer-jobs" aria-live="polite">
+        {#each jobs.slice(0, 3) as job (job.jobId)}
+          <article class:active={job.status === 'queued' || job.status === 'running'} class="transfer-job">
+            <div class="transfer-job-header">
+              <span>{job.status}</span>
+              <strong>{progressValue(job)}%</strong>
+            </div>
+            <div class="transfer-job-current" title={job.current || job.sourceIds?.[0] || job.sourcePaths?.[0] || job.targetId}>
+              {displayName(job.current || job.sourceIds?.[0] || job.sourcePaths?.[0] || job.targetId)}
+            </div>
+            <progress value={progressBarValue(job)} max={progressBarMax(job)}></progress>
+            <div class="transfer-job-footer">
+              <span>{formatBytes(job.transferredBytes)}{job.totalBytes ? ` / ${formatBytes(job.totalBytes)}` : ''} · {formatSpeed(job)}</span>
+              {#if job.status === 'queued' || job.status === 'running'}
+                <button type="button" disabled={cancelingJobIds.has(job.jobId)} onclick={() => cancelTransferJob(job)}>
+                  {cancelingJobIds.has(job.jobId) ? 'Canceling...' : 'Cancel'}
+                </button>
+              {:else}
+                {#if job.error}<span class="transfer-job-error" title={job.error}>{job.error}</span>{/if}
+                <button type="button" onclick={() => dismissJob(job.jobId)}>Close</button>
+              {/if}
+            </div>
+          </article>
+        {/each}
+      </div>
+    {/if}
   </div>
-  {#if error}
-    <div class="transfer-error" role="alert">
-      <span>{error}</span>
-      <button type="button" onclick={() => (error = '')} title="Dismiss error" aria-label="Dismiss error">&#10005;</button>
-    </div>
-  {/if}
-  {#if jobs.length}
-    <div class="transfer-jobs" aria-live="polite">
-      {#each jobs.slice(0, 3) as job (job.jobId)}
-        <article class:active={job.status === 'queued' || job.status === 'running'} class="transfer-job">
-          <div class="transfer-job-header">
-            <span>{job.status}</span>
-            <strong>{progressValue(job)}%</strong>
-          </div>
-          <div class="transfer-job-current" title={job.current || job.sourceIds?.[0] || job.sourcePaths?.[0] || job.targetId}>
-            {displayName(job.current || job.sourceIds?.[0] || job.sourcePaths?.[0] || job.targetId)}
-          </div>
-          <progress value={progressBarValue(job)} max={progressBarMax(job)}></progress>
-          <div class="transfer-job-footer">
-            <span>{formatBytes(job.transferredBytes)}{job.totalBytes ? ` / ${formatBytes(job.totalBytes)}` : ''} · {formatSpeed(job)}</span>
-            {#if job.status === 'queued' || job.status === 'running'}
-              <button type="button" disabled={cancelingJobIds.has(job.jobId)} onclick={() => cancelTransferJob(job)}>
-                {cancelingJobIds.has(job.jobId) ? 'Canceling...' : 'Cancel'}
-              </button>
-            {:else}
-              {#if job.error}<span class="transfer-job-error" title={job.error}>{job.error}</span>{/if}
-              <button type="button" onclick={() => dismissJob(job.jobId)}>Close</button>
-            {/if}
-          </div>
-        </article>
-      {/each}
-    </div>
-  {/if}
   {#if needsPassword && !session}
     <form class="transfer-auth" onsubmit={submitPassword}>
       <label>

@@ -339,7 +339,7 @@ app.innerHTML = `
   <div id="tunnel-panel-root" class="overlay-root"></div>
 
   <div id="settings-root" class="overlay-root"></div>
-  <div id="app-overlays-root" class="overlay-root"></div>
+  <div id="app-overlays-root" class="app-overlays-root"></div>
 
   <div id="file-transfer-shell-root" class="overlay-root"></div>
 

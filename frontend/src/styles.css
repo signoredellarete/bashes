@@ -1188,6 +1188,17 @@ html.sorting-tags * {
   display: contents;
 }
 
+.app-overlays-root {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  pointer-events: none;
+}
+
+.app-overlays-root > * {
+  pointer-events: auto;
+}
+
 #settings-panel .panel-scrim {
   border: 0;
   border-radius: 0;
@@ -1746,8 +1757,8 @@ html.sorting-tags * {
 }
 
 .transfer-shell {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   height: 100%;
   width: 100%;
   min-height: 0;
@@ -1756,9 +1767,14 @@ html.sorting-tags * {
   background: #f8fafb;
 }
 
+.transfer-chrome {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+}
+
 .transfer-status {
   display: flex;
-  flex: 0 0 auto;
   min-width: 0;
   align-items: center;
   justify-content: space-between;
@@ -1843,7 +1859,6 @@ html.sorting-tags * {
 
 .transfer-error {
   display: flex;
-  flex: 0 0 auto;
   min-width: 0;
   align-items: flex-start;
   justify-content: space-between;
@@ -1887,9 +1902,8 @@ html.sorting-tags * {
 .transfer-jobs {
   display: grid;
   box-sizing: border-box;
-  flex: 0 0 auto;
   gap: 6px;
-  max-height: min(240px, 40%);
+  max-height: 240px;
   overflow: auto;
   border-bottom: 1px solid #dce1e6;
   background: #eef3f5;
@@ -2040,8 +2054,7 @@ html.sorting-tags * {
 
 .transfer-manager {
   position: relative;
-  flex: 1 1 0;
-  height: auto;
+  height: 100%;
   width: 100%;
   min-width: 0;
   min-height: 0;
