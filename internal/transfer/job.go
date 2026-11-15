@@ -9,25 +9,28 @@ import (
 	"sync"
 	"time"
 
+	"github.com/signoredellarete/bashes/internal/apperrors"
 	runtimestate "github.com/signoredellarete/bashes/internal/runtime"
 )
 
 type JobInfo struct {
-	JobID            string   `json:"jobId"`
-	SessionID        string   `json:"sessionId"`
-	ResourceID       string   `json:"resourceId"`
-	SourceIDs        []string `json:"sourceIds,omitempty"`
-	SourcePaths      []string `json:"sourcePaths,omitempty"`
-	TargetID         string   `json:"targetId"`
-	Move             bool     `json:"move"`
-	Status           string   `json:"status"`
-	TotalBytes       int64    `json:"totalBytes"`
-	TransferredBytes int64    `json:"transferredBytes"`
-	Current          string   `json:"current,omitempty"`
-	Error            string   `json:"error,omitempty"`
-	Operation        string   `json:"operation,omitempty"`
-	StartedAt        string   `json:"startedAt,omitempty"`
-	FinishedAt       string   `json:"finishedAt,omitempty"`
+	JobID            string            `json:"jobId"`
+	SessionID        string            `json:"sessionId"`
+	ResourceID       string            `json:"resourceId"`
+	SourceIDs        []string          `json:"sourceIds,omitempty"`
+	SourcePaths      []string          `json:"sourcePaths,omitempty"`
+	TargetID         string            `json:"targetId"`
+	Move             bool              `json:"move"`
+	Status           string            `json:"status"`
+	TotalBytes       int64             `json:"totalBytes"`
+	TransferredBytes int64             `json:"transferredBytes"`
+	Current          string            `json:"current,omitempty"`
+	Error            string            `json:"error,omitempty"`
+	ErrorCode        string            `json:"errorCode,omitempty"`
+	ErrorDetails     map[string]string `json:"errorDetails,omitempty"`
+	Operation        string            `json:"operation,omitempty"`
+	StartedAt        string            `json:"startedAt,omitempty"`
+	FinishedAt       string            `json:"finishedAt,omitempty"`
 }
 
 type JobOptions struct {
@@ -217,6 +220,7 @@ func (job *Job) Snapshot() JobInfo {
 	info := job.info
 	info.SourceIDs = append([]string(nil), job.info.SourceIDs...)
 	info.SourcePaths = append([]string(nil), job.info.SourcePaths...)
+	info.ErrorDetails = cloneDetails(job.info.ErrorDetails)
 	return info
 }
 
@@ -237,6 +241,8 @@ func (job *Job) Finish(err error) {
 		case err == nil && info.Status != "canceled":
 			info.Status = "completed"
 			info.Error = ""
+			info.ErrorCode = ""
+			info.ErrorDetails = nil
 		case errors.Is(err, context.Canceled) || info.Status == "canceled":
 			info.Status = "canceled"
 			if info.Error == "" {
@@ -244,7 +250,15 @@ func (job *Job) Finish(err error) {
 			}
 		default:
 			info.Status = "failed"
-			info.Error = err.Error()
+			if payload, ok := apperrors.Decode(err); ok {
+				info.Error = payload.Message
+				info.ErrorCode = payload.Code
+				info.ErrorDetails = cloneDetails(payload.Details)
+			} else {
+				info.Error = err.Error()
+				info.ErrorCode = ""
+				info.ErrorDetails = nil
+			}
 		}
 	})
 	finishedStatus := job.Snapshot().Status
@@ -255,6 +269,17 @@ func (job *Job) Finish(err error) {
 	}
 	job.cancel()
 	job.doneOnce.Do(func() { close(job.done) })
+}
+
+func cloneDetails(source map[string]string) map[string]string {
+	if len(source) == 0 {
+		return nil
+	}
+	cloned := make(map[string]string, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func (job *Job) Cancel() {

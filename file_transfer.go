@@ -16,6 +16,7 @@ import (
 
 	"github.com/pkg/sftp"
 	"github.com/signoredellarete/bashes/internal/desktop"
+	filetransfercore "github.com/signoredellarete/bashes/internal/filetransfer"
 	"github.com/signoredellarete/bashes/internal/remotessh"
 	"github.com/signoredellarete/bashes/internal/transfer"
 	"golang.org/x/crypto/ssh"
@@ -226,7 +227,8 @@ func (a *App) ListFileTransferFiles(input FileTransferListInput) ([]FileTransfer
 	if err != nil {
 		return nil, err
 	}
-	return session.list(input.ID)
+	entries, err := session.list(input.ID)
+	return entries, filetransfercore.PresentError(err)
 }
 
 func (a *App) CreateFileTransferItem(input FileTransferCreateInput) (FileTransferEntry, error) {
@@ -234,7 +236,8 @@ func (a *App) CreateFileTransferItem(input FileTransferCreateInput) (FileTransfe
 	if err != nil {
 		return FileTransferEntry{}, err
 	}
-	return session.create(input)
+	entry, err := session.create(input)
+	return entry, filetransfercore.PresentError(err)
 }
 
 func (a *App) RenameFileTransferItem(input FileTransferRenameInput) (FileTransferEntry, error) {
@@ -242,7 +245,8 @@ func (a *App) RenameFileTransferItem(input FileTransferRenameInput) (FileTransfe
 	if err != nil {
 		return FileTransferEntry{}, err
 	}
-	return session.rename(input)
+	entry, err := session.rename(input)
+	return entry, filetransfercore.PresentError(err)
 }
 
 func (a *App) DeleteFileTransferItems(input FileTransferDeleteInput) error {
@@ -252,7 +256,7 @@ func (a *App) DeleteFileTransferItems(input FileTransferDeleteInput) error {
 	}
 	for _, id := range input.IDs {
 		if err := session.remove(id); err != nil {
-			return err
+			return filetransfercore.PresentError(err)
 		}
 	}
 	return nil
@@ -263,7 +267,8 @@ func (a *App) CheckFileTransferCopyConflicts(input FileTransferCopyInput) ([]Fil
 	if err != nil {
 		return nil, err
 	}
-	return session.copyConflicts(input)
+	conflicts, err := session.copyConflicts(input)
+	return conflicts, filetransfercore.PresentError(err)
 }
 
 func (a *App) CheckFileTransferUploadConflicts(input FileTransferUploadInput) ([]FileTransferConflict, error) {
@@ -271,7 +276,8 @@ func (a *App) CheckFileTransferUploadConflicts(input FileTransferUploadInput) ([
 	if err != nil {
 		return nil, err
 	}
-	return session.uploadConflicts(input)
+	conflicts, err := session.uploadConflicts(input)
+	return conflicts, filetransfercore.PresentError(err)
 }
 
 func (a *App) CopyFileTransferItems(input FileTransferCopyInput) error {
@@ -281,7 +287,7 @@ func (a *App) CopyFileTransferItems(input FileTransferCopyInput) error {
 	}
 	for _, id := range input.IDs {
 		if err := session.copy(id, input.TargetID, input.Move); err != nil {
-			return err
+			return filetransfercore.PresentError(err)
 		}
 	}
 	return nil
@@ -513,7 +519,7 @@ func (a *App) runFileTransferOpenJob(ctx context.Context, session *fileTransferS
 }
 
 func (a *App) finishFileTransferJob(job *transfer.Job, err error) {
-	job.Finish(err)
+	job.Finish(filetransfercore.PresentError(err))
 	a.emitFileTransferJob(job, true)
 	a.transferJobs.PruneFinished(job.Snapshot().ResourceID, 16)
 }
@@ -1069,17 +1075,13 @@ func (s *fileTransferSession) replacePath(scope, temporaryRel, targetRel string)
 		path.Dir(targetRel),
 		fmt.Sprintf(".%s.bashes-replaced-%d", path.Base(targetRel), now().UnixNano()),
 	)
-	if err := s.renamePath(scope, targetRel, backupRel); err != nil {
-		return fmt.Errorf("stage existing destination: %w", err)
-	}
-	if err := s.renamePath(scope, temporaryRel, targetRel); err != nil {
-		if restoreErr := s.renamePath(scope, backupRel, targetRel); restoreErr != nil {
-			return fmt.Errorf("replace destination: %w; restore original: %v", err, restoreErr)
-		}
-		return fmt.Errorf("replace destination: %w", err)
-	}
-	_ = s.removeUnlocked(scope, backupRel)
-	return nil
+	return filetransfercore.ReplaceWithBackup(
+		temporaryRel,
+		targetRel,
+		backupRel,
+		func(oldRel, newRel string) error { return s.renamePath(scope, oldRel, newRel) },
+		func(rel string) error { return s.removeUnlocked(scope, rel) },
+	)
 }
 
 func conflictAction(actions map[string]string, scope, targetRel string) string {

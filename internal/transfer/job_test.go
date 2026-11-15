@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/signoredellarete/bashes/internal/apperrors"
 	runtimestate "github.com/signoredellarete/bashes/internal/runtime"
 )
 
@@ -44,6 +45,24 @@ func TestJobFinishRecordsTerminalStateAndClosesDone(t *testing.T) {
 	}
 	if !errors.Is(ctx.Err(), context.Canceled) {
 		t.Fatalf("context error = %v, want canceled", ctx.Err())
+	}
+}
+
+func TestJobFinishExposesStructuredErrorWithoutEncodedPayload(t *testing.T) {
+	manager := NewManager()
+	job, _, err := manager.Start(JobOptions{Info: testJobInfo("one", "session-1", "host-1")})
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	job.Finish(apperrors.New("file_transfer_permission_denied", "Permission was denied.", map[string]string{"reason": "remote"}))
+
+	info := job.Snapshot()
+	if info.Error != "Permission was denied." || info.ErrorCode != "file_transfer_permission_denied" || info.ErrorDetails["reason"] != "remote" {
+		t.Fatalf("Snapshot() = %+v", info)
+	}
+	info.ErrorDetails["reason"] = "mutated"
+	if job.Snapshot().ErrorDetails["reason"] != "remote" {
+		t.Fatal("Snapshot() leaked the job error details map")
 	}
 }
 

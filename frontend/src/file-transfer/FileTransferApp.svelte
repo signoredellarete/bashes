@@ -2,7 +2,7 @@
   import { onDestroy, onMount } from 'svelte';
 	import { Filemanager, WillowDark, getMenuOptions } from '@svar-ui/svelte-filemanager';
 	import { onRuntimeEvent, RUNTIME_EVENT } from '../api/runtime.js';
-	import { isAuthError, isCredentialStoreError, isHostKeyMismatchError, isUnknownHostKeyError } from '../ssh-errors.js';
+	import { isAuthError, isCredentialStoreError, isHostKeyMismatchError, isUnknownHostKeyError, parseCodedError } from '../ssh-errors.js';
 	import { visibleFileEntries } from './file-visibility.js';
 	import { resolveConflictActions } from './conflict-policy.js';
 	import { normalizeRemoteStartId, remotePathChain } from './remote-path.js';
@@ -105,7 +105,7 @@
       await loadJobs();
       await loadInitial();
     } catch (err) {
-      const message = String(err?.message ?? err);
+      const message = errorMessage(err);
       if (isCredentialStoreError(message)) {
         showPasswordPrompt('Could not access the system keyring. Enter the password and leave the save option disabled.');
       } else if (isAuthError(message)) {
@@ -149,7 +149,7 @@
     cleanupDragEvents = setupDragAndDrop();
     setupDraggableItems();
     void loadInitial().catch((err) => {
-      error = String(err?.message ?? err);
+      error = errorMessage(err);
     });
   }
 
@@ -318,10 +318,14 @@
     try {
       await operation();
     } catch (err) {
-      error = String(err?.message ?? err);
+      error = errorMessage(err);
     } finally {
       busy = false;
     }
+  }
+
+  function errorMessage(value) {
+    return parseCodedError(value)?.message ?? String(value?.message ?? value ?? 'File transfer failed.');
   }
 
   async function startCopyWithConflictPolicy(ids, targetId, move) {
@@ -405,7 +409,7 @@
 		try {
 			await dismissBackendJob(jobId);
 		} catch (err) {
-			error = String(err?.message ?? err);
+			error = errorMessage(err);
 			return;
 		}
 		jobs = jobs.filter((job) => job.jobId !== jobId);
@@ -449,7 +453,7 @@
       const next = new Set(cancelingJobIds);
       next.delete(job.jobId);
       cancelingJobIds = next;
-      error = String(err?.message ?? err);
+      error = errorMessage(err);
     }
   }
 
