@@ -27,8 +27,5 @@ export function createAppState({ terminalSettings, storage = globalThis.localSto
     messageLog: [],
     sessions: new Map(),
     pendingSSHOutput: new Map(),
-    fileTransferWorkspaces: new Map(),
-    backgroundFileTransferResourceIds: new Set(),
-    activeFileTransferResourceId: null,
   };
 }

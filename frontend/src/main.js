@@ -115,6 +115,7 @@ import {
 } from './ssh-keys/model.js';
 import { mountSSHKeysPanel } from './ssh-keys/mount.js';
 import { mountFileTransferShell } from './file-transfer/shell-mount.js';
+import { createFileTransferWorkspaceController } from './file-transfer/workspace-controller.js';
 import { mountWebAppAuthPanel } from './web-apps/auth-mount.js';
 import { webAppAuthPanelData } from './web-apps/auth-model.js';
 import { mountWebAppPanel } from './web-apps/panel-mount.js';
@@ -365,9 +366,10 @@ const settingsPanel = mountSettingsPanel(document.querySelector('#settings-root'
   onsave: (values) => submitSettings(values),
   onrequestclose: () => closeSettingsPanel(),
 });
+let fileTransferWorkspaces;
 const fileTransferShell = mountFileTransferShell(document.querySelector('#file-transfer-shell-root'), {
-  onrequestclose: () => closeFileTransferModal(),
-  onbackground: () => backgroundFileTransferModal(),
+  onrequestclose: () => fileTransferWorkspaces?.requestClose(),
+  onbackground: () => fileTransferWorkspaces?.background(),
 });
 const appOverlays = mountAppOverlays(document.querySelector('#app-overlays-root'), {
   onclosed: () => restoreTerminalFocusAfterOverlay(),
@@ -380,6 +382,35 @@ const editContextMenu = createEditContextMenu({
   writeClipboard,
 });
 const dragOutline = createDragOutlineController({ delay: 300 });
+fileTransferWorkspaces = createFileTransferWorkspaceController({
+  shell: fileTransferShell,
+  createElement: (resource) => {
+    const element = document.createElement('div');
+    element.className = 'file-transfer-workspace';
+    element.dataset.resourceId = resource.id;
+    return element;
+  },
+  mountWorkspace: async (element, resource, callbacks) => {
+    const { mountFileTransfer } = await import('./file-transfer/mount.js');
+    return mountFileTransfer(element, {
+      resource,
+      onconfirmcancel: callbacks.confirmCancellation,
+      onresolveconflict: callbacks.resolveConflict,
+    });
+  },
+  confirmBackground: () => openConfirmModal({
+    kicker: 'File Transfer',
+    title: 'Transfer in progress',
+    message: 'A file transfer is still running. Keep it running in the background?',
+    confirmLabel: 'Run in background',
+    danger: false,
+  }),
+  confirmCancellation: (job) => confirmFileTransferCancellation(job),
+  resolveConflict: (conflict, index, total) => appOverlays.fileConflict({ ...conflict, index, total }),
+  notify: (message) => writeNotice(message),
+  restoreFocus: () => restoreTerminalFocusAfterOverlay(),
+  onIndicatorChange: (indicator) => renderFileTransferBackgroundIndicator(indicator),
+});
 const tagPanel = mountTagPanel(document.querySelector('#tag-panel-root'), {
   oncreate: (name) => createManagedTag(name),
   onrename: (tag, name) => renameManagedTag(tag, name),
@@ -1850,40 +1881,11 @@ async function openFileTransferModal() {
   const selected = findResource(state.selectedId)?.resource;
   if (!selected) return;
   if (isLocalResource(selected)) return;
-
-  const root = fileTransferShell.workspaceRoot();
-  if (!root) return;
-  fileTransferShell.open(`${selected.user}@${selected.ip || selected.hostname}:${selected.port}`);
-
-  let workspace = state.fileTransferWorkspaces.get(selected.id);
-  if (!workspace) {
-    const { mountFileTransfer } = await import('./file-transfer/mount.js');
-    const element = document.createElement('div');
-    element.className = 'file-transfer-workspace';
-    element.dataset.resourceId = selected.id;
-    element.addEventListener('bashes-file-transfer-active', (event) => {
-      workspace.active = Boolean(event.detail?.active);
-      renderFileTransferBackgroundIndicator();
-    });
-    root.append(element);
-    workspace = {
-      active: false,
-      element,
-      resource: selected,
-      unmount: mountFileTransfer(element, {
-        resource: selected,
-        onconfirmcancel: (job) => confirmFileTransferCancellation(job),
-        onresolveconflict: (conflict, index, total) => appOverlays.fileConflict({
-          ...conflict,
-          index,
-          total,
-        }),
-      }),
-    };
-    state.fileTransferWorkspaces.set(selected.id, workspace);
+  try {
+    await fileTransferWorkspaces.open(selected);
+  } catch (error) {
+    writeNotice(`Could not open Files: ${errorDetail(error)}`, 'error');
   }
-
-  showFileTransferWorkspace(selected.id);
 }
 
 function confirmFileTransferCancellation(job) {
@@ -1899,84 +1901,17 @@ function confirmFileTransferCancellation(job) {
   });
 }
 
-async function closeFileTransferModal() {
-  const workspace = state.fileTransferWorkspaces.get(state.activeFileTransferResourceId);
-  if (workspace?.active) {
-    const keepRunning = await openConfirmModal({
-      kicker: 'File Transfer',
-      title: 'Transfer in progress',
-      message: 'A file transfer is still running. Keep it running in the background?',
-      confirmLabel: 'Run in background',
-      danger: false,
-    });
-    if (!keepRunning) return;
-    backgroundFileTransferModal();
-    writeNotice('File transfer continues in background.');
-    return;
-  }
-  if (workspace) destroyFileTransferWorkspace(state.activeFileTransferResourceId);
-  hideFileTransferModal();
-}
-
-function backgroundFileTransferModal() {
-  if (state.activeFileTransferResourceId) {
-    state.backgroundFileTransferResourceIds.add(state.activeFileTransferResourceId);
-  }
-  hideFileTransferModal();
-  renderFileTransferBackgroundIndicator();
-}
-
-function hideFileTransferModal() {
-  fileTransferShell.hide();
-  restoreTerminalFocusAfterOverlay();
-}
-
-function showFileTransferWorkspace(resourceId) {
-  for (const [id, workspace] of state.fileTransferWorkspaces) {
-    workspace.element.hidden = id !== resourceId;
-  }
-  state.activeFileTransferResourceId = resourceId;
-  state.backgroundFileTransferResourceIds.delete(resourceId);
-  renderFileTransferBackgroundIndicator();
-}
-
-function destroyFileTransferWorkspace(resourceId) {
-  if (!resourceId) return;
-  const workspace = state.fileTransferWorkspaces.get(resourceId);
-  if (!workspace) return;
-  workspace.unmount();
-  workspace.element.remove();
-  state.fileTransferWorkspaces.delete(resourceId);
-  state.backgroundFileTransferResourceIds.delete(resourceId);
-  if (state.activeFileTransferResourceId === resourceId) {
-    state.activeFileTransferResourceId = null;
-  }
-  renderFileTransferBackgroundIndicator();
-}
-
-function renderFileTransferBackgroundIndicator() {
+function renderFileTransferBackgroundIndicator({ backgrounded = false, active = false } = {}) {
   const button = document.querySelector('#open-file-transfer');
   if (!button) return;
-
-  const backgrounded = state.backgroundFileTransferResourceIds.size > 0;
-  const transferActive = [...state.backgroundFileTransferResourceIds].some(
-    (resourceId) => state.fileTransferWorkspaces.get(resourceId)?.active,
-  );
-  const label = transferActive
+  const label = active
     ? 'File transfer running in background'
     : backgrounded ? 'Files in background' : 'Files';
 
   button.classList.toggle('file-transfer-backgrounded', backgrounded);
-  button.classList.toggle('file-transfer-running', transferActive);
+  button.classList.toggle('file-transfer-running', active);
   button.title = label;
   button.setAttribute('aria-label', label);
-}
-
-function closeAllFileTransferWorkspaces() {
-  for (const resourceId of [...state.fileTransferWorkspaces.keys()]) {
-    destroyFileTransferWorkspace(resourceId);
-  }
-  hideFileTransferModal();
 }
 
 function renderSelection() {
@@ -2762,7 +2697,7 @@ function registerAppEvents() {
   });
   onRuntimeEvent(RUNTIME_EVENT.databaseImported, async (event) => {
     clearAllSessionsFromUI();
-    closeAllFileTransferWorkspaces();
+    fileTransferWorkspaces.closeAll();
     state.selectedId = null;
     await refreshHosts();
     await loadTunnels();
