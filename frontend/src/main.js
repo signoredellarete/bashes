@@ -53,7 +53,7 @@ import { mountAppOverlays } from './app/overlays/mount.js';
 import { mountResourcePanel } from './resources/mount.js';
 import { resourcePanelData } from './resources/panel-model.js';
 import { mountSettingsPanel } from './settings/mount.js';
-import { settingsPanelData as createSettingsPanelData } from './settings/model.js';
+import { createSettingsController } from './settings/controller.js';
 import { mountTagPanel } from './tags/mount.js';
 import { mountTagFilters } from './tags/filters-mount.js';
 import { tagFilterData } from './tags/filter-model.js';
@@ -77,16 +77,11 @@ import {
   sessionsForResource as sessionsForResourceFromState,
 } from './session-state.js';
 import {
-  clampNumber,
-  DEFAULT_TERMINAL_FONT_FAMILY,
-  DEFAULT_TERMINAL_FONT_SIZE,
-  DEFAULT_TERMINAL_SCROLLBACK,
   MAX_TERMINAL_FONT_SIZE,
   MIN_TERMINAL_FONT_SIZE,
   TERMINAL_FONT_FAMILY_OPTIONS,
   loadTerminalSettings,
   persistTerminalSettings,
-  terminalAppearancePreview,
 } from './terminal-settings.js';
 import { revealSidebarResource, sidebarListInset } from './sidebar-scroll.js';
 import { loadTunnelPreference, saveTunnelPreference } from './tunnel-preferences.js';
@@ -363,10 +358,11 @@ app.innerHTML = `
   </div>
 `;
 
+let settingsController;
 const settingsPanel = mountSettingsPanel(document.querySelector('#settings-root'), {
-  onpreview: (values) => previewTerminalAppearance(values),
-  onsave: (values) => submitSettings(values),
-  onrequestclose: () => closeSettingsPanel(),
+  onpreview: (values) => settingsController?.preview(values),
+  onsave: (values) => settingsController?.submit(values),
+  onrequestclose: () => settingsController?.close(),
 });
 let fileTransferWorkspaces;
 const fileTransferShell = mountFileTransferShell(document.querySelector('#file-transfer-shell-root'), {
@@ -514,6 +510,35 @@ const terminalController = createTerminalController({
   reconnectSession: (sessionId) => reconnectClosedSession(sessionId),
   inputError: (kind, error) => writeNotice(`${terminalKindLabel(kind)} input error: ${error?.message ?? error}`),
 });
+settingsController = createSettingsController({
+  state,
+  panel: settingsPanel,
+  fontOptions: TERMINAL_FONT_FAMILY_OPTIONS,
+  limits: { min: MIN_TERMINAL_FONT_SIZE, max: MAX_TERMINAL_FONT_SIZE },
+  loadBrowserSettings: () => loadWebAppBrowserSettings(),
+  getPluginInventory: () => apiGetPluginInventory(),
+  saveBrowserSettings: (settings) => apiSaveWebAppBrowserSettings(settings),
+  setPluginEnabled: (id, enabled) => apiSetPluginEnabled(id, enabled),
+  confirmPluginEnable: (plugins) => {
+    const permissions = [...new Set(plugins.flatMap((plugin) => plugin.permissions ?? []))];
+    return openConfirmModal({
+      kicker: 'Plugins',
+      title: `Enable ${plugins.length === 1 ? plugins[0].name : `${plugins.length} plugins`}?`,
+      message: `Plugins are native programs and are not sandboxed.${permissions.length ? ` Requested permissions: ${permissions.join(', ')}.` : ''}`,
+      confirmLabel: 'Enable',
+      danger: false,
+    });
+  },
+  persistTerminalSettings: (settings) => persistTerminalSettings(localStorage, settings),
+  applyTerminalSettings: (settings, { focus = true } = {}) => {
+    terminalController.applySettings(settings);
+    scheduleTerminalFit();
+    if (focus) focusActiveTerminal();
+  },
+  restoreFocus: () => restoreTerminalFocusAfterOverlay(),
+  notifyError: (message) => writeNotice(message, 'error'),
+  notifySuccess: (message) => writeNotice(message),
+});
 
 window.addEventListener('resize', () => {
   scheduleTerminalFit();
@@ -566,8 +591,8 @@ document.querySelector('#connect').addEventListener('click', () => {
 document.querySelector('#disconnect').addEventListener('click', () => disconnectActiveSession());
 document.querySelector('#delete-resource').addEventListener('click', () => deleteSelectedResource());
 document.querySelector('#message-log-button').addEventListener('click', () => showMessageLog());
-document.querySelector('#decrease-terminal-font').addEventListener('click', () => adjustTerminalFontSize(-1));
-document.querySelector('#increase-terminal-font').addEventListener('click', () => adjustTerminalFontSize(1));
+document.querySelector('#decrease-terminal-font').addEventListener('click', () => settingsController.adjustFontSize(-1));
+document.querySelector('#increase-terminal-font').addEventListener('click', () => settingsController.adjustFontSize(1));
 fieldHelp.bind(document.querySelectorAll('.field-help-trigger'));
 document.querySelector('#edit-context-menu').addEventListener('click', (event) => editContextMenu.run(event));
 document.addEventListener('contextmenu', (event) => editContextMenu.open(event));
@@ -587,8 +612,8 @@ window.addEventListener('keydown', (event) => {
     resolveConfirmModal(false);
   } else if (event.key === 'Escape' && appOverlays.isAppOpen()) {
     closeAppModal();
-  } else if (event.key === 'Escape' && !document.querySelector('#settings-panel').hidden) {
-    closeSettingsPanel();
+  } else if (event.key === 'Escape' && settingsPanel.isOpen()) {
+    settingsController.close();
   } else if (event.key === 'Escape' && tagPanel.isOpen()) {
     closeTagPanel();
   } else if (event.key === 'Escape') {
@@ -2494,136 +2519,6 @@ async function runAutomaticUpdateCheck() {
   }
 }
 
-async function openSettingsPanel() {
-  try {
-    await Promise.all([loadWebAppBrowserSettings(), loadPluginInventory()]);
-  } catch (error) {
-    writeNotice(`Could not load settings: ${errorDetail(error)}`, 'error');
-  }
-  await settingsPanel.open(settingsPanelData());
-}
-
-function closeSettingsPanel({ restoreTerminalSettings = true } = {}) {
-  if (restoreTerminalSettings) applyTerminalSettings(state, { focus: false });
-  settingsPanel.close();
-  restoreTerminalFocusAfterOverlay();
-}
-
-function renderSettingsForm() {
-  settingsPanel.update(settingsPanelData());
-}
-
-function settingsPanelData() {
-  return createSettingsPanelData(state, TERMINAL_FONT_FAMILY_OPTIONS, {
-    min: MIN_TERMINAL_FONT_SIZE,
-    max: MAX_TERMINAL_FONT_SIZE,
-  });
-}
-
-async function submitSettings(values) {
-  if (!await applyPluginSettings(values.plugins)) return false;
-  state.terminalFontSize = clampNumber(
-    values.terminalFontSize,
-    MIN_TERMINAL_FONT_SIZE,
-    MAX_TERMINAL_FONT_SIZE,
-    DEFAULT_TERMINAL_FONT_SIZE,
-  );
-  state.terminalScrollback = clampNumber(values.terminalScrollback, 1000, 500000, DEFAULT_TERMINAL_SCROLLBACK);
-  state.terminalFontFamily = values.terminalFontFamily || DEFAULT_TERMINAL_FONT_FAMILY;
-  state.terminalCopyOnSelect = values.terminalCopyOnSelect;
-  try {
-    state.webAppBrowserSettings = await apiSaveWebAppBrowserSettings({
-      preferredBrowserId: values.webAppBrowser,
-      customBrowserPath: values.customBrowserPath.trim(),
-    });
-  } catch (error) {
-    writeNotice(`Could not save browser settings: ${errorDetail(error)}`, 'error');
-    return false;
-  }
-  saveTerminalSettings();
-  applyTerminalSettings();
-  writeNotice('Settings saved.');
-  closeSettingsPanel({ restoreTerminalSettings: false });
-  return true;
-}
-
-async function loadPluginInventory() {
-  state.pluginInventory = await apiGetPluginInventory();
-}
-
-async function applyPluginSettings(requested = []) {
-  const current = new Map((state.pluginInventory.plugins ?? []).map((plugin) => [plugin.id, plugin]));
-  const changes = requested.filter((plugin) => current.get(plugin.id)?.enabled !== plugin.enabled);
-  const enabling = changes.filter((plugin) => plugin.enabled);
-  if (enabling.length > 0) {
-    const permissions = [...new Set(enabling.flatMap((plugin) => plugin.permissions ?? []))];
-    const approved = await openConfirmModal({
-      kicker: 'Plugins',
-      title: `Enable ${enabling.length === 1 ? enabling[0].name : `${enabling.length} plugins`}?`,
-      message: `Plugins are native programs and are not sandboxed.${permissions.length ? ` Requested permissions: ${permissions.join(', ')}.` : ''}`,
-      confirmLabel: 'Enable',
-      danger: false,
-    });
-    if (!approved) return false;
-  }
-
-  const applied = [];
-  try {
-    for (const plugin of changes) {
-      await apiSetPluginEnabled(plugin.id, plugin.enabled);
-      applied.push({ id: plugin.id, enabled: !plugin.enabled });
-    }
-    await loadPluginInventory();
-    return true;
-  } catch (error) {
-    for (const plugin of applied.reverse()) {
-      try {
-        await apiSetPluginEnabled(plugin.id, plugin.enabled);
-      } catch {
-        // The inventory reload below reports any rollback failure explicitly.
-      }
-    }
-    try {
-      await loadPluginInventory();
-    } catch {
-      // Preserve the original plugin settings error.
-    }
-    writeNotice(`Could not save plugin settings: ${errorDetail(error)}`, 'error');
-    return false;
-  }
-}
-
-function previewTerminalAppearance(values) {
-  const preview = terminalAppearancePreview(
-    state,
-    values.terminalFontSize,
-    values.terminalFontFamily,
-  );
-  applyTerminalSettings(preview, { focus: false });
-}
-
-function applyTerminalSettings(settings = state, { focus = true } = {}) {
-  terminalController.applySettings(settings);
-  scheduleTerminalFit();
-  if (focus) focusActiveTerminal();
-}
-
-function saveTerminalSettings() {
-	persistTerminalSettings(localStorage, state);
-}
-
-function adjustTerminalFontSize(delta) {
-  state.terminalFontSize = clampNumber(
-    state.terminalFontSize + delta,
-    MIN_TERMINAL_FONT_SIZE,
-    MAX_TERMINAL_FONT_SIZE,
-    DEFAULT_TERMINAL_FONT_SIZE,
-  );
-  saveTerminalSettings();
-  applyTerminalSettings();
-  if (settingsPanel.isOpen()) renderSettingsForm();
-}
-
 function focusActiveTerminal() {
   terminalController.focusActive();
 }
@@ -2763,7 +2658,7 @@ function registerAppEvents() {
     showHostsFileImportPreview(event);
   });
   onRuntimeEvent(RUNTIME_EVENT.openSettings, () => {
-    openSettingsPanel();
+    settingsController.open();
   });
   onRuntimeEvent(RUNTIME_EVENT.openSSHKeys, () => {
     openKeysPanel({ allowInstall: false });
