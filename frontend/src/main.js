@@ -122,6 +122,7 @@ import { createEditContextMenu } from './ui/edit-context-menu.js';
 import { createFieldHelpController } from './ui/field-help.js';
 import { createTooltipController } from './ui/tooltip.js';
 import { createMessageCenter } from './messages/controller.js';
+import { createUpdateController } from './updates/controller.js';
 import './terminal-fonts.css';
 import './styles.css';
 import './terminal/workspace.css';
@@ -379,6 +380,12 @@ const messageCenter = createMessageCenter({
   showLog: (options) => showAppModal(options),
 });
 const writeNotice = (message, level = '') => messageCenter.write(message, level);
+const updateController = createUpdateController({
+  checkForUpdate: () => apiCheckForUpdate(),
+  storage: localStorage,
+  showModal: (options) => showAppModal(options),
+  openURL: (url) => openExternalURL(url),
+});
 const tooltip = createTooltipController({ element: document.querySelector('#app-tooltip') });
 const fieldHelp = createFieldHelpController();
 const editContextMenu = createEditContextMenu({
@@ -636,7 +643,7 @@ await loadKeySettings();
 await loadKeys();
 await loadTunnels();
 applySidebarState();
-schedulePeriodicUpdateCheck();
+updateController.schedule();
 window.setTimeout(() => {
   openInitialLocalSession().catch((error) => {
     writeNotice(`Could not initialize local terminal UI: ${error?.message ?? error}`, 'error');
@@ -2500,32 +2507,6 @@ async function withConnectionBusy(resourceID, task) {
   }
 }
 
-function schedulePeriodicUpdateCheck() {
-  const startupDelayMs = 1200;
-  const periodicIntervalMs = 6 * 60 * 60 * 1000;
-  window.setTimeout(runAutomaticUpdateCheck, startupDelayMs);
-  window.setInterval(runAutomaticUpdateCheck, periodicIntervalMs);
-}
-
-async function runAutomaticUpdateCheck() {
-  try {
-    const info = await apiCheckForUpdate();
-    localStorage.setItem('bashes.updateCheck.lastAt', String(Date.now()));
-    if (!info?.updateAvailable) return;
-
-    const latestVersion = String(info.latestVersion ?? '').trim();
-    const notifiedVersion = localStorage.getItem('bashes.updateCheck.notifiedLatest');
-    if (latestVersion && notifiedVersion === latestVersion) return;
-
-    showUpdateModal(info, false);
-    if (latestVersion) {
-      localStorage.setItem('bashes.updateCheck.notifiedLatest', latestVersion);
-    }
-  } catch {
-    // Keep update failures silent and retry at the next scheduled check.
-  }
-}
-
 function focusActiveTerminal() {
   terminalController.focusActive();
 }
@@ -2624,10 +2605,10 @@ function registerAppEvents() {
   onRuntimeEvent(RUNTIME_EVENT.openAbout, (info) => showAboutModal(info));
   onRuntimeEvent(RUNTIME_EVENT.updateCheck, (event) => {
     if (event?.error) {
-      showUpdateErrorModal(event.error);
+      updateController.showError(event.error);
       return;
     }
-    if (event?.info) showUpdateModal(event.info, Boolean(event.manual));
+    if (event?.info) updateController.show(event.info, Boolean(event.manual));
   });
 }
 
@@ -2694,35 +2675,6 @@ function showAboutModal(info) {
     primaryAction: () => openExternalURL(appInfo.readmeUrl ?? 'https://github.com/signoredellarete/bashes#readme'),
     secondaryLabel: 'Releases',
     secondaryAction: () => openExternalURL(appInfo.releasesUrl ?? 'https://github.com/signoredellarete/bashes/releases'),
-  });
-}
-
-function showUpdateModal(info, manual = false) {
-  if (!info) return;
-  if (!info.updateAvailable && !manual) return;
-  showAppModal({
-    kicker: 'Updates',
-    title: info.updateAvailable ? 'Update Available' : 'Bashes Is Up To Date',
-    message: info.message ?? '',
-    details: [
-      ['Current version', info.currentVersion ?? 'dev'],
-      ['Latest version', info.latestVersion ?? 'unknown'],
-    ],
-    primaryLabel: info.updateAvailable ? 'Open Releases' : 'OK',
-    primaryAction: info.updateAvailable ? () => openExternalURL(info.releaseUrl ?? info.repoUrl) : null,
-    secondaryLabel: info.updateAvailable ? 'Repository' : '',
-    secondaryAction: info.updateAvailable ? () => openExternalURL(info.repoUrl) : null,
-  });
-}
-
-function showUpdateErrorModal(message) {
-  showAppModal({
-    kicker: 'Updates',
-    title: 'Could Not Check Updates',
-    message,
-    primaryLabel: 'Repository',
-    primaryAction: () => openExternalURL('https://github.com/signoredellarete/bashes'),
-    secondaryLabel: 'OK',
   });
 }
 
