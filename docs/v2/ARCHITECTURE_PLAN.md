@@ -101,12 +101,15 @@ Status on 2026-11-16 for branch `feature/v2-modular-architecture`:
 - frontend application state and the hierarchical resource model are isolated
   from DOM rendering and covered by unit tests;
 - the complete Settings panel is mounted as a Svelte feature with a tested pure
-  model; terminal preview, cancel rollback and browser preferences keep their
-  existing application contracts;
+  model and workflow controller; terminal preview, cancel rollback, browser
+  preferences and plugin authorization keep explicit application contracts;
 - shared confirmation and application-message overlays are mounted as one
   Svelte feature while preserving focus restoration, Escape handling and the
   existing modal call sites; error notifications and their lifecycle now use
   the same feature, with overlay styles isolated in one feature stylesheet;
+- message history, update scheduling, desktop menu actions, runtime event
+  routing and global/per-resource busy state have independent tested
+  controllers instead of sharing mutable bootstrap state;
 - the Tag Manager panel owns its rendering and local edit state in Svelte;
   backend tag mutations and global filtering remain explicit application
   callbacks backed by a tested panel model;
@@ -121,6 +124,8 @@ Status on 2026-11-16 for branch `feature/v2-modular-architecture`:
 - the terminal tab strip is rendered by a tested Svelte view model and uses a
   dedicated SortableJS controller; a separate terminal controller owns xterm
   creation, input, clipboard, key repeat, disposal, focus, fit and PTY resize;
+- SSH output decoding and bounded pre-terminal buffering are owned by the
+  terminal feature, including deterministic flush and cleanup behavior;
 - SSH key inventory, search, source diagnostics, generation, import, private-key
   viewing and remote installation share one tested Svelte panel model while
   native key operations and confirmation policy remain application callbacks;
