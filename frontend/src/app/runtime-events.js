@@ -4,6 +4,7 @@ export function registerRuntimeEvents({
   state,
   decodeSSHOutput,
   writeSSHOutput,
+  discardSSHOutput,
   markSessionClosed,
   renderHosts,
   renderTunnelStatus,
@@ -29,7 +30,7 @@ export function registerRuntimeEvents({
   });
   on(events.sshClosed, (event) => {
     if (!state.sessions.has(event.sessionId)) {
-      state.pendingSSHOutput.delete(event.sessionId);
+      discardSSHOutput(event.sessionId);
       return;
     }
     markSessionClosed(event.sessionId, event?.message);

@@ -10,12 +10,12 @@ function harness() {
     openSettings: 'open-settings', openSSHKeys: 'open-keys', openAbout: 'open-about', updateCheck: 'update-check',
   };
   const state = {
-    sessions: new Map(), pendingSSHOutput: new Map(), tunnels: new Map(),
+    sessions: new Map(), tunnels: new Map(),
     webAppRuntimes: new Map(), selectedId: 'host-1',
   };
   const dependencies = {
     on: (name, handler) => handlers.set(name, handler), events, state,
-    decodeSSHOutput: vi.fn(() => new Uint8Array([1])), writeSSHOutput: vi.fn(), markSessionClosed: vi.fn(),
+    decodeSSHOutput: vi.fn(() => new Uint8Array([1])), writeSSHOutput: vi.fn(), discardSSHOutput: vi.fn(), markSessionClosed: vi.fn(),
     renderHosts: vi.fn(), renderTunnelStatus: vi.fn(), renderSelection: vi.fn(), writeNotice: vi.fn(),
     clearSessions: vi.fn(), closeFileTransfers: vi.fn(), refreshHosts: vi.fn(), loadTunnels: vi.fn(),
     restoreFocus: vi.fn(), showHostsFilePreview: vi.fn(), openSettings: vi.fn(), openSSHKeys: vi.fn(),
@@ -48,9 +48,8 @@ describe('runtime event registration', () => {
 
   it('drops buffered output for an already removed session', () => {
     const test = harness();
-    test.state.pendingSSHOutput.set('session-1', ['pending']);
     test.handlers.get(test.events.sshClosed)({ sessionId: 'session-1' });
-    expect(test.state.pendingSSHOutput.has('session-1')).toBe(false);
+    expect(test.dependencies.discardSSHOutput).toHaveBeenCalledWith('session-1');
     expect(test.dependencies.markSessionClosed).not.toHaveBeenCalled();
   });
 });

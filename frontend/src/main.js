@@ -91,6 +91,7 @@ import { terminalTabsData, terminalKindLabel } from './terminal-tabs/model.js';
 import { mountTerminalTabs } from './terminal-tabs/mount.js';
 import { createTerminalTabSorting } from './terminal-tabs/sorting.js';
 import { createTerminalController } from './terminal/controller.js';
+import { createTerminalOutputBuffer } from './terminal/output-buffer.js';
 import {
   canonicalTag,
   mergeTagCatalog,
@@ -525,6 +526,7 @@ const terminalController = createTerminalController({
   reconnectSession: (sessionId) => reconnectClosedSession(sessionId),
   inputError: (kind, error) => writeNotice(`${terminalKindLabel(kind)} input error: ${error?.message ?? error}`),
 });
+const terminalOutput = createTerminalOutputBuffer({ sessions: () => state.sessions });
 settingsController = createSettingsController({
   state,
   panel: settingsPanel,
@@ -572,8 +574,9 @@ registerRuntimeEvents({
   on: onRuntimeEvent,
   events: RUNTIME_EVENT,
   state,
-  decodeSSHOutput,
-  writeSSHOutput,
+  decodeSSHOutput: (event) => terminalOutput.decode(event),
+  writeSSHOutput: (sessionID, data) => terminalOutput.write(sessionID, data),
+  discardSSHOutput: (sessionID) => terminalOutput.discard(sessionID),
   markSessionClosed,
   renderHosts: () => renderHosts(searchInput.value),
   renderTunnelStatus,
@@ -1264,11 +1267,11 @@ async function stopSession(sessionID) {
 function markSessionClosed(sessionID, message = '') {
   const session = state.sessions.get(sessionID);
   if (!session) {
-    state.pendingSSHOutput.delete(sessionID);
+    terminalOutput.discard(sessionID);
     return;
   }
 
-  flushPendingSSHOutput(sessionID);
+  terminalOutput.flush(sessionID);
   session.closed = true;
   session.pending = false;
   if (session.terminal) {
@@ -1324,7 +1327,7 @@ function terminalSafeText(value) {
 function removeSessionFromUI(sessionID) {
   const session = state.sessions.get(sessionID);
   state.sessions.delete(sessionID);
-  state.pendingSSHOutput.delete(sessionID);
+  terminalOutput.discard(sessionID);
   forgetSessionFocus(sessionID);
   if (session && state.lastSessionByResource.get(session.resourceId) === sessionID) {
     state.lastSessionByResource.delete(session.resourceId);
@@ -1748,7 +1751,7 @@ function createSession(sessionID, resource, kind = 'ssh', replaceSessionID = '')
     };
     if (replacedSession) {
       state.sessions = replaceSession(state.sessions, replaceSessionID, nextSession);
-      state.pendingSSHOutput.delete(replaceSessionID);
+      terminalOutput.discard(replaceSessionID);
       forgetSessionFocus(replaceSessionID);
       if (state.lastSessionByResource.get(replacedSession.resourceId) === replaceSessionID) {
         state.lastSessionByResource.delete(replacedSession.resourceId);
@@ -1757,7 +1760,7 @@ function createSession(sessionID, resource, kind = 'ssh', replaceSessionID = '')
     } else {
       state.sessions.set(sessionID, nextSession);
     }
-    flushPendingSSHOutput(sessionID);
+    terminalOutput.flush(sessionID);
     setActiveSession(sessionID);
     renderTabs();
     renderSelection();
@@ -2556,7 +2559,7 @@ function clearAllSessionsFromUI() {
   for (const sessionID of [...state.sessions.keys()]) {
     removeSessionFromUI(sessionID);
   }
-  state.pendingSSHOutput.clear();
+  terminalOutput.clear();
   state.lastSessionByResource.clear();
   state.sessionFocusHistory = [];
   state.activeSessionId = null;
@@ -2631,58 +2634,4 @@ function openTerminalLink(event, value) {
   }
   event?.preventDefault?.();
   openExternalURL(url);
-}
-
-function writeSSHOutput(sessionID, data) {
-  if (!sessionID || !data || data.length === 0) return;
-  const session = state.sessions.get(sessionID);
-  if (session?.terminal) {
-    session.terminal.write(data);
-    return;
-  }
-
-  const current = state.pendingSSHOutput.get(sessionID);
-  const chunks = Array.isArray(current) ? current : current ? [current] : [];
-  chunks.push(data);
-  state.pendingSSHOutput.set(sessionID, trimPendingSSHOutput(chunks));
-}
-
-function flushPendingSSHOutput(sessionID) {
-  const pending = state.pendingSSHOutput.get(sessionID);
-  if (!pending) return;
-  state.pendingSSHOutput.delete(sessionID);
-  const session = state.sessions.get(sessionID);
-  if (!session?.terminal) return;
-
-  const chunks = Array.isArray(pending) ? pending : [pending];
-  chunks.forEach((chunk) => session.terminal.write(chunk));
-}
-
-function decodeSSHOutput(event) {
-  if (event?.bytes) return base64ToBytes(event.bytes);
-  return event?.data ?? '';
-}
-
-function base64ToBytes(value) {
-  const binary = atob(String(value));
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
-}
-
-function trimPendingSSHOutput(chunks) {
-  const limit = 262144;
-  let total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-  while (chunks.length > 1 && total > limit) {
-    const removed = chunks.shift();
-    total -= removed.length;
-  }
-  if (total <= limit) return chunks;
-
-  const first = chunks[0];
-  const start = first.length - limit;
-  chunks[0] = typeof first === 'string' ? first.slice(start) : first.slice(start);
-  return chunks;
 }
