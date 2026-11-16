@@ -123,6 +123,7 @@ import { createFieldHelpController } from './ui/field-help.js';
 import { createTooltipController } from './ui/tooltip.js';
 import { createMessageCenter } from './messages/controller.js';
 import { createUpdateController } from './updates/controller.js';
+import { registerRuntimeEvents } from './app/runtime-events.js';
 import './terminal-fonts.css';
 import './styles.css';
 import './terminal/workspace.css';
@@ -567,8 +568,29 @@ if (globalThis.ResizeObserver) {
   hostsResizeObserver.observe(hostsScroll);
 }
 
-registerSSHEvents();
-registerAppEvents();
+registerRuntimeEvents({
+  on: onRuntimeEvent,
+  events: RUNTIME_EVENT,
+  state,
+  decodeSSHOutput,
+  writeSSHOutput,
+  markSessionClosed,
+  renderHosts: () => renderHosts(searchInput.value),
+  renderTunnelStatus,
+  renderSelection,
+  writeNotice,
+  clearSessions: clearAllSessionsFromUI,
+  closeFileTransfers: () => fileTransferWorkspaces.closeAll(),
+  refreshHosts,
+  loadTunnels,
+  restoreFocus: restoreTerminalFocusAfterOverlay,
+  showHostsFilePreview: showHostsFileImportPreview,
+  openSettings: () => settingsController.open(),
+  openSSHKeys: () => openKeysPanel({ allowInstall: false }),
+  showAbout: showAboutModal,
+  showUpdate: (info, manual) => updateController.show(info, manual),
+  showUpdateError: (message) => updateController.showError(message),
+});
 
 const searchInput = document.querySelector('#search');
 document.querySelector('#toggle-sidebar').addEventListener('click', () => toggleSidebar());
@@ -2528,88 +2550,6 @@ function hasOpenBlockingOverlay() {
 
 function scheduleTerminalFit() {
   terminalController.scheduleFit();
-}
-
-function registerSSHEvents() {
-  onRuntimeEvent(RUNTIME_EVENT.sshOutput, (event) => {
-    writeSSHOutput(event.sessionId, decodeSSHOutput(event));
-  });
-  onRuntimeEvent(RUNTIME_EVENT.sshStatus, (event) => {
-    if (event?.message) writeNotice(event.message);
-  });
-  onRuntimeEvent(RUNTIME_EVENT.sshClosed, (event) => {
-    const session = state.sessions.get(event.sessionId);
-    if (!session) {
-      state.pendingSSHOutput.delete(event.sessionId);
-      return;
-    }
-    markSessionClosed(event.sessionId, event?.message);
-    if (event?.message) writeNotice(event.message);
-  });
-  onRuntimeEvent(RUNTIME_EVENT.sshTunnelClosed, (event) => {
-    if (event?.sessionId) {
-      state.tunnels.delete(event.sessionId);
-      renderHosts(searchInput.value);
-      renderTunnelStatus();
-    }
-    if (event?.message) writeNotice(event.message);
-  });
-}
-
-function registerAppEvents() {
-  onRuntimeEvent(RUNTIME_EVENT.webAppClosed, (event) => {
-    for (const [webAppID, runtime] of state.webAppRuntimes) {
-      if (runtime.runtimeId === event?.runtimeId) state.webAppRuntimes.delete(webAppID);
-    }
-    renderHosts(searchInput.value);
-    renderSelection();
-    if (event?.message && /failed|error|closed:/i.test(event.message)) writeNotice(event.message, 'error');
-  });
-  onRuntimeEvent(RUNTIME_EVENT.webAppStatus, (event) => {
-    if (event?.webAppId && event?.runtimeId) {
-      const current = state.webAppRuntimes.get(event.webAppId) ?? {};
-      state.webAppRuntimes.set(event.webAppId, { ...current, ...event });
-      renderHosts(searchInput.value);
-      renderSelection();
-    }
-    if (event?.message) writeNotice(event.message, event.error ? 'error' : undefined);
-  });
-
-  onRuntimeEvent(RUNTIME_EVENT.databaseExported, (event) => {
-    if (event?.message) writeNotice(`${event.message} ${event.path ?? ''}`.trim());
-  });
-  onRuntimeEvent(RUNTIME_EVENT.databaseImported, async (event) => {
-    clearAllSessionsFromUI();
-    fileTransferWorkspaces.closeAll();
-    state.selectedId = null;
-    await refreshHosts();
-    await loadTunnels();
-    writeNotice(event?.message ?? 'Database imported.');
-  });
-  onRuntimeEvent(RUNTIME_EVENT.hostsFileImported, async (event) => {
-    await refreshHosts();
-    const imported = event?.imported ?? 0;
-    const skipped = event?.skipped ?? 0;
-    writeNotice(`Imported ${imported} host${imported === 1 ? '' : 's'} from hosts file. Skipped ${skipped}.`);
-    restoreTerminalFocusAfterOverlay();
-  });
-  onRuntimeEvent(RUNTIME_EVENT.hostsFilePreview, (event) => {
-    showHostsFileImportPreview(event);
-  });
-  onRuntimeEvent(RUNTIME_EVENT.openSettings, () => {
-    settingsController.open();
-  });
-  onRuntimeEvent(RUNTIME_EVENT.openSSHKeys, () => {
-    openKeysPanel({ allowInstall: false });
-  });
-  onRuntimeEvent(RUNTIME_EVENT.openAbout, (info) => showAboutModal(info));
-  onRuntimeEvent(RUNTIME_EVENT.updateCheck, (event) => {
-    if (event?.error) {
-      updateController.showError(event.error);
-      return;
-    }
-    if (event?.info) updateController.show(event.info, Boolean(event.manual));
-  });
 }
 
 function clearAllSessionsFromUI() {
