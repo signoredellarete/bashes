@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/signoredellarete/bashes/internal/apperrors"
 )
 
 func TestParseTransferID(t *testing.T) {
@@ -164,6 +166,62 @@ func TestFileTransferLocalPathRejectsSymlinkEscape(t *testing.T) {
 	session := &fileTransferSession{localRoot: root}
 	if _, err := session.localPath("outside/file.txt"); err == nil || !strings.Contains(err.Error(), "escapes transfer root") {
 		t.Fatalf("localPath() error = %v, want symlink escape rejection", err)
+	}
+}
+
+func TestTransferSizeRejectsSymbolicLinks(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "target.txt"), []byte("target"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Symlink("target.txt", filepath.Join(root, "link.txt")); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	session := &fileTransferSession{localRoot: root}
+	_, err := session.transferSizeUnlocked("local", "link.txt")
+	payload, ok := apperrors.Decode(err)
+	if !ok || payload.Code != "file_transfer_symlink_unsupported" {
+		t.Fatalf("transferSizeUnlocked() error = %v, want symlink policy error", err)
+	}
+}
+
+func TestLocalAbsoluteTransferSizeRejectsNestedSymbolicLinks(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "target.txt"), []byte("target"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Symlink("target.txt", filepath.Join(root, "link.txt")); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	_, err := localAbsoluteTransferSize(root)
+	payload, ok := apperrors.Decode(err)
+	if !ok || payload.Code != "file_transfer_symlink_unsupported" {
+		t.Fatalf("localAbsoluteTransferSize() error = %v, want symlink policy error", err)
+	}
+}
+
+func TestRemoveLocalSymlinkDoesNotRemoveTarget(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	target := filepath.Join(outside, "keep.txt")
+	if err := os.WriteFile(target, []byte("keep"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "outside-link")); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	session := &fileTransferSession{localRoot: root}
+	if err := session.remove("/local/outside-link"); err != nil {
+		t.Fatalf("remove() error = %v", err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("outside target was removed: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "outside-link")); !os.IsNotExist(err) {
+		t.Fatalf("symlink still exists or returned unexpected error: %v", err)
 	}
 }
 

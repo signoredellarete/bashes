@@ -396,7 +396,11 @@ func (a *App) StartFileTransferOpenJob(input FileTransferOpenInput) (FileTransfe
 	}
 
 	session.mu.Lock()
-	info, err := session.stat(scope, rel)
+	err = session.validateTransferSourcePath(scope, rel)
+	var info fs.FileInfo
+	if err == nil {
+		info, err = session.lstat(scope, rel)
+	}
 	var localPath string
 	if err == nil && scope == "local" {
 		localPath, err = session.localPath(rel)
@@ -610,7 +614,7 @@ func (s *fileTransferSession) create(input FileTransferCreateInput) (FileTransfe
 
 	switch parentScope {
 	case "local":
-		target, err := s.localPath(rel)
+		target, err := s.localPathNoFollow(rel)
 		if err != nil {
 			return FileTransferEntry{}, err
 		}
@@ -629,7 +633,7 @@ func (s *fileTransferSession) create(input FileTransferCreateInput) (FileTransfe
 		}
 		return entryFromInfo(parentScope, rel, info), nil
 	case "remote":
-		target, err := s.remotePath(rel)
+		target, err := s.remotePathNoFollow(rel)
 		if err != nil {
 			return FileTransferEntry{}, err
 		}
@@ -672,11 +676,11 @@ func (s *fileTransferSession) rename(input FileTransferRenameInput) (FileTransfe
 
 	switch scope {
 	case "local":
-		oldPath, err := s.localPath(rel)
+		oldPath, err := s.localPathNoFollow(rel)
 		if err != nil {
 			return FileTransferEntry{}, err
 		}
-		newPath, err := s.localPath(newRel)
+		newPath, err := s.localPathNoFollow(newRel)
 		if err != nil {
 			return FileTransferEntry{}, err
 		}
@@ -689,11 +693,11 @@ func (s *fileTransferSession) rename(input FileTransferRenameInput) (FileTransfe
 		}
 		return entryFromInfo(scope, newRel, info), nil
 	case "remote":
-		oldPath, err := s.remotePath(rel)
+		oldPath, err := s.remotePathNoFollow(rel)
 		if err != nil {
 			return FileTransferEntry{}, err
 		}
-		newPath, err := s.remotePath(newRel)
+		newPath, err := s.remotePathNoFollow(newRel)
 		if err != nil {
 			return FileTransferEntry{}, err
 		}
@@ -724,17 +728,17 @@ func (s *fileTransferSession) remove(id string) error {
 
 	switch scope {
 	case "local":
-		target, err := s.localPath(rel)
+		target, err := s.localPathNoFollow(rel)
 		if err != nil {
 			return err
 		}
 		return os.RemoveAll(target)
 	case "remote":
-		target, err := s.remotePath(rel)
+		target, err := s.remotePathNoFollow(rel)
 		if err != nil {
 			return err
 		}
-		return s.removeRemote(target)
+		return s.removeRemote(target, filetransfercore.NewDefaultTraversal(), 0)
 	default:
 		return fmt.Errorf("unsupported file transfer scope %q", scope)
 	}
@@ -789,6 +793,9 @@ func (s *fileTransferSession) copyConflicts(input FileTransferCopyInput) ([]File
 	defer s.mu.Unlock()
 	conflicts := make([]FileTransferConflict, 0)
 	for _, plan := range plans {
+		if err := s.validateTransferSourcePath(plan.sourceScope, plan.sourceRel); err != nil {
+			return nil, err
+		}
 		exists, err := s.pathExists(plan.targetScope, plan.targetRel)
 		if err != nil {
 			return nil, err
@@ -796,7 +803,7 @@ func (s *fileTransferSession) copyConflicts(input FileTransferCopyInput) ([]File
 		if !exists {
 			continue
 		}
-		info, err := s.stat(plan.sourceScope, plan.sourceRel)
+		info, err := s.lstat(plan.sourceScope, plan.sourceRel)
 		if err != nil {
 			return nil, err
 		}
@@ -828,8 +835,11 @@ func (s *fileTransferSession) uploadConflicts(input FileTransferUploadInput) ([]
 		if sourcePath == "" {
 			continue
 		}
-		info, err := os.Stat(sourcePath)
+		info, err := os.Lstat(sourcePath)
 		if err != nil {
+			return nil, err
+		}
+		if err := filetransfercore.ValidateTransferMode(sourcePath, info.Mode()); err != nil {
 			return nil, err
 		}
 		targetRelPath := path.Join(targetRel, filepath.Base(sourcePath))
@@ -895,8 +905,12 @@ func (s *fileTransferSession) copyJob(ctx context.Context, job *transfer.Job, in
 	defer s.mu.Unlock()
 
 	var total int64
+	sizeTraversal := filetransfercore.NewDefaultTraversal()
 	for index := range plans {
-		size, err := s.transferSizeUnlocked(plans[index].sourceScope, plans[index].sourceRel)
+		if err := s.validateTransferSourcePath(plans[index].sourceScope, plans[index].sourceRel); err != nil {
+			return err
+		}
+		size, err := s.transferSizeUnlockedAt(plans[index].sourceScope, plans[index].sourceRel, sizeTraversal, 0)
 		if err != nil {
 			return err
 		}
@@ -908,13 +922,14 @@ func (s *fileTransferSession) copyJob(ctx context.Context, job *transfer.Job, in
 	})
 	emit(true)
 
+	copyTraversal := filetransfercore.NewDefaultTraversal()
 	for _, plan := range plans {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		copied, err := s.copyItemAtomicWithProgress(
 			ctx, job, plan.sourceScope, plan.sourceRel, plan.targetScope, plan.targetRel,
-			conflictAction(input.ConflictActions, plan.targetScope, plan.targetRel), emit,
+			conflictAction(input.ConflictActions, plan.targetScope, plan.targetRel), copyTraversal, emit,
 		)
 		if err != nil {
 			return err
@@ -946,8 +961,9 @@ func (s *fileTransferSession) uploadJob(ctx context.Context, job *transfer.Job, 
 
 	var total int64
 	sizes := make(map[string]int64, len(sourcePaths))
+	sizeTraversal := filetransfercore.NewDefaultTraversal()
 	for _, sourcePath := range sourcePaths {
-		size, err := localAbsoluteTransferSize(sourcePath)
+		size, err := localAbsoluteTransferSizeAt(sourcePath, sizeTraversal, 0)
 		if err != nil {
 			return err
 		}
@@ -959,6 +975,7 @@ func (s *fileTransferSession) uploadJob(ctx context.Context, job *transfer.Job, 
 	})
 	emit(true)
 
+	copyTraversal := filetransfercore.NewDefaultTraversal()
 	for _, sourcePath := range sourcePaths {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -967,7 +984,7 @@ func (s *fileTransferSession) uploadJob(ctx context.Context, job *transfer.Job, 
 		targetRelPath := path.Join(targetRel, name)
 		copied, err := s.copyAbsoluteLocalAtomicWithProgress(
 			ctx, job, sourcePath, targetScope, targetRelPath,
-			conflictAction(input.ConflictActions, targetScope, targetRelPath), emit,
+			conflictAction(input.ConflictActions, targetScope, targetRelPath), copyTraversal, emit,
 		)
 		if err != nil {
 			return err
@@ -991,15 +1008,15 @@ func (s *fileTransferSession) copyItemAtomic(ctx context.Context, sourceScope, s
 	})
 }
 
-func (s *fileTransferSession) copyItemAtomicWithProgress(ctx context.Context, job *transfer.Job, sourceScope, sourceRel, targetScope, targetRel, action string, emit func(bool)) (bool, error) {
+func (s *fileTransferSession) copyItemAtomicWithProgress(ctx context.Context, job *transfer.Job, sourceScope, sourceRel, targetScope, targetRel, action string, traversal *filetransfercore.Traversal, emit func(bool)) (bool, error) {
 	return s.withAtomicDestinationPolicy(targetScope, targetRel, action, func(tempRel string) error {
-		return s.copyUnlockedWithProgress(ctx, job, sourceScope, sourceRel, targetScope, tempRel, emit)
+		return s.copyUnlockedWithProgress(ctx, job, sourceScope, sourceRel, targetScope, tempRel, traversal, 0, emit)
 	})
 }
 
-func (s *fileTransferSession) copyAbsoluteLocalAtomicWithProgress(ctx context.Context, job *transfer.Job, sourcePath, targetScope, targetRel, action string, emit func(bool)) (bool, error) {
+func (s *fileTransferSession) copyAbsoluteLocalAtomicWithProgress(ctx context.Context, job *transfer.Job, sourcePath, targetScope, targetRel, action string, traversal *filetransfercore.Traversal, emit func(bool)) (bool, error) {
 	return s.withAtomicDestinationPolicy(targetScope, targetRel, action, func(tempRel string) error {
-		return s.copyAbsoluteLocalWithProgress(ctx, job, sourcePath, targetScope, tempRel, emit)
+		return s.copyAbsoluteLocalWithProgress(ctx, job, sourcePath, targetScope, tempRel, traversal, 0, emit)
 	})
 }
 
@@ -1093,7 +1110,7 @@ func conflictAction(actions map[string]string, scope, targetRel string) string {
 }
 
 func (s *fileTransferSession) pathExists(scope, rel string) (bool, error) {
-	_, err := s.stat(scope, rel)
+	_, err := s.lstat(scope, rel)
 	if err == nil {
 		return true, nil
 	}
@@ -1106,21 +1123,21 @@ func (s *fileTransferSession) pathExists(scope, rel string) (bool, error) {
 func (s *fileTransferSession) renamePath(scope, oldRel, newRel string) error {
 	switch scope {
 	case "local":
-		oldPath, err := s.localPath(oldRel)
+		oldPath, err := s.localPathNoFollow(oldRel)
 		if err != nil {
 			return err
 		}
-		newPath, err := s.localPath(newRel)
+		newPath, err := s.localPathNoFollow(newRel)
 		if err != nil {
 			return err
 		}
 		return os.Rename(oldPath, newPath)
 	case "remote":
-		oldPath, err := s.remotePath(oldRel)
+		oldPath, err := s.remotePathNoFollow(oldRel)
 		if err != nil {
 			return err
 		}
-		newPath, err := s.remotePath(newRel)
+		newPath, err := s.remotePathNoFollow(newRel)
 		if err != nil {
 			return err
 		}
@@ -1131,11 +1148,24 @@ func (s *fileTransferSession) renamePath(scope, oldRel, newRel string) error {
 }
 
 func (s *fileTransferSession) copyUnlocked(sourceScope, sourceRel, targetScope, targetRel string) error {
-	sourceIsDir, err := s.isDir(sourceScope, sourceRel)
+	if err := s.validateTransferSourcePath(sourceScope, sourceRel); err != nil {
+		return err
+	}
+	return s.copyUnlockedAt(sourceScope, sourceRel, targetScope, targetRel, filetransfercore.NewDefaultTraversal(), 0)
+}
+
+func (s *fileTransferSession) copyUnlockedAt(sourceScope, sourceRel, targetScope, targetRel string, traversal *filetransfercore.Traversal, depth int) error {
+	info, err := s.lstat(sourceScope, sourceRel)
 	if err != nil {
 		return err
 	}
-	if sourceIsDir {
+	if err := traversal.Visit(depth, transferID(sourceScope, sourceRel)); err != nil {
+		return err
+	}
+	if err := filetransfercore.ValidateTransferMode(transferID(sourceScope, sourceRel), info.Mode()); err != nil {
+		return err
+	}
+	if info.IsDir() {
 		if err := s.mkdir(targetScope, targetRel); err != nil {
 			return err
 		}
@@ -1148,7 +1178,7 @@ func (s *fileTransferSession) copyUnlocked(sourceScope, sourceRel, targetScope, 
 			if err != nil {
 				return err
 			}
-			if err := s.copyUnlocked(sourceScope, childRel, targetScope, path.Join(targetRel, path.Base(childRel))); err != nil {
+			if err := s.copyUnlockedAt(sourceScope, childRel, targetScope, path.Join(targetRel, path.Base(childRel)), traversal, depth+1); err != nil {
 				return err
 			}
 		}
@@ -1169,13 +1199,19 @@ func (s *fileTransferSession) copyUnlocked(sourceScope, sourceRel, targetScope, 
 	return err
 }
 
-func (s *fileTransferSession) copyUnlockedWithProgress(ctx context.Context, job *transfer.Job, sourceScope, sourceRel, targetScope, targetRel string, emit func(bool)) error {
+func (s *fileTransferSession) copyUnlockedWithProgress(ctx context.Context, job *transfer.Job, sourceScope, sourceRel, targetScope, targetRel string, traversal *filetransfercore.Traversal, depth int, emit func(bool)) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	sourceIsDir, err := s.isDir(sourceScope, sourceRel)
+	info, err := s.lstat(sourceScope, sourceRel)
 	if err != nil {
+		return err
+	}
+	if err := traversal.Visit(depth, transferID(sourceScope, sourceRel)); err != nil {
+		return err
+	}
+	if err := filetransfercore.ValidateTransferMode(transferID(sourceScope, sourceRel), info.Mode()); err != nil {
 		return err
 	}
 	job.Update(func(info *FileTransferJobInfo) {
@@ -1183,7 +1219,7 @@ func (s *fileTransferSession) copyUnlockedWithProgress(ctx context.Context, job 
 	})
 	emit(false)
 
-	if sourceIsDir {
+	if info.IsDir() {
 		if err := s.mkdir(targetScope, targetRel); err != nil {
 			return err
 		}
@@ -1196,7 +1232,7 @@ func (s *fileTransferSession) copyUnlockedWithProgress(ctx context.Context, job 
 			if err != nil {
 				return err
 			}
-			if err := s.copyUnlockedWithProgress(ctx, job, sourceScope, childRel, targetScope, path.Join(targetRel, path.Base(childRel)), emit); err != nil {
+			if err := s.copyUnlockedWithProgress(ctx, job, sourceScope, childRel, targetScope, path.Join(targetRel, path.Base(childRel)), traversal, depth+1, emit); err != nil {
 				return err
 			}
 		}
@@ -1236,12 +1272,18 @@ func validateCopyDestination(sourceScope, sourceRel, targetScope, targetRel stri
 	return nil
 }
 
-func (s *fileTransferSession) copyAbsoluteLocalWithProgress(ctx context.Context, job *transfer.Job, sourcePath, targetScope, targetRel string, emit func(bool)) error {
+func (s *fileTransferSession) copyAbsoluteLocalWithProgress(ctx context.Context, job *transfer.Job, sourcePath, targetScope, targetRel string, traversal *filetransfercore.Traversal, depth int, emit func(bool)) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	info, err := os.Stat(sourcePath)
+	info, err := os.Lstat(sourcePath)
 	if err != nil {
+		return err
+	}
+	if err := traversal.Visit(depth, sourcePath); err != nil {
+		return err
+	}
+	if err := filetransfercore.ValidateTransferMode(sourcePath, info.Mode()); err != nil {
 		return err
 	}
 	job.Update(func(jobInfo *FileTransferJobInfo) {
@@ -1258,7 +1300,7 @@ func (s *fileTransferSession) copyAbsoluteLocalWithProgress(ctx context.Context,
 			return err
 		}
 		for _, entry := range entries {
-			if err := s.copyAbsoluteLocalWithProgress(ctx, job, filepath.Join(sourcePath, entry.Name()), targetScope, path.Join(targetRel, entry.Name()), emit); err != nil {
+			if err := s.copyAbsoluteLocalWithProgress(ctx, job, filepath.Join(sourcePath, entry.Name()), targetScope, path.Join(targetRel, entry.Name()), traversal, depth+1, emit); err != nil {
 				return err
 			}
 		}
@@ -1290,11 +1332,14 @@ func (s *fileTransferSession) downloadRemoteFileWithProgress(ctx context.Context
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	remotePath, err := s.remotePath(remoteRel)
+	if err := s.validateTransferSourcePath("remote", remoteRel); err != nil {
+		return err
+	}
+	info, err := s.lstat("remote", remoteRel)
 	if err != nil {
 		return err
 	}
-	info, err := s.sftp.Stat(remotePath)
+	remotePath, err := s.remotePath(remoteRel)
 	if err != nil {
 		return err
 	}
@@ -1352,15 +1397,24 @@ func (s *fileTransferSession) downloadRemoteFileWithProgress(ctx context.Context
 }
 
 func (s *fileTransferSession) transferSizeUnlocked(scope, rel string) (int64, error) {
-	sourceIsDir, err := s.isDir(scope, rel)
+	if err := s.validateTransferSourcePath(scope, rel); err != nil {
+		return 0, err
+	}
+	return s.transferSizeUnlockedAt(scope, rel, filetransfercore.NewDefaultTraversal(), 0)
+}
+
+func (s *fileTransferSession) transferSizeUnlockedAt(scope, rel string, traversal *filetransfercore.Traversal, depth int) (int64, error) {
+	info, err := s.lstat(scope, rel)
 	if err != nil {
 		return 0, err
 	}
-	if !sourceIsDir {
-		info, err := s.stat(scope, rel)
-		if err != nil {
-			return 0, err
-		}
+	if err := traversal.Visit(depth, transferID(scope, rel)); err != nil {
+		return 0, err
+	}
+	if err := filetransfercore.ValidateTransferMode(transferID(scope, rel), info.Mode()); err != nil {
+		return 0, err
+	}
+	if !info.IsDir() {
 		return info.Size(), nil
 	}
 	children, err := s.listUnlocked(scope, rel)
@@ -1373,7 +1427,7 @@ func (s *fileTransferSession) transferSizeUnlocked(scope, rel string) (int64, er
 		if err != nil {
 			return 0, err
 		}
-		size, err := s.transferSizeUnlocked(scope, childRel)
+		size, err := s.transferSizeUnlockedAt(scope, childRel, traversal, depth+1)
 		if err != nil {
 			return 0, err
 		}
@@ -1424,65 +1478,19 @@ func (s *fileTransferSession) listUnlocked(scope string, rel string) ([]FileTran
 func (s *fileTransferSession) removeUnlocked(scope, rel string) error {
 	switch scope {
 	case "local":
-		target, err := s.localPath(rel)
+		target, err := s.localPathNoFollow(rel)
 		if err != nil {
 			return err
 		}
 		return os.RemoveAll(target)
 	case "remote":
-		target, err := s.remotePath(rel)
+		target, err := s.remotePathNoFollow(rel)
 		if err != nil {
 			return err
 		}
-		return s.removeRemote(target)
+		return s.removeRemote(target, filetransfercore.NewDefaultTraversal(), 0)
 	default:
 		return fmt.Errorf("unsupported file transfer scope %q", scope)
-	}
-}
-
-func (s *fileTransferSession) isDir(scope, rel string) (bool, error) {
-	switch scope {
-	case "local":
-		target, err := s.localPath(rel)
-		if err != nil {
-			return false, err
-		}
-		info, err := os.Stat(target)
-		if err != nil {
-			return false, err
-		}
-		return info.IsDir(), nil
-	case "remote":
-		target, err := s.remotePath(rel)
-		if err != nil {
-			return false, err
-		}
-		info, err := s.sftp.Stat(target)
-		if err != nil {
-			return false, err
-		}
-		return info.IsDir(), nil
-	default:
-		return false, fmt.Errorf("unsupported file transfer scope %q", scope)
-	}
-}
-
-func (s *fileTransferSession) stat(scope, rel string) (fs.FileInfo, error) {
-	switch scope {
-	case "local":
-		target, err := s.localPath(rel)
-		if err != nil {
-			return nil, err
-		}
-		return os.Stat(target)
-	case "remote":
-		target, err := s.remotePath(rel)
-		if err != nil {
-			return nil, err
-		}
-		return s.sftp.Stat(target)
-	default:
-		return nil, fmt.Errorf("unsupported file transfer scope %q", scope)
 	}
 }
 
@@ -1549,8 +1557,11 @@ func (s *fileTransferSession) openWriter(scope, rel string) (io.WriteCloser, err
 	}
 }
 
-func (s *fileTransferSession) removeRemote(target string) error {
-	info, err := s.sftp.Stat(target)
+func (s *fileTransferSession) removeRemote(target string, traversal *filetransfercore.Traversal, depth int) error {
+	if err := traversal.Visit(depth, target); err != nil {
+		return err
+	}
+	info, err := s.sftp.Lstat(target)
 	if err != nil {
 		return err
 	}
@@ -1562,7 +1573,7 @@ func (s *fileTransferSession) removeRemote(target string) error {
 		return err
 	}
 	for _, entry := range entries {
-		if err := s.removeRemote(path.Join(target, entry.Name())); err != nil {
+		if err := s.removeRemote(path.Join(target, entry.Name()), traversal, depth+1); err != nil {
 			return err
 		}
 	}
@@ -1594,6 +1605,34 @@ func (s *fileTransferSession) localPath(rel string) (string, error) {
 	return resolvedTarget, nil
 }
 
+func (s *fileTransferSession) localPathNoFollow(rel string) (string, error) {
+	cleaned := cleanRelative(rel)
+	if cleaned == "" {
+		return s.localPath("")
+	}
+	absRoot, err := filepath.Abs(s.localRoot)
+	if err != nil {
+		return "", err
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(absRoot)
+	if err != nil {
+		return "", err
+	}
+	target := filepath.Join(s.localRoot, filepath.FromSlash(cleaned))
+	resolvedParent, err := resolveLocalPath(filepath.Dir(target))
+	if err != nil {
+		return "", err
+	}
+	relative, err := filepath.Rel(resolvedRoot, resolvedParent)
+	if err != nil {
+		return "", err
+	}
+	if pathEscapesRoot(relative) {
+		return "", errors.New("local path escapes transfer root")
+	}
+	return filepath.Join(resolvedParent, filepath.Base(target)), nil
+}
+
 func (s *fileTransferSession) remotePath(rel string) (string, error) {
 	cleaned := cleanRelative(rel)
 	target := path.Clean(path.Join(s.remoteRoot, cleaned))
@@ -1608,6 +1647,67 @@ func (s *fileTransferSession) remotePath(rel string) (string, error) {
 		return "", errors.New("remote path escapes transfer root through symlink")
 	}
 	return resolvedTarget, nil
+}
+
+func (s *fileTransferSession) remotePathNoFollow(rel string) (string, error) {
+	cleaned := cleanRelative(rel)
+	if cleaned == "" {
+		return s.remotePath("")
+	}
+	target := path.Clean(path.Join(s.remoteRoot, cleaned))
+	if _, ok := remoteRelativePath(s.remoteRoot, target); !ok {
+		return "", errors.New("remote path escapes transfer root")
+	}
+	resolvedParent, err := s.resolveRemotePath(path.Dir(target))
+	if err != nil {
+		return "", err
+	}
+	if _, ok := remoteRelativePath(s.remoteRoot, resolvedParent); !ok {
+		return "", errors.New("remote path escapes transfer root through symlink")
+	}
+	return path.Join(resolvedParent, path.Base(target)), nil
+}
+
+func (s *fileTransferSession) lstat(scope, rel string) (fs.FileInfo, error) {
+	switch scope {
+	case "local":
+		target, err := s.localPathNoFollow(rel)
+		if err != nil {
+			return nil, err
+		}
+		return os.Lstat(target)
+	case "remote":
+		target, err := s.remotePathNoFollow(rel)
+		if err != nil {
+			return nil, err
+		}
+		return s.sftp.Lstat(target)
+	default:
+		return nil, fmt.Errorf("unsupported file transfer scope %q", scope)
+	}
+}
+
+func (s *fileTransferSession) validateTransferSourcePath(scope, rel string) error {
+	cleaned := cleanRelative(rel)
+	if cleaned == "" {
+		return errors.New("cannot transfer file transfer root")
+	}
+	current := ""
+	parts := strings.Split(cleaned, "/")
+	for index, part := range parts {
+		current = path.Join(current, part)
+		info, err := s.lstat(scope, current)
+		if err != nil {
+			return err
+		}
+		if err := filetransfercore.ValidateTransferMode(transferID(scope, current), info.Mode()); err != nil {
+			return err
+		}
+		if index < len(parts)-1 && !info.IsDir() {
+			return fmt.Errorf("transfer source parent is not a folder: %s", transferID(scope, current))
+		}
+	}
+	return nil
 }
 
 func resolveLocalPath(target string) (string, error) {
@@ -1777,29 +1877,36 @@ func copyWithProgress(ctx context.Context, writer io.Writer, reader io.Reader, p
 }
 
 func localAbsoluteTransferSize(sourcePath string) (int64, error) {
-	info, err := os.Stat(sourcePath)
+	return localAbsoluteTransferSizeAt(sourcePath, filetransfercore.NewDefaultTraversal(), 0)
+}
+
+func localAbsoluteTransferSizeAt(sourcePath string, traversal *filetransfercore.Traversal, depth int) (int64, error) {
+	info, err := os.Lstat(sourcePath)
 	if err != nil {
+		return 0, err
+	}
+	if err := traversal.Visit(depth, sourcePath); err != nil {
+		return 0, err
+	}
+	if err := filetransfercore.ValidateTransferMode(sourcePath, info.Mode()); err != nil {
 		return 0, err
 	}
 	if !info.IsDir() {
 		return info.Size(), nil
 	}
 	var total int64
-	err = filepath.WalkDir(sourcePath, func(path string, entry fs.DirEntry, err error) error {
+	entries, err := os.ReadDir(sourcePath)
+	if err != nil {
+		return 0, err
+	}
+	for _, entry := range entries {
+		size, err := localAbsoluteTransferSizeAt(filepath.Join(sourcePath, entry.Name()), traversal, depth+1)
 		if err != nil {
-			return err
+			return 0, err
 		}
-		if entry.IsDir() {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		total += info.Size()
-		return nil
-	})
-	return total, err
+		total += size
+	}
+	return total, nil
 }
 
 func writeLocalFile(target string, data string) error {
