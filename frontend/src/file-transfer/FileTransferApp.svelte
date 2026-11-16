@@ -6,6 +6,7 @@
 	import { visibleFileEntries } from './file-visibility.js';
 	import { resolveConflictActions } from './conflict-policy.js';
 	import { normalizeRemoteStartId, remotePathChain } from './remote-path.js';
+	import { formatDuration, remainingSeconds } from './transfer-progress.js';
   import {
 		cancelJob,
 		checkCopyConflicts,
@@ -457,6 +458,28 @@
     }
   }
 
+  async function retryTransferJob(job) {
+    if (!job || job.status === 'queued' || job.status === 'running') return;
+    await runOperation(async () => {
+      let retried = null;
+      let refreshTargets = [];
+      if (job.operation === 'open') {
+        retried = await startOpenJob(session.sessionId, job.sourceIds?.[0]);
+      } else if (job.sourcePaths?.length) {
+        retried = await startUploadWithConflictPolicy(job.sourcePaths, job.targetId);
+        refreshTargets = [job.targetId];
+      } else if (job.sourceIds?.length) {
+        retried = await startCopyWithConflictPolicy(job.sourceIds, job.targetId, job.move);
+        refreshTargets = job.move
+          ? unique([...job.sourceIds.map(parentId), job.targetId])
+          : [job.targetId];
+      }
+      if (!retried) return;
+      trackJob(retried, refreshTargets.filter(Boolean));
+      status = job.operation === 'open' ? 'Retrying file open...' : 'Retrying transfer...';
+    });
+  }
+
   function hasActiveJobs(items) {
     return items.some((job) => job.status === 'queued' || job.status === 'running');
   }
@@ -516,6 +539,12 @@
   function formatSpeed(job) {
     const speed = jobSpeed(job);
     return speed > 0 ? `${formatBytes(speed)}/s` : '--';
+  }
+
+  function formatETA(job) {
+    if (job?.status !== 'queued' && job?.status !== 'running') return '';
+    const seconds = remainingSeconds(job.totalBytes, job.transferredBytes, jobSpeed(job));
+    return seconds > 0 ? formatDuration(seconds) : '--';
   }
 
   function formatBytes(value) {
@@ -908,14 +937,19 @@
             </div>
             <progress value={progressBarValue(job)} max={progressBarMax(job)}></progress>
             <div class="transfer-job-footer">
-              <span>{formatBytes(job.transferredBytes)}{job.totalBytes ? ` / ${formatBytes(job.totalBytes)}` : ''} · {formatSpeed(job)}</span>
+              <span>{formatBytes(job.transferredBytes)}{job.totalBytes ? ` / ${formatBytes(job.totalBytes)}` : ''} · {formatSpeed(job)}{#if formatETA(job)} · ETA {formatETA(job)}{/if}</span>
               {#if job.status === 'queued' || job.status === 'running'}
                 <button type="button" disabled={cancelingJobIds.has(job.jobId)} onclick={() => cancelTransferJob(job)}>
                   {cancelingJobIds.has(job.jobId) ? 'Canceling...' : 'Cancel'}
                 </button>
               {:else}
                 {#if job.error}<span class="transfer-job-error" title={job.error}>{job.error}</span>{/if}
-                <button type="button" onclick={() => dismissJob(job.jobId)}>Close</button>
+                <span class="transfer-job-actions">
+                  {#if job.status === 'failed' || job.status === 'canceled'}
+                    <button type="button" onclick={() => retryTransferJob(job)}>Retry</button>
+                  {/if}
+                  <button type="button" onclick={() => dismissJob(job.jobId)}>Close</button>
+                </span>
               {/if}
             </div>
           </article>

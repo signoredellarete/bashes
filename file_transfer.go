@@ -619,7 +619,7 @@ func (s *fileTransferSession) create(input FileTransferCreateInput) (FileTransfe
 			return FileTransferEntry{}, err
 		}
 		if itemType == "folder" {
-			if err := os.MkdirAll(target, 0o755); err != nil {
+			if err := os.Mkdir(target, 0o755); err != nil {
 				return FileTransferEntry{}, err
 			}
 		} else {
@@ -627,7 +627,7 @@ func (s *fileTransferSession) create(input FileTransferCreateInput) (FileTransfe
 				return FileTransferEntry{}, err
 			}
 		}
-		info, err := os.Stat(target)
+		info, err := os.Lstat(target)
 		if err != nil {
 			return FileTransferEntry{}, err
 		}
@@ -638,7 +638,7 @@ func (s *fileTransferSession) create(input FileTransferCreateInput) (FileTransfe
 			return FileTransferEntry{}, err
 		}
 		if itemType == "folder" {
-			if err := s.sftp.MkdirAll(target); err != nil {
+			if err := s.sftp.Mkdir(target); err != nil {
 				return FileTransferEntry{}, err
 			}
 		} else {
@@ -646,7 +646,7 @@ func (s *fileTransferSession) create(input FileTransferCreateInput) (FileTransfe
 				return FileTransferEntry{}, err
 			}
 		}
-		info, err := s.sftp.Stat(target)
+		info, err := s.sftp.Lstat(target)
 		if err != nil {
 			return FileTransferEntry{}, err
 		}
@@ -1917,24 +1917,40 @@ func writeLocalFile(target string, data string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(target, decoded, 0o644)
-}
-
-func (s *fileTransferSession) writeRemoteFile(target string, data string) error {
-	if err := s.sftp.MkdirAll(path.Dir(target)); err != nil {
-		return err
-	}
-	file, err := s.sftp.Create(target)
+	file, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	if _, err := file.Write(decoded); err != nil {
+		_ = file.Close()
+		_ = os.Remove(target)
+		return err
+	}
+	return file.Close()
+}
+
+func (s *fileTransferSession) writeRemoteFile(target string, data string) error {
 	decoded, err := decodeOptionalBase64(data)
 	if err != nil {
 		return err
 	}
-	_, err = file.Write(decoded)
-	return err
+	if err := s.sftp.MkdirAll(path.Dir(target)); err != nil {
+		return err
+	}
+	file, err := s.sftp.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(decoded); err != nil {
+		_ = file.Close()
+		_ = s.sftp.Remove(target)
+		return err
+	}
+	if err := file.Close(); err != nil {
+		_ = s.sftp.Remove(target)
+		return err
+	}
+	return nil
 }
 
 func decodeOptionalBase64(data string) ([]byte, error) {

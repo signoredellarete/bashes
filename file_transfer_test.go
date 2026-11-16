@@ -225,6 +225,31 @@ func TestRemoveLocalSymlinkDoesNotRemoveTarget(t *testing.T) {
 	}
 }
 
+func TestCreateFileTransferItemDoesNotOverwriteExistingFile(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "existing.txt")
+	if err := os.WriteFile(target, []byte("original"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	session := &fileTransferSession{localRoot: root}
+	_, err := session.create(FileTransferCreateInput{
+		ParentID: "/local",
+		Name:     "existing.txt",
+		Type:     "file",
+	})
+	if err == nil {
+		t.Fatal("create() error = nil, want existing destination error")
+	}
+	data, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatalf("ReadFile() error = %v", readErr)
+	}
+	if string(data) != "original" {
+		t.Fatalf("existing content = %q, want original", data)
+	}
+}
+
 func TestAtomicFileTransferRejectsConflictWithoutChangingDestination(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "source.txt"), []byte("source"), 0o600); err != nil {

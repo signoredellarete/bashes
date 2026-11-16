@@ -1989,6 +1989,12 @@ html.sorting-tags * {
   white-space: nowrap;
 }
 
+.transfer-job-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 5px;
+}
+
 .transfer-auth {
   align-self: start;
   justify-self: center;

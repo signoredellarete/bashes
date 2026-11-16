@@ -38,7 +38,7 @@ The guiding product rule is:
 
 ## Implementation status
 
-Status on 2026-11-12 for branch `feature/v2-modular-architecture`:
+Status on 2026-11-16 for branch `feature/v2-modular-architecture`:
 
 | Phase | Status | Current result |
 | --- | --- | --- |
@@ -46,7 +46,7 @@ Status on 2026-11-12 for branch `feature/v2-modular-architecture`:
 | 1 - Backend application boundaries | Complete | Data and connection workflows are independent of Wails and native operations use injectable adapters. |
 | 2 - Runtime manager | Complete | Native runtimes have backend ownership, common lifecycle state and deterministic cleanup tests. |
 | 3 - Frontend modularization | In progress | Desktop APIs, shared state and the main feature surfaces are extracted; bootstrap orchestration and CSS separation remain. |
-| 4 - Transfer reliability | Not started | Planned after the application boundaries are stable. |
+| 4 - Transfer reliability | Complete | Conflicts, rollback, bounded traversal, structured errors, retry and ETA have deterministic contracts and tests. |
 | 5 - Plugin foundation | In progress | Manifest, discovery, protocol and supervisor exist without user-facing enablement. |
 | 6 - First optional plugin | Not started | Depends on the completed plugin permission and installation model. |
 | 7 - Framework and release decision | Not started | Deferred until v1 feature parity is preserved by the modular core. |
@@ -127,6 +127,11 @@ Status on 2026-11-12 for branch `feature/v2-modular-architecture`:
 - the file-transfer window shell owns its Svelte markup, visibility, title,
   drag and resize behavior behind a tested geometry model; workspace lifetime,
   background jobs and the existing SVAR manager remain application-owned;
+- file transfers use explicit overwrite/skip decisions, atomic replacement with
+  restoration on promotion failure, bounded traversal, and a conservative
+  policy that rejects symbolic links and special files;
+- opaque SFTP status failures are translated into structured user-facing errors,
+  while failed or canceled jobs can be retried and active jobs report an ETA;
 - the selected Web App workbench is a Svelte feature backed by a pure view
   model; browser launch and tunnel operations remain application callbacks;
 - newly created hosts, nested systems and Web Apps enter the same selected and
@@ -153,10 +158,9 @@ Status on 2026-11-12 for branch `feature/v2-modular-architecture`:
 - plugin package details are documented in
   [PLUGIN_MANIFEST.md](PLUGIN_MANIFEST.md).
 
-The next implementation milestone is frontend modularization in Phase 3. The
-SFTP engine remains a Phase 4 concern, where its extraction is coupled to
-conflict, retry and rollback contracts rather than treated as an unrelated
-facade refactor. Plugin process supervision is available
+The next implementation milestone is completing frontend modularization in
+Phase 3, followed by the user-facing plugin foundation in Phase 5. File transfer
+reliability contracts are now explicit and tested. Plugin process supervision is available
 to the application shutdown path, but user-facing plugin installation and
 enablement remain blocked on explicit permission and trust policy.
 
@@ -427,11 +431,12 @@ Exit condition: `main.js` is bootstrap code rather than the application.
 
 ### Phase 4: Transfer reliability
 
-- [ ] Add structured SFTP errors, retry and ETA.
+- [x] Add structured SFTP errors, retry and ETA.
 - [x] Define explicit destination conflict policies.
-- [ ] Add bounded recursive traversal and explicit symlink/special-file behavior.
-- [ ] Add rollback/preservation rules for replacement.
-- [ ] Design remote editing with revision/conflict checks before implementation.
+- [x] Add bounded recursive traversal and explicit symlink/special-file behavior.
+- [x] Add rollback/preservation rules for replacement.
+- [x] Design remote editing with revision/conflict checks before implementation
+  in [REMOTE_EDITING.md](REMOTE_EDITING.md).
 
 Exit condition: interrupted or conflicting transfers have deterministic,
 tested outcomes and useful diagnostics.
