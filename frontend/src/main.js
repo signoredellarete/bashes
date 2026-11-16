@@ -121,6 +121,7 @@ import { createDragOutlineController } from './ui/drag-outline.js';
 import { createEditContextMenu } from './ui/edit-context-menu.js';
 import { createFieldHelpController } from './ui/field-help.js';
 import { createTooltipController } from './ui/tooltip.js';
+import { createMessageCenter } from './messages/controller.js';
 import './terminal-fonts.css';
 import './styles.css';
 import './terminal/workspace.css';
@@ -372,6 +373,12 @@ const fileTransferShell = mountFileTransferShell(document.querySelector('#file-t
 const appOverlays = mountAppOverlays(document.querySelector('#app-overlays-root'), {
   onclosed: () => restoreTerminalFocusAfterOverlay(),
 });
+const messageCenter = createMessageCenter({
+  statusElement: document.querySelector('#app-status'),
+  notify: (message, level) => appOverlays.notify(message, level),
+  showLog: (options) => showAppModal(options),
+});
+const writeNotice = (message, level = '') => messageCenter.write(message, level);
 const tooltip = createTooltipController({ element: document.querySelector('#app-tooltip') });
 const fieldHelp = createFieldHelpController();
 const editContextMenu = createEditContextMenu({
@@ -590,7 +597,7 @@ document.querySelector('#connect').addEventListener('click', () => {
 });
 document.querySelector('#disconnect').addEventListener('click', () => disconnectActiveSession());
 document.querySelector('#delete-resource').addEventListener('click', () => deleteSelectedResource());
-document.querySelector('#message-log-button').addEventListener('click', () => showMessageLog());
+document.querySelector('#message-log-button').addEventListener('click', () => messageCenter.openLog());
 document.querySelector('#decrease-terminal-font').addEventListener('click', () => settingsController.adjustFontSize(-1));
 document.querySelector('#increase-terminal-font').addEventListener('click', () => settingsController.adjustFontSize(1));
 fieldHelp.bind(document.querySelectorAll('.field-help-trigger'));
@@ -2540,55 +2547,6 @@ function hasOpenBlockingOverlay() {
 
 function scheduleTerminalFit() {
   terminalController.scheduleFit();
-}
-
-function writeNotice(message, level = '') {
-  const status = document.querySelector('#app-status');
-  if (!status) return;
-  status.textContent = message;
-  status.title = message;
-  const resolvedLevel = level || noticeLevel(message);
-  recordNotice(message, resolvedLevel);
-  notify(message, resolvedLevel);
-}
-
-function noticeLevel(message) {
-  const text = String(message ?? '');
-  if (/error|could not|failed|unable|invalid|mismatch|required|denied|refused|timeout|unreachable/i.test(text)) {
-    return 'error';
-  }
-  if (/updated|added|imported|installed|generated|connected|started|stopped|active|saved/i.test(text)) {
-    return 'success';
-  }
-  return 'info';
-}
-
-function recordNotice(message, level) {
-  state.messageLog.unshift({
-    time: new Date().toLocaleTimeString(),
-    level,
-    message: String(message ?? ''),
-  });
-  state.messageLog = state.messageLog.slice(0, 50);
-}
-
-function notify(message, level = 'info') {
-  appOverlays.notify(message, level);
-}
-
-function showMessageLog() {
-  const entries = state.messageLog.length > 0
-    ? state.messageLog.map((entry) => [
-      `${entry.time} ${entry.level.toUpperCase()}`,
-      entry.message,
-    ])
-    : [['Log', 'No messages yet.']];
-  showAppModal({
-    kicker: 'Tools',
-    title: 'Message Log',
-    message: 'Latest Bashes messages.',
-    details: entries,
-  });
 }
 
 function registerSSHEvents() {

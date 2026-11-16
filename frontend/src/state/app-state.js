@@ -25,7 +25,6 @@ export function createAppState({ terminalSettings, storage = globalThis.localSto
     tagFilterMode: 'any',
     lastSessionByResource: new Map(),
     sessionFocusHistory: [],
-    messageLog: [],
     sessions: new Map(),
     pendingSSHOutput: new Map(),
   };
