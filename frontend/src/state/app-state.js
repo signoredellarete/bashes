@@ -20,7 +20,6 @@ export function createAppState({ terminalSettings, storage = globalThis.localSto
     sidebarCollapsed: storage?.getItem('bashes.sidebarCollapsed') === 'true',
     busy: false,
     connectingResourceIds: new Set(),
-    editContextTarget: null,
     activeTagFilters: [],
     tagFilterMode: 'any',
     lastSessionByResource: new Map(),

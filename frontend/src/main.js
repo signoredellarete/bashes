@@ -121,6 +121,10 @@ import { mountWebAppPanel } from './web-apps/panel-mount.js';
 import { webAppPanelData } from './web-apps/panel-model.js';
 import { mountWebAppWorkspace } from './web-apps/workspace-mount.js';
 import { webAppWorkspaceData } from './web-apps/workspace-model.js';
+import { createDragOutlineController } from './ui/drag-outline.js';
+import { createEditContextMenu } from './ui/edit-context-menu.js';
+import { createFieldHelpController } from './ui/field-help.js';
+import { createTooltipController } from './ui/tooltip.js';
 import './terminal-fonts.css';
 import './styles.css';
 import './terminal/workspace.css';
@@ -142,16 +146,11 @@ const state = createAppState({ terminalSettings, storage: localStorage });
 
 let searchRenderFrame = 0;
 let sidebarRenderFrame = 0;
-let tooltipTimer = 0;
 let suppressTagFilterClickUntil = 0;
 let tagPopover = null;
 let tagPopoverRequest = 0;
-const dragOutlineTimers = { hosts: 0, tabs: 0 };
-const dragOutlineTargets = { hosts: null, tabs: null };
 
 const FILE_TRANSFER_ENABLED = true;
-const TOOLTIP_DELAY = 500;
-const DRAG_OUTLINE_DELAY = 300;
 const backend = createBackendClient({
   demoMode: import.meta.env.DEV && globalThis.__BASHES_DEMO__ === true,
   getSessionTerminal: (sessionID) => state.sessions.get(sessionID)?.terminal,
@@ -373,6 +372,14 @@ const fileTransferShell = mountFileTransferShell(document.querySelector('#file-t
 const appOverlays = mountAppOverlays(document.querySelector('#app-overlays-root'), {
   onclosed: () => restoreTerminalFocusAfterOverlay(),
 });
+const tooltip = createTooltipController({ element: document.querySelector('#app-tooltip') });
+const fieldHelp = createFieldHelpController();
+const editContextMenu = createEditContextMenu({
+  menu: document.querySelector('#edit-context-menu'),
+  readClipboard,
+  writeClipboard,
+});
+const dragOutline = createDragOutlineController({ delay: 300 });
 const tagPanel = mountTagPanel(document.querySelector('#tag-panel-root'), {
   oncreate: (name) => createManagedTag(name),
   onrename: (tag, name) => renameManagedTag(tag, name),
@@ -431,30 +438,30 @@ const sshKeysPanel = mountSSHKeysPanel(document.querySelector('#ssh-keys-panel-r
 const sidebarResources = mountSidebarResources(document.querySelector('#hosts'), {
   onselect: (resourceId) => selectSidebarResource(resourceId),
   onactivate: (resourceId, type) => activateSidebarResource(resourceId, type),
-  ontooltip: (anchor, delay) => showTooltip(anchor, delay),
-  onhidetooltip: () => hideTooltip(),
+  ontooltip: (anchor, delay) => tooltip.show(anchor, delay),
+  onhidetooltip: () => tooltip.hide(),
   ontagpopover: (anchor, resourceId) => toggleTagPopover(anchor, resourceId),
   onrender: (data) => finishSidebarRender(data),
 });
 const sidebarSorting = createSidebarSorting({
   onReorder: (order) => persistHostOrder(order),
   onTagAssignment: (resourceId, tagName, assigned) => updateResourceTagAssignment(resourceId, tagName, assigned),
-  onHideTooltip: () => hideTooltip(),
-  onClearDragOutline: (kind) => clearDragOutline(kind),
-  onClearAllDragOutlines: () => clearAllDragOutlines(),
+  onHideTooltip: () => tooltip.hide(),
+  onClearDragOutline: (kind) => dragOutline.clear(kind),
+  onClearAllDragOutlines: () => dragOutline.clearAll(),
   onSuppressTagFilter: () => { suppressTagFilterClickUntil = Date.now() + 120; },
 });
 const terminalTabs = mountTerminalTabs(document.querySelector('#session-tabs'), {
   onselect: (sessionId) => selectTerminalTab(sessionId),
   onactivate: (sessionId) => activateTerminalTab(sessionId),
   onclose: (sessionId) => stopSession(sessionId),
-  ontooltip: (anchor) => showTooltip(anchor),
-  onhidetooltip: () => hideTooltip(),
+  ontooltip: (anchor) => tooltip.show(anchor),
+  onhidetooltip: () => tooltip.hide(),
   onrender: (data) => finishTerminalTabsRender(data),
 });
 const terminalTabSorting = createTerminalTabSorting({
   onReorder: (order) => reorderSessionTabs(order),
-  onClearDragOutline: () => clearDragOutline('tabs'),
+  onClearDragOutline: () => dragOutline.clear('tabs'),
   onFocus: () => focusActiveTerminal(),
 });
 
@@ -528,25 +535,18 @@ document.querySelector('#delete-resource').addEventListener('click', () => delet
 document.querySelector('#message-log-button').addEventListener('click', () => showMessageLog());
 document.querySelector('#decrease-terminal-font').addEventListener('click', () => adjustTerminalFontSize(-1));
 document.querySelector('#increase-terminal-font').addEventListener('click', () => adjustTerminalFontSize(1));
-document.querySelectorAll('.field-help-trigger').forEach((button) => {
-  button.addEventListener('click', (event) => toggleFieldHelp(event));
-  button.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      toggleFieldHelp(event);
-    }
-  });
-});
-document.querySelector('#edit-context-menu').addEventListener('click', (event) => runEditContextCommand(event));
-document.addEventListener('contextmenu', (event) => openEditContextMenu(event));
+fieldHelp.bind(document.querySelectorAll('.field-help-trigger'));
+document.querySelector('#edit-context-menu').addEventListener('click', (event) => editContextMenu.run(event));
+document.addEventListener('contextmenu', (event) => editContextMenu.open(event));
 document.addEventListener('pointerdown', (event) => {
-  if (!event.target.closest?.('#edit-context-menu')) hideEditContextMenu();
-  if (!event.target.closest?.('.field-label-with-help')) closeFieldHelpPopovers();
+  if (!event.target.closest?.('#edit-context-menu')) editContextMenu.hide();
+  if (!event.target.closest?.('.field-label-with-help')) fieldHelp.close();
   schedulePointerDragOutline(event);
   if (!event.target.closest?.('#open-add-menu, #add-resource-menu')) closeAddResourceMenu();
 });
-window.addEventListener('pointerup', () => clearAllDragOutlines());
-window.addEventListener('pointercancel', () => clearAllDragOutlines());
-window.addEventListener('blur', () => clearAllDragOutlines());
+window.addEventListener('pointerup', () => dragOutline.clearAll());
+window.addEventListener('pointercancel', () => dragOutline.clearAll());
+window.addEventListener('blur', () => dragOutline.clearAll());
 window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && appOverlays.isFileConflictOpen()) {
     appOverlays.resolveFileConflict(null);
@@ -559,8 +559,8 @@ window.addEventListener('keydown', (event) => {
   } else if (event.key === 'Escape' && tagPanel.isOpen()) {
     closeTagPanel();
   } else if (event.key === 'Escape') {
-    closeFieldHelpPopovers();
-    hideEditContextMenu();
+    fieldHelp.close();
+    editContextMenu.hide();
   }
 });
 
@@ -568,23 +568,6 @@ await loadCapabilities();
 await loadHosts();
 await loadKeySettings();
 
-function toggleFieldHelp(event) {
-  event.preventDefault();
-  event.stopPropagation();
-
-  const button = event.currentTarget;
-  const willOpen = button.getAttribute('aria-expanded') !== 'true';
-  closeFieldHelpPopovers(button);
-  button.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
-}
-
-function closeFieldHelpPopovers(except = null) {
-  document.querySelectorAll('.field-help-trigger[aria-expanded="true"]').forEach((button) => {
-    if (button !== except) {
-      button.setAttribute('aria-expanded', 'false');
-    }
-  });
-}
 await loadKeys();
 await loadTunnels();
 applySidebarState();
@@ -1277,7 +1260,7 @@ function scheduleHostRender() {
 
 function renderHosts(filter = '') {
   closeTagPopover();
-  clearDragOutline('hosts');
+  dragOutline.clear('hosts');
   sidebarSorting.destroy();
   renderTagFilters();
   void sidebarResources.update(sidebarTreeData({
@@ -1533,56 +1516,13 @@ function applySidebarState() {
   toggle.title = state.sidebarCollapsed ? 'Expand sidebar' : 'Compact sidebar';
   toggle.setAttribute('aria-label', toggle.title);
   toggle.setAttribute('aria-expanded', String(!state.sidebarCollapsed));
-  hideTooltip();
+  tooltip.hide();
   requestAnimationFrame(syncSidebarScrollbarInset);
 }
 
 function syncSidebarScrollbarInset() {
   const inset = sidebarListInset(hostsScroll.offsetWidth, hostsScroll.clientWidth);
   hostsScroll.style.setProperty('--hosts-scroll-inset', `${inset}px`);
-}
-
-function showTooltip(anchor, delay = TOOLTIP_DELAY) {
-  hideTooltip();
-  if (delay <= 0) {
-    renderTooltip(anchor);
-    return;
-  }
-
-  tooltipTimer = window.setTimeout(() => {
-    tooltipTimer = 0;
-    renderTooltip(anchor);
-  }, delay);
-}
-
-function renderTooltip(anchor) {
-  if (!anchor.isConnected) return;
-  const tooltip = document.querySelector('#app-tooltip');
-  const text = anchor.dataset.tooltip;
-  if (!tooltip || !text) return;
-
-  const rect = anchor.getBoundingClientRect();
-  tooltip.textContent = text;
-  tooltip.hidden = false;
-  const tooltipRect = tooltip.getBoundingClientRect();
-  const placement = anchor.dataset.tooltipPlacement || 'right';
-  const left = placement === 'bottom'
-    ? rect.left + rect.width / 2 - tooltipRect.width / 2
-    : rect.right + 10;
-  const top = placement === 'bottom'
-    ? rect.bottom + 8
-    : rect.top + rect.height / 2 - tooltipRect.height / 2;
-  tooltip.style.left = `${Math.round(clampNumber(left, 8, Math.max(8, window.innerWidth - tooltipRect.width - 8)))}px`;
-  tooltip.style.top = `${Math.round(clampNumber(top, 8, Math.max(8, window.innerHeight - tooltipRect.height - 8)))}px`;
-}
-
-function hideTooltip() {
-  if (tooltipTimer) {
-    window.clearTimeout(tooltipTimer);
-    tooltipTimer = 0;
-  }
-  const tooltip = document.querySelector('#app-tooltip');
-  if (tooltip) tooltip.hidden = true;
 }
 
 function webAppTabForResource(resourceID) {
@@ -1737,8 +1677,8 @@ function createSession(sessionID, resource, kind = 'ssh', replaceSessionID = '')
 }
 
 function renderTabs() {
-  hideTooltip();
-  clearDragOutline('tabs');
+  tooltip.hide();
+  dragOutline.clear('tabs');
   terminalTabSorting.destroy();
   const empty = document.querySelector('#empty-terminal');
   const sessions = [...state.sessions.values()];
@@ -1792,34 +1732,11 @@ function schedulePointerDragOutline(event) {
   if (event.target.closest?.('.resource-tag, .tag-filter-chip')) return;
   const tab = event.target.closest?.('.session-tab');
   if (terminalTabSorting.isActive() && tab) {
-    scheduleDragOutline('tabs', tab.closest('.session-tab-wrap'));
+    dragOutline.schedule('tabs', tab.closest('.session-tab-wrap'));
     return;
   }
   const host = event.target.closest?.('.host-block');
-  if (sidebarSorting.hostSortingActive() && host) scheduleDragOutline('hosts', host);
-}
-
-function scheduleDragOutline(kind, target) {
-  clearDragOutline(kind);
-  dragOutlineTargets[kind] = target;
-  target?.classList.add('drag-outline-source');
-  dragOutlineTimers[kind] = window.setTimeout(() => {
-    dragOutlineTimers[kind] = 0;
-    document.documentElement.classList.add(`${kind}-drag-outline-ready`);
-  }, DRAG_OUTLINE_DELAY);
-}
-
-function clearDragOutline(kind) {
-  window.clearTimeout(dragOutlineTimers[kind]);
-  dragOutlineTimers[kind] = 0;
-  dragOutlineTargets[kind]?.classList.remove('drag-outline-source');
-  dragOutlineTargets[kind] = null;
-  document.documentElement.classList.remove(`${kind}-drag-outline-ready`);
-}
-
-function clearAllDragOutlines() {
-  clearDragOutline('hosts');
-  clearDragOutline('tabs');
+  if (sidebarSorting.hostSortingActive() && host) dragOutline.schedule('hosts', host);
 }
 
 function openResourcePanel(mode, hostID = '') {
@@ -2744,93 +2661,6 @@ function hasOpenBlockingOverlay() {
 
 function scheduleTerminalFit() {
   terminalController.scheduleFit();
-}
-
-function openEditContextMenu(event) {
-  const target = editableContextTarget(event.target);
-  if (!target) return;
-
-  event.preventDefault();
-  event.stopPropagation();
-  state.editContextTarget = target;
-  const menu = document.querySelector('#edit-context-menu');
-  if (!menu) return;
-
-  const canWrite = !target.readOnly && !target.disabled;
-  menu.querySelector('[data-edit-command="cut"]').disabled = !canWrite;
-  menu.querySelector('[data-edit-command="paste"]').disabled = !canWrite;
-  menu.hidden = false;
-
-  const rect = menu.getBoundingClientRect();
-  const left = Math.min(event.clientX, window.innerWidth - rect.width - 8);
-  const top = Math.min(event.clientY, window.innerHeight - rect.height - 8);
-  menu.style.left = `${Math.max(8, left)}px`;
-  menu.style.top = `${Math.max(8, top)}px`;
-}
-
-function editableContextTarget(target) {
-  const element = target?.closest?.('input, textarea, [contenteditable="true"]');
-  if (!element || element.closest('.terminal-pane')) return null;
-  if (element.matches('input')) {
-    const type = (element.getAttribute('type') || 'text').toLowerCase();
-    if (['button', 'checkbox', 'color', 'file', 'hidden', 'radio', 'range', 'reset', 'submit'].includes(type)) return null;
-  }
-  return element;
-}
-
-async function runEditContextCommand(event) {
-  const button = event.target.closest?.('[data-edit-command]');
-  if (!button || button.disabled || !state.editContextTarget) return;
-  event.preventDefault();
-  event.stopPropagation();
-
-  const target = state.editContextTarget;
-  const command = button.dataset.editCommand;
-  try {
-    if (command === 'copy') {
-      await writeClipboard(selectedEditableText(target));
-    } else if (command === 'cut') {
-      await writeClipboard(selectedEditableText(target));
-      replaceEditableSelection(target, '');
-    } else if (command === 'paste') {
-      const text = await readClipboard();
-      if (text) replaceEditableSelection(target, text);
-    }
-  } finally {
-    target.focus();
-    hideEditContextMenu();
-  }
-}
-
-function hideEditContextMenu() {
-  const menu = document.querySelector('#edit-context-menu');
-  if (menu) menu.hidden = true;
-  state.editContextTarget = null;
-}
-
-function selectedEditableText(target) {
-  if (target.isContentEditable) {
-    return String(globalThis.getSelection?.() ?? '');
-  }
-  const start = target.selectionStart ?? 0;
-  const end = target.selectionEnd ?? start;
-  return target.value.slice(start, end);
-}
-
-function replaceEditableSelection(target, text) {
-  if (target.isContentEditable) {
-    document.execCommand('insertText', false, text);
-    target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
-    return;
-  }
-  const start = target.selectionStart ?? target.value.length;
-  const end = target.selectionEnd ?? start;
-  const before = target.value.slice(0, start);
-  const after = target.value.slice(end);
-  target.value = `${before}${text}${after}`;
-  const next = start + text.length;
-  target.setSelectionRange(next, next);
-  target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: text ? 'insertText' : 'deleteByCut', data: text }));
 }
 
 function writeNotice(message, level = '') {
