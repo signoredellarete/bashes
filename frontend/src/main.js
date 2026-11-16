@@ -126,6 +126,7 @@ import { createMessageCenter } from './messages/controller.js';
 import { createUpdateController } from './updates/controller.js';
 import { registerRuntimeEvents } from './app/runtime-events.js';
 import { createMenuActions } from './app/menu-actions.js';
+import { createBusyController } from './app/busy-controller.js';
 import './terminal-fonts.css';
 import './styles.css';
 import './terminal/workspace.css';
@@ -364,6 +365,7 @@ app.innerHTML = `
 `;
 
 let settingsController;
+let busyController;
 const settingsPanel = mountSettingsPanel(document.querySelector('#settings-root'), {
   onpreview: (values) => settingsController?.preview(values),
   onsave: (values) => settingsController?.submit(values),
@@ -490,6 +492,12 @@ const sshKeysPanel = mountSSHKeysPanel(document.querySelector('#ssh-keys-panel-r
   onsavedirectory: (directory) => submitKeyDirectory(directory),
   onbrowse: () => browseKeyDirectory(),
   onrescan: (announce) => rescanKeySources(announce),
+});
+busyController = createBusyController({
+  state,
+  panels: [tagPanel, resourcePanel, webAppPanel, webAppAuthPanel, connectPanel, tunnelPanel, sshKeysPanel],
+  renderSelection: () => renderSelection(),
+  writeNotice,
 });
 const sidebarResources = mountSidebarResources(document.querySelector('#hosts'), {
   onselect: (resourceId) => selectSidebarResource(resourceId),
@@ -2495,52 +2503,11 @@ function lastFocusedSessionID() {
 }
 
 async function withBusy(task) {
-  if (state.busy) {
-    writeNotice('Operation in progress, please wait.', 'warning');
-    return;
-  }
-
-  state.busy = true;
-  renderSelection();
-  tagPanel.setBusy(true);
-  resourcePanel.setBusy(true);
-  webAppPanel.setBusy(true);
-  webAppAuthPanel.setBusy(true);
-  connectPanel.setBusy(true);
-  tunnelPanel.setBusy(true);
-  sshKeysPanel.setBusy(true);
-  try {
-    return await task();
-  } catch (error) {
-    writeNotice(`Error: ${error?.message ?? error}`, 'error');
-    return null;
-  } finally {
-    state.busy = false;
-    renderSelection();
-    tagPanel.setBusy(false);
-    resourcePanel.setBusy(false);
-    webAppPanel.setBusy(false);
-    webAppAuthPanel.setBusy(false);
-    connectPanel.setBusy(false);
-    tunnelPanel.setBusy(false);
-    sshKeysPanel.setBusy(false);
-  }
+  return busyController.run(task);
 }
 
 async function withConnectionBusy(resourceID, task) {
-  if (state.connectingResourceIds.has(resourceID)) {
-    writeNotice('A connection attempt is already in progress for this node.', 'warning');
-    return null;
-  }
-
-  state.connectingResourceIds.add(resourceID);
-  renderSelection();
-  try {
-    return await task();
-  } finally {
-    state.connectingResourceIds.delete(resourceID);
-    renderSelection();
-  }
+  return busyController.runConnection(resourceID, task);
 }
 
 function focusActiveTerminal() {
