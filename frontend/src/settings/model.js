@@ -29,6 +29,12 @@ export function settingsPanelData(state, terminalFontOptions, limits) {
     customBrowserPath: state.webAppBrowserSettings.customBrowserPath || '',
     fontOptions,
     browserOptions,
+    pluginDirectory: state.pluginInventory?.directory ?? '',
+    plugins: (state.pluginInventory?.plugins ?? []).map((plugin) => ({
+      ...plugin,
+      permissions: [...(plugin.permissions ?? [])],
+      capabilities: [...(plugin.capabilities ?? [])],
+    })),
     minTerminalFontSize: limits.min,
     maxTerminalFontSize: limits.max,
   };

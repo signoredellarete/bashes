@@ -171,6 +171,7 @@ const {
   deleteWebApp: apiDeleteWebApp,
   generateSSHKey: apiGenerateSSHKey,
   getAppInfo: apiGetAppInfo,
+  getPluginInventory: apiGetPluginInventory,
   getSSHKeyInventory: apiGetSSHKeyInventory,
   getSSHKeySettings: apiGetSSHKeySettings,
   getWebAppBrowserSettings: apiGetWebAppBrowserSettings,
@@ -194,6 +195,7 @@ const {
   resizeSSHSession: apiResizeSSHSession,
   saveSSHKeySettings: apiSaveSSHKeySettings,
   saveWebAppBrowserSettings: apiSaveWebAppBrowserSettings,
+  setPluginEnabled: apiSetPluginEnabled,
   setResourceTags: apiSetResourceTags,
   startLocalSession: apiStartLocalSession,
   startSSHSession: apiStartSSHSession,
@@ -2494,9 +2496,9 @@ async function runAutomaticUpdateCheck() {
 
 async function openSettingsPanel() {
   try {
-    await loadWebAppBrowserSettings();
+    await Promise.all([loadWebAppBrowserSettings(), loadPluginInventory()]);
   } catch (error) {
-    writeNotice(`Could not detect Web App browsers: ${errorDetail(error)}`, 'error');
+    writeNotice(`Could not load settings: ${errorDetail(error)}`, 'error');
   }
   await settingsPanel.open(settingsPanelData());
 }
@@ -2519,6 +2521,7 @@ function settingsPanelData() {
 }
 
 async function submitSettings(values) {
+  if (!await applyPluginSettings(values.plugins)) return false;
   state.terminalFontSize = clampNumber(
     values.terminalFontSize,
     MIN_TERMINAL_FONT_SIZE,
@@ -2542,6 +2545,52 @@ async function submitSettings(values) {
   writeNotice('Settings saved.');
   closeSettingsPanel({ restoreTerminalSettings: false });
   return true;
+}
+
+async function loadPluginInventory() {
+  state.pluginInventory = await apiGetPluginInventory();
+}
+
+async function applyPluginSettings(requested = []) {
+  const current = new Map((state.pluginInventory.plugins ?? []).map((plugin) => [plugin.id, plugin]));
+  const changes = requested.filter((plugin) => current.get(plugin.id)?.enabled !== plugin.enabled);
+  const enabling = changes.filter((plugin) => plugin.enabled);
+  if (enabling.length > 0) {
+    const permissions = [...new Set(enabling.flatMap((plugin) => plugin.permissions ?? []))];
+    const approved = await openConfirmModal({
+      kicker: 'Plugins',
+      title: `Enable ${enabling.length === 1 ? enabling[0].name : `${enabling.length} plugins`}?`,
+      message: `Plugins are native programs and are not sandboxed.${permissions.length ? ` Requested permissions: ${permissions.join(', ')}.` : ''}`,
+      confirmLabel: 'Enable',
+      danger: false,
+    });
+    if (!approved) return false;
+  }
+
+  const applied = [];
+  try {
+    for (const plugin of changes) {
+      await apiSetPluginEnabled(plugin.id, plugin.enabled);
+      applied.push({ id: plugin.id, enabled: !plugin.enabled });
+    }
+    await loadPluginInventory();
+    return true;
+  } catch (error) {
+    for (const plugin of applied.reverse()) {
+      try {
+        await apiSetPluginEnabled(plugin.id, plugin.enabled);
+      } catch {
+        // The inventory reload below reports any rollback failure explicitly.
+      }
+    }
+    try {
+      await loadPluginInventory();
+    } catch {
+      // Preserve the original plugin settings error.
+    }
+    writeNotice(`Could not save plugin settings: ${errorDetail(error)}`, 'error');
+    return false;
+  }
 }
 
 function previewTerminalAppearance(values) {

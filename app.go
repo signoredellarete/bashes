@@ -66,6 +66,7 @@ type App struct {
 	transferJobs     *transfer.Manager
 	webAppRuntimes   *webappruntime.Registry[*webAppRuntime]
 	plugins          *plugin.Supervisor
+	pluginRegistry   *plugin.Registry
 	desktopRuntime   desktop.Runtime
 	openFile         func(string) error
 	openFileCacheDir string
@@ -112,6 +113,7 @@ func newAppWithPasswordStore(dataPath string, passwords credentials.Store) *App 
 		transferJobs:     transfer.NewManager(),
 		webAppRuntimes:   webappruntime.NewRegistry[*webAppRuntime](),
 		plugins:          plugin.NewSupervisor(plugin.SupervisorOptions{HostVersion: version}),
+		pluginRegistry:   plugin.NewRegistry(filepath.Join(filepath.Dir(dataPath), "plugins"), goruntime.GOOS, goruntime.GOARCH, settingsRepository),
 		desktopRuntime:   desktop.NewWailsRuntime(),
 		openFile:         openFileWithDefaultApplication,
 		openFileCacheDir: defaultOpenFileCacheDir(dataPath),
@@ -235,6 +237,14 @@ func (a *App) ListWorkspace() (application.Workspace, error) {
 
 func (a *App) ListTags() ([]string, error) {
 	return a.service.ListTags()
+}
+
+func (a *App) GetPluginInventory() (plugin.Inventory, error) {
+	return a.pluginRegistry.Inventory()
+}
+
+func (a *App) SetPluginEnabled(id string, enabled bool) (plugin.PluginInfo, error) {
+	return a.pluginRegistry.SetEnabled(id, enabled)
 }
 
 func (a *App) CreateTag(name string) (string, error) {

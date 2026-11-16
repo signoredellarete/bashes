@@ -45,9 +45,9 @@ Status on 2026-11-16 for branch `feature/v2-modular-architecture`:
 | 0 - Baseline and contracts | Complete | Desktop adapters, error/event contracts and architecture guards are in place. |
 | 1 - Backend application boundaries | Complete | Data and connection workflows are independent of Wails and native operations use injectable adapters. |
 | 2 - Runtime manager | Complete | Native runtimes have backend ownership, common lifecycle state and deterministic cleanup tests. |
-| 3 - Frontend modularization | In progress | Desktop APIs, shared state and the main feature surfaces are extracted; bootstrap orchestration and CSS separation remain. |
+| 3 - Frontend modularization | In progress | Desktop APIs, feature surfaces, shared interactions, CSS and Files workspace ownership are extracted; bootstrap orchestration remains. |
 | 4 - Transfer reliability | Complete | Conflicts, rollback, bounded traversal, structured errors, retry and ETA have deterministic contracts and tests. |
-| 5 - Plugin foundation | In progress | Manifest, discovery, protocol and supervisor exist without user-facing enablement. |
+| 5 - Plugin foundation | Complete | Discovery, compatibility, explicit enablement, permissions, protocol supervision and Settings UI have tested contracts. |
 | 6 - First optional plugin | Not started | Depends on the completed plugin permission and installation model. |
 | 7 - Framework and release decision | Not started | Deferred until v1 feature parity is preserved by the modular core. |
 
@@ -125,8 +125,9 @@ Status on 2026-11-16 for branch `feature/v2-modular-architecture`:
   viewing and remote installation share one tested Svelte panel model while
   native key operations and confirmation policy remain application callbacks;
 - the file-transfer window shell owns its Svelte markup, visibility, title,
-  drag and resize behavior behind a tested geometry model; workspace lifetime,
-  background jobs and the existing SVAR manager remain application-owned;
+  drag and resize behavior behind a tested geometry model; a dedicated
+  controller owns workspace lifetime and background state while the existing
+  SVAR manager remains isolated;
 - file transfers use explicit overwrite/skip decisions, atomic replacement with
   restoration on promotion failure, bounded traversal, and a conservative
   policy that rejects symbolic links and special files;
@@ -152,17 +153,16 @@ Status on 2026-11-16 for branch `feature/v2-modular-architecture`:
 - Web App gateway authentication now uses the same shared credentials component
   and tested normalization as SSH sessions and tunnels, with browser launch and
   host-key confirmation still delegated to application callbacks;
-- plugin manifest validation, discovery, handshake and bounded process
-  supervision are tested; the supervisor is part of application shutdown but
-  has no user-facing installation or enablement path yet;
+- plugin manifest validation, discovery, compatibility, explicit enablement,
+  handshake and bounded process supervision are tested; Settings reports
+  unavailable packages and permissions without launching plugin processes;
 - plugin package details are documented in
   [PLUGIN_MANIFEST.md](PLUGIN_MANIFEST.md).
 
 The next implementation milestone is completing frontend modularization in
-Phase 3, followed by the user-facing plugin foundation in Phase 5. File transfer
-reliability contracts are now explicit and tested. Plugin process supervision is available
-to the application shutdown path, but user-facing plugin installation and
-enablement remain blocked on explicit permission and trust policy.
+Phase 3. File transfer reliability and the plugin foundation now have explicit,
+tested contracts. The first optional plugin remains blocked on a separate
+package repository and platform validation rather than core host architecture.
 
 ## Technology decisions
 
@@ -395,8 +395,10 @@ Exit condition: resource management, imports, keys and settings are testable
 without constructing the Wails facade.
 
 Scope note: protocol engines that already have backend runtime ownership are not
-rewritten merely to move files. The SFTP engine is extracted with the transfer
-contracts in Phase 4; Web App runtime evolution follows the plugin boundary.
+rewritten merely to move files. File-transfer reliability policy lives in
+`internal/filetransfer`; the Wails-facing SFTP adapter remains in
+`file_transfer.go` until it can move without changing generated bindings. Web
+App runtime evolution follows the plugin boundary.
 
 ### Phase 2: Runtime manager
 
@@ -425,7 +427,7 @@ Exit condition: no native resource relies on frontend cleanup for correctness.
 - [-] Preserve UI dimensions, colors, shortcuts, focus and modal behavior with
   focused automated and desktop preview tests.
 - [x] Split CSS by tokens, layout and feature while keeping one generated bundle.
-- [ ] Reduce `main.js` to application bootstrap and feature orchestration only.
+- [-] Reduce `main.js` to application bootstrap and feature orchestration only.
 
 Exit condition: `main.js` is bootstrap code rather than the application.
 
@@ -444,10 +446,10 @@ tested outcomes and useful diagnostics.
 ### Phase 5: Plugin foundation
 
 - [x] Implement manifest schema and validation.
-- [-] Implement discovery, enable/disable and compatibility reporting.
+- [x] Implement discovery, enable/disable and compatibility reporting.
 - [x] Implement process handshake, health, cancellation and shutdown.
 - [x] Ship a repository-local fixture plugin and failure-isolation tests.
-- [ ] Add a minimal plugin settings screen only after backend behavior is stable.
+- [x] Add a minimal plugin settings screen only after backend behavior is stable.
 
 Exit condition: a crashing or incompatible fixture is contained and explained
 without affecting SSH sessions or persisted data.

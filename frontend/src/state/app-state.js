@@ -11,6 +11,7 @@ export function createAppState({ terminalSettings, storage = globalThis.localSto
     keySettings: { customDirectory: '' },
     webAppBrowsers: [],
     webAppBrowserSettings: { preferredBrowserId: '', customBrowserPath: '' },
+    pluginInventory: { directory: '', plugins: [] },
     webAppRuntimes: new Map(),
     tunnels: new Map(),
     localShellSupported: false,

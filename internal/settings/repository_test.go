@@ -28,6 +28,7 @@ func TestRepositoryUpdatePreservesUnrelatedSettings(t *testing.T) {
 	if _, err := repository.Update(func(data *Data) error {
 		data.CustomDirectory = "/keys"
 		data.PreferredBrowserID = "firefox"
+		data.EnabledPlugins = []string{" org.bashes.example ", "org.bashes.example"}
 		return nil
 	}); err != nil {
 		t.Fatalf("Update(first) error = %v", err)
@@ -43,7 +44,7 @@ func TestRepositoryUpdatePreservesUnrelatedSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if data.CustomDirectory != "/keys" || data.PreferredBrowserID != "firefox" || data.CustomBrowserPath != "/browser" {
+	if data.CustomDirectory != "/keys" || data.PreferredBrowserID != "firefox" || data.CustomBrowserPath != "/browser" || len(data.EnabledPlugins) != 1 || data.EnabledPlugins[0] != "org.bashes.example" {
 		t.Fatalf("Load() = %#v", data)
 	}
 }

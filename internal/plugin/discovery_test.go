@@ -52,7 +52,27 @@ func TestDiscoverMissingRootIsEmpty(t *testing.T) {
 	}
 }
 
+func TestDiscoverRejectsDuplicatePluginIDs(t *testing.T) {
+	root := t.TempDir()
+	createDiscoveryFixtureWithID(t, root, "first", "org.bashes.duplicate", HostAPIVersion, true)
+	createDiscoveryFixtureWithID(t, root, "second", "org.bashes.duplicate", HostAPIVersion, true)
+
+	candidates, err := Discover(root, runtime.GOOS, runtime.GOARCH, HostAPIVersion)
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	for _, candidate := range candidates {
+		if candidate.Err == nil || !strings.Contains(candidate.Err.Error(), "duplicate plugin id") {
+			t.Fatalf("candidate error = %v, want duplicate plugin id", candidate.Err)
+		}
+	}
+}
+
 func createDiscoveryFixture(t *testing.T, root, name string, apiVersion int, executable bool) {
+	createDiscoveryFixtureWithID(t, root, name, "org.bashes."+name, apiVersion, executable)
+}
+
+func createDiscoveryFixtureWithID(t *testing.T, root, name, id string, apiVersion int, executable bool) {
 	t.Helper()
 	dir := filepath.Join(root, name)
 	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o700); err != nil {
@@ -64,7 +84,7 @@ func createDiscoveryFixture(t *testing.T, root, name string, apiVersion int, exe
 			t.Fatalf("WriteFile(executable) error = %v", err)
 		}
 	}
-	manifest := fmt.Sprintf(`{"schemaVersion":1,"id":"org.bashes.%s","name":"%s","version":"1.0.0","apiVersion":%d,"capabilities":["diagnostic"],"executables":{"%s/%s":"bin/plugin"}}`, name, name, apiVersion, runtime.GOOS, runtime.GOARCH)
+	manifest := fmt.Sprintf(`{"schemaVersion":1,"id":"%s","name":"%s","version":"1.0.0","apiVersion":%d,"capabilities":["diagnostic"],"executables":{"%s/%s":"bin/plugin"}}`, id, name, apiVersion, runtime.GOOS, runtime.GOARCH)
 	if err := os.WriteFile(filepath.Join(dir, ManifestFilename), []byte(manifest), 0o600); err != nil {
 		t.Fatalf("WriteFile(manifest) error = %v", err)
 	}

@@ -24,10 +24,11 @@ type WebAppBrowser struct {
 
 // Data intentionally retains the Bashes 1.x flat JSON field names.
 type Data struct {
-	Version            int    `json:"version,omitempty"`
-	CustomDirectory    string `json:"customDirectory,omitempty"`
-	PreferredBrowserID string `json:"preferredBrowserId,omitempty"`
-	CustomBrowserPath  string `json:"customBrowserPath,omitempty"`
+	Version            int      `json:"version,omitempty"`
+	CustomDirectory    string   `json:"customDirectory,omitempty"`
+	PreferredBrowserID string   `json:"preferredBrowserId,omitempty"`
+	CustomBrowserPath  string   `json:"customBrowserPath,omitempty"`
+	EnabledPlugins     []string `json:"enabledPlugins,omitempty"`
 }
 
 type Repository struct {
@@ -103,5 +104,23 @@ func normalize(settings Data) Data {
 	settings.CustomDirectory = strings.TrimSpace(settings.CustomDirectory)
 	settings.PreferredBrowserID = strings.TrimSpace(settings.PreferredBrowserID)
 	settings.CustomBrowserPath = strings.TrimSpace(settings.CustomBrowserPath)
+	settings.EnabledPlugins = normalizeStrings(settings.EnabledPlugins)
 	return settings
+}
+
+func normalizeStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }

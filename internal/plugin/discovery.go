@@ -54,5 +54,23 @@ func Discover(root, goos, goarch string, hostAPIVersion int) ([]Candidate, error
 		candidate.Executable, candidate.Err = manifest.Executable(directory, goos, goarch)
 		result = append(result, candidate)
 	}
+	markDuplicateIDs(result)
 	return result, nil
+}
+
+func markDuplicateIDs(candidates []Candidate) {
+	indexes := make(map[string][]int)
+	for index, candidate := range candidates {
+		if candidate.Manifest.ID != "" {
+			indexes[candidate.Manifest.ID] = append(indexes[candidate.Manifest.ID], index)
+		}
+	}
+	for id, duplicates := range indexes {
+		if len(duplicates) < 2 {
+			continue
+		}
+		for _, index := range duplicates {
+			candidates[index].Err = fmt.Errorf("duplicate plugin id %q", id)
+		}
+	}
 }

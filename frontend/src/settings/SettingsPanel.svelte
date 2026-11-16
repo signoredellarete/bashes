@@ -14,6 +14,8 @@
   let customBrowserPath = $state('');
   let fontOptions = $state([]);
   let browserOptions = $state([]);
+  let pluginDirectory = $state('');
+  let plugins = $state([]);
   let minTerminalFontSize = $state(8);
   let maxTerminalFontSize = $state(36);
   let fontSizeInput;
@@ -27,6 +29,8 @@
     customBrowserPath = data.customBrowserPath ?? '';
     fontOptions = data.fontOptions ?? [];
     browserOptions = data.browserOptions ?? [];
+    pluginDirectory = data.pluginDirectory ?? '';
+    plugins = (data.plugins ?? []).map((plugin) => ({ ...plugin }));
     minTerminalFontSize = data.minTerminalFontSize ?? 8;
     maxTerminalFontSize = data.maxTerminalFontSize ?? 36;
   }
@@ -61,6 +65,12 @@
       terminalCopyOnSelect,
       webAppBrowser,
       customBrowserPath,
+      plugins: plugins.filter((plugin) => plugin.id).map((plugin) => ({
+        id: plugin.id,
+        name: plugin.name,
+        permissions: plugin.permissions ?? [],
+        enabled: plugin.enabled,
+      })),
     });
   }
 </script>
@@ -137,6 +147,35 @@
           placeholder="Optional executable path"
         />
       </label>
+    </fieldset>
+
+    <fieldset class="settings-group">
+      <legend>Plugins</legend>
+      <p class="settings-group-note">
+        {#if pluginDirectory}Directory: <code>{pluginDirectory}</code>{:else}No plugin directory is available.{/if}
+      </p>
+      {#if plugins.length === 0}
+        <p class="settings-empty">No plugins installed.</p>
+      {:else}
+        <div class="settings-plugin-list">
+          {#each plugins as plugin, index}
+            <label class:unavailable={!plugin.available} class="settings-plugin-row">
+              <input
+                type="checkbox"
+                bind:checked={plugins[index].enabled}
+                disabled={!plugin.id || (!plugin.available && !plugin.enabled)}
+              />
+              <span class="settings-plugin-copy">
+                <strong>{plugin.name}</strong>
+                {#if plugin.version}<span class="settings-plugin-version">v{plugin.version}</span>{/if}
+                {#if plugin.description}<small>{plugin.description}</small>{/if}
+                {#if plugin.permissions?.length}<small>Permissions: {plugin.permissions.join(', ')}</small>{/if}
+                {#if plugin.error}<small class="settings-plugin-error">{plugin.error}</small>{/if}
+              </span>
+            </label>
+          {/each}
+        </div>
+      {/if}
     </fieldset>
 
     <footer class="panel-actions">

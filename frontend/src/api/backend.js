@@ -32,6 +32,8 @@ const METHOD_NAMES = Object.freeze({
   listWebAppBrowsers: 'ListWebAppBrowsers',
   getWebAppBrowserSettings: 'GetWebAppBrowserSettings',
   saveWebAppBrowserSettings: 'SaveWebAppBrowserSettings',
+  getPluginInventory: 'GetPluginInventory',
+  setPluginEnabled: 'SetPluginEnabled',
   launchWebApp: 'LaunchWebApp',
   stopWebAppTunnel: 'StopWebAppTunnel',
   startWebAppTunnel: 'StartWebAppTunnel',
@@ -294,6 +296,12 @@ function createDemoClient({ storage, getSessionTerminal, getWebAppRuntime, listW
       settingsStorage.setItem('bashes.webapps.browser', input.preferredBrowserId || '');
       settingsStorage.setItem('bashes.webapps.browserPath', input.customBrowserPath || '');
       return input;
+    },
+    async getPluginInventory() {
+      return { directory: 'demo/plugins', plugins: [] };
+    },
+    async setPluginEnabled(id, enabled) {
+      return { id, name: id, available: true, enabled };
     },
     async launchWebApp(input) {
       const webApp = store.webApps.find((item) => item.id === input.webAppId);
