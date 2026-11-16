@@ -424,7 +424,7 @@ Exit condition: no native resource relies on frontend cleanup for correctness.
 - [x] Extract SSH key inventory, generation, import and installation views.
 - [-] Preserve UI dimensions, colors, shortcuts, focus and modal behavior with
   focused automated and desktop preview tests.
-- [-] Split CSS by tokens, layout and feature while keeping one generated bundle.
+- [x] Split CSS by tokens, layout and feature while keeping one generated bundle.
 - [ ] Reduce `main.js` to application bootstrap and feature orchestration only.
 
 Exit condition: `main.js` is bootstrap code rather than the application.

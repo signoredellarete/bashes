@@ -1,0 +1,700 @@
+.file-transfer-modal[hidden] {
+  display: none;
+}
+
+.file-transfer-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.file-transfer-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(16, 20, 24, 0.46);
+}
+
+.file-transfer-card {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: min(1180px, calc(100vw - 36px));
+  height: min(760px, calc(100vh - 36px));
+  min-width: 720px;
+  min-height: 460px;
+  overflow: hidden;
+  grid-template-rows: auto minmax(0, 1fr);
+  border: 1px solid #c7cfd8;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 22px 58px rgba(31, 41, 51, 0.28);
+}
+
+.file-transfer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #dce1e6;
+  padding: 10px 12px;
+  cursor: move;
+  user-select: none;
+}
+
+.file-transfer-header h3 {
+  margin: 2px 0 0;
+  color: #2f3945;
+  font-size: 14px;
+}
+
+.file-transfer-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-transfer-header-actions .secondary {
+  min-height: 28px;
+  border: 1px solid #c7cfd8;
+  border-radius: 5px;
+  background: #f8fafb;
+  color: #53606f;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 9px;
+}
+
+#file-transfer-background {
+  border-color: #d8b18d;
+  background: #f5e6d8;
+  color: #86522a;
+}
+
+#file-transfer-background:hover {
+  border-color: #ca986b;
+  background: #f0dac6;
+  color: #73431f;
+}
+
+.file-transfer-root {
+  display: grid;
+  height: 100%;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.file-transfer-workspace {
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.file-transfer-workspace[hidden] {
+  display: none;
+}
+
+.file-transfer-resize-handle {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  color: #7b8794;
+}
+
+.file-transfer-resize-handle::before {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 11px;
+  height: 11px;
+  content: "";
+  background:
+    linear-gradient(135deg, transparent 0 46%, currentColor 47% 54%, transparent 55%),
+    linear-gradient(135deg, transparent 0 66%, currentColor 67% 74%, transparent 75%);
+  opacity: 0.75;
+}
+
+.resizing-file-transfer {
+  cursor: nwse-resize;
+  user-select: none;
+}
+
+.dragging-file-transfer {
+  cursor: move;
+  user-select: none;
+}
+
+.dragging-file-transfer-item {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.transfer-drag-ghost {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 80;
+  display: inline-flex;
+  max-width: 260px;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(127, 147, 165, 0.45);
+  border-radius: 6px;
+  background: rgba(31, 41, 51, 0.92);
+  box-shadow: 0 8px 24px rgba(16, 20, 24, 0.28);
+  color: #eef4f8;
+  font-size: 12px;
+  pointer-events: none;
+  padding: 6px 9px;
+}
+
+.transfer-drag-ghost span:not(.transfer-drag-ghost-icon) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-drag-ghost strong {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 99px;
+  background: #2f8f63;
+  color: #fff;
+  font-size: 11px;
+}
+
+.transfer-drag-ghost-icon {
+  position: relative;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+}
+
+.transfer-drag-ghost-icon.file::before {
+  position: absolute;
+  inset: 1px 3px 1px 2px;
+  border: 1px solid #9fb0bf;
+  border-radius: 2px;
+  background: #eef4f8;
+  content: "";
+}
+
+.transfer-drag-ghost-icon.file::after {
+  position: absolute;
+  top: 1px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  background: linear-gradient(135deg, #c9d6df 50%, transparent 50%);
+  content: "";
+}
+
+.transfer-drag-ghost-icon.folder::before {
+  position: absolute;
+  inset: 5px 1px 3px;
+  border: 1px solid #c88a28;
+  border-radius: 2px;
+  background: #f7ca6b;
+  content: "";
+}
+
+.transfer-drag-ghost-icon.folder::after {
+  position: absolute;
+  top: 3px;
+  left: 2px;
+  width: 8px;
+  height: 5px;
+  border-radius: 2px 2px 0 0;
+  background: #f2b84b;
+  content: "";
+}
+
+.transfer-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  background: #f8fafb;
+}
+
+.transfer-chrome {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+}
+
+.transfer-status {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid #dce1e6;
+  color: #53606f;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.transfer-status span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-status strong {
+  color: #495479;
+  font-size: 12px;
+}
+
+.transfer-status-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.transfer-hidden-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #53606f;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.transfer-hidden-toggle input {
+  width: 28px;
+  height: 16px;
+  margin: 0;
+  appearance: none;
+  border: 1px solid #9ca8b4;
+  border-radius: 99px;
+  background: #dce2e7;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.transfer-hidden-toggle input::before {
+  display: block;
+  width: 10px;
+  height: 10px;
+  margin: 2px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(31, 41, 51, 0.24);
+  content: "";
+  transition: transform 120ms ease;
+}
+
+.transfer-hidden-toggle input:checked {
+  border-color: #2f8f63;
+  background: #2f8f63;
+}
+
+.transfer-hidden-toggle input:checked::before {
+  transform: translateX(12px);
+}
+
+.transfer-hidden-toggle input:focus-visible {
+  outline: 2px solid #d9862f;
+  outline-offset: 2px;
+}
+
+.transfer-hidden-toggle input:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.transfer-error {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid #e0a39c;
+  background: #fff0ee;
+  color: #8b332a;
+  font-size: 12px;
+  padding: 7px 10px;
+}
+
+.transfer-error span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.transfer-error button {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: #8b332a;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+}
+
+.transfer-error button:hover {
+  color: #5f211b;
+}
+
+.transfer-error button:focus-visible {
+  outline: 2px solid #8b332a;
+  outline-offset: 1px;
+}
+
+.transfer-jobs {
+  display: grid;
+  box-sizing: border-box;
+  gap: 6px;
+  max-height: 240px;
+  overflow: auto;
+  border-bottom: 1px solid #dce1e6;
+  background: #eef3f5;
+  padding: 8px 10px;
+}
+
+.transfer-job {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #d2dbe2;
+  border-radius: 6px;
+  background: #fff;
+  color: #53606f;
+  font-size: 12px;
+  padding: 7px 8px;
+}
+
+.transfer-job.active {
+  border-color: #80b9a3;
+}
+
+.transfer-job-header,
+.transfer-job-footer {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.transfer-job-header span {
+  text-transform: capitalize;
+}
+
+.transfer-job-current {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-job progress {
+  width: 100%;
+  height: 7px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 99px;
+}
+
+.transfer-job progress::-webkit-progress-bar {
+  background: #e2e8ee;
+}
+
+.transfer-job progress::-webkit-progress-value {
+  background: #2f8f63;
+}
+
+.transfer-job progress::-moz-progress-bar {
+  background: #2f8f63;
+}
+
+.transfer-job button {
+  min-height: 24px;
+  border: 1px solid #c7cfd8;
+  border-radius: 5px;
+  background: #fff;
+  color: #2f3945;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+.transfer-job button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.transfer-job-error {
+  min-width: 0;
+  overflow: hidden;
+  color: #8b332a;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-job-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 5px;
+}
+
+.transfer-auth {
+  align-self: start;
+  justify-self: center;
+  display: grid;
+  width: min(360px, calc(100% - 32px));
+  gap: 11px;
+  margin-top: 44px;
+  border: 1px solid #dce1e6;
+  border-radius: 7px;
+  background: #fff;
+  box-shadow: 0 8px 22px rgba(31, 41, 51, 0.08);
+  padding: 16px;
+}
+
+.transfer-auth label {
+  display: grid;
+  gap: 5px;
+  color: #53606f;
+  font-size: 12px;
+}
+
+.transfer-auth input {
+  min-width: 0;
+  border: 1px solid #c7cfd8;
+  border-radius: 5px;
+  background: #fff;
+  color: #2f3945;
+  font: inherit;
+  padding: 8px 9px;
+}
+
+.transfer-auth input[readonly] {
+  background: #f5f7f9;
+}
+
+.transfer-auth button {
+  justify-self: end;
+  min-height: 30px;
+  border-radius: 5px;
+  padding: 6px 13px;
+}
+
+.transfer-auth-check {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+.transfer-auth-check input {
+  width: 15px;
+  height: 15px;
+  padding: 0;
+}
+
+.transfer-auth-placeholder {
+  color: #53606f;
+  font-size: 13px;
+  text-align: center;
+}
+
+.transfer-auth-placeholder p {
+  margin: 0;
+}
+
+.transfer-manager {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  contain: size layout paint;
+  overflow: hidden;
+}
+
+.transfer-manager .wx-filemanager {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.transfer-manager .wx-content-wrapper,
+.transfer-manager .wx-content-item-fit,
+.transfer-manager .wx-panels {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.transfer-manager .wx-panels {
+  overflow: hidden;
+}
+
+.transfer-manager .wx-panels .wx-item {
+  flex: 0 1 calc(50% - 5px);
+  min-width: 0;
+  max-width: calc(50% - 5px);
+}
+
+.transfer-shell.dragging .transfer-manager {
+  outline: 1px dashed #495479;
+  outline-offset: -8px;
+}
+
+.transfer-shell.dragging .transfer-manager::after {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  border: 1px dashed #495479;
+  border-radius: 5px;
+  background: rgba(237, 248, 240, 0.9);
+  color: #1f6f3d;
+  content: "Drop on target panel";
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 9px;
+  pointer-events: none;
+}
+
+.transfer-manager [class^="wxi-"]::before,
+.transfer-manager [class*=" wxi-"]::before,
+.transfer-manager [class^="mdi "]::before,
+.transfer-manager [class*=" mdi-"]::before {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  content: "";
+  background: currentColor;
+  -webkit-mask: var(--bashes-local-icon) center / contain no-repeat;
+  mask: var(--bashes-local-icon) center / contain no-repeat;
+}
+
+.transfer-manager .wxi-empty::before {
+  background: transparent;
+}
+
+.transfer-manager .wxi-view-sequential::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M5 6h14v2H5zm0 5h14v2H5zm0 5h14v2H5z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-view-grid::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4 4h7v7H4zm9 0h7v7h-7zM4 13h7v7H4zm9 0h7v7h-7z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-view-column::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4 4h5v16H4zm7 0h5v16h-5zm7 0h2v16h-2z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-eye::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 5C6.8 5 3.2 8.1 2 12c1.2 3.9 4.8 7 10 7s8.8-3.1 10-7c-1.2-3.9-4.8-7-10-7zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-search::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M10 4a6 6 0 0 1 4.7 9.7l4.8 4.8-1.4 1.4-4.8-4.8A6 6 0 1 1 10 4zm0 2a4 4 0 1 0 0 8 4 4 0 0 0 0-8z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-refresh::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M20 11a8 8 0 0 0-15.5-2M4 5v4h4M4 13a8 8 0 0 0 15.5 2m.5 4v-4h-4' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-close::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m6.4 5 12.6 12.6-1.4 1.4L5 6.4z'/%3E%3Cpath d='M17.6 5 5 17.6 6.4 19 19 6.4z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-angle-right::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m8 5 8 7-8 7z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-angle-down::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m5 8 7 8 7-8z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-arrow-left::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m10 5 1.4 1.4L7.8 10H20v2H7.8l3.6 3.6L10 17l-6-6z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-dots-v::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-dots-h::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8 12a2 2 0 1 0-4 0 2 2 0 0 0 4 0zm6 0a2 2 0 1 0-4 0 2 2 0 0 0 4 0zm6 0a2 2 0 1 0-4 0 2 2 0 0 0 4 0z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-content-copy::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8 7h11v13H8zM5 4h11v2H7v11H5z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-content-cut::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m6 4 12 16h-3L3 4zm12 0L3 20h3L21 4z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-content-paste::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8 4h8v3h3v14H5V7h3zm2 2v2h4V6zM7 9v10h10V9z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-download::before,
+.transfer-manager .mdi-file-upload-outline::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M11 4h2v8l3-3 1.4 1.4L12 16l-5.4-5.6L8 9l3 3zM5 18h14v2H5z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-edit::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M5 16.5V20h3.5L18.8 9.7l-3.5-3.5zM17 4.5 19.5 7 18 8.5 15.5 6z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-folder::before,
+.transfer-manager .mdi-folder-plus-outline::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3 6h7l2 2h9v10H3z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .mdi-file-plus-outline::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 3h9l4 4v14H6zm8 2v4h3zM11 11v3H8v2h3v3h2v-3h3v-2h-3v-3z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-check::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m9 16.5-4-4 1.4-1.4L9 13.7l8.6-8.6L19 6.5z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-alert::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 3 2 21h20zm-1 6h2v6h-2zm0 8h2v2h-2z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-loading::before {
+  --bashes-local-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2a10 10 0 0 1 10 10h-3a7 7 0 0 0-7-7z'/%3E%3C/svg%3E");
+}
+
+.transfer-manager .wxi-spin::before {
+  animation: wx-local-spin 0.8s linear infinite;
+}
+
+@keyframes wx-local-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+

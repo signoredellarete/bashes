@@ -1,0 +1,34 @@
+@media (max-width: 760px) {
+  #app {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(240px, 34vh) minmax(0, 1fr);
+  }
+
+  #app.sidebar-collapsed {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    border-right: 0;
+    border-bottom: 1px solid #d3d9df;
+  }
+
+  #app.sidebar-collapsed .sidebar {
+    min-height: 82px;
+  }
+
+  .session-header {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: center;
+  }
+
+  .session-actions {
+    grid-column: 1;
+    justify-self: start;
+    margin-left: 0;
+  }
+
+  .toolbar {
+    grid-template-columns: minmax(0, 1fr) 34px 34px;
+  }
+}

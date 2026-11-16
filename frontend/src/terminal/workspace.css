@@ -1,0 +1,239 @@
+.workspace {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  background: #e9edf1;
+  overflow: hidden;
+}
+
+.session-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid #ebeef2;
+  background: #f4f6f8;
+  padding: 8px 16px;
+}
+
+.session-header h2,
+.eyebrow {
+  margin: 0;
+}
+
+.session-header h2 {
+  min-width: 0;
+  overflow: hidden;
+  color: #111827;
+  font-size: 15px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-shell {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.session-tabs {
+  display: flex;
+  min-width: 0;
+  gap: 6px;
+  overflow-x: auto;
+  border-bottom: 1px solid #232b33;
+  background: #151a20;
+  padding: 6px 8px 0;
+}
+
+.session-tab-wrap {
+  display: inline-grid;
+  grid-template-columns: minmax(96px, 150px) 26px;
+  align-items: center;
+}
+
+.session-tab-wrap.tab-drag-ghost {
+  opacity: 0.32;
+}
+
+html.tabs-drag-outline-ready .session-tab-wrap.drag-outline-source .session-tab,
+html.tabs-drag-outline-ready .session-tab-wrap.drag-outline-source .tab-close {
+  border-color: #8290a0;
+  border-style: dashed;
+}
+
+.tab-drag-mirror {
+  z-index: 100;
+  cursor: grabbing;
+  opacity: 0.94;
+  filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.32));
+}
+
+.session-tab,
+.tab-close {
+  min-height: 30px;
+  border: 1px solid #2c3844;
+  background: #1d252e;
+  color: #d7dde5;
+  cursor: pointer;
+}
+
+.tab-close .ti,
+.tab-close svg {
+  width: 14px;
+  height: 14px;
+  font-size: 14px;
+}
+
+.session-tab {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  border-radius: 6px 0 0 0;
+  padding: 5px 7px;
+  text-align: left;
+}
+
+.session-tab span {
+  color: #91a3b5;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.session-tab strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-tab.closed {
+  border-color: #4b5563;
+  color: #91a3b5;
+  background: #171d24;
+}
+
+.session-tab.pending {
+  border-color: #64748b;
+  background: #202832;
+}
+
+.session-tab.active,
+.session-tab-wrap.active .tab-close {
+  border-color: #697887;
+  background: #202832;
+}
+
+.session-tab.active span {
+  color: #aab7c4;
+}
+
+.session-tab.active strong {
+  color: #ef9b4a;
+}
+
+.session-tab-wrap.active .tab-close {
+  color: #d7dde5;
+}
+
+.tab-close {
+  display: grid;
+  place-items: center;
+  border-left: 0;
+  border-radius: 0 6px 0 0;
+  font-family: "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols 2", system-ui, sans-serif;
+  padding: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+html.sorting-hosts,
+html.sorting-hosts *,
+html.sorting-tabs,
+html.sorting-tabs *,
+html.sorting-tags,
+html.sorting-tags * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+.terminal-stack {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #101418;
+  padding: 10px 14px 18px 10px;
+}
+
+.terminal-stack > * {
+  grid-area: 1 / 1;
+}
+
+.terminal-stack.webapp-active {
+  padding: 0;
+}
+
+.terminal-pane {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.terminal-pane.closed-pane {
+  opacity: 0.92;
+}
+
+.empty-terminal {
+  display: grid;
+  height: 100%;
+  place-items: center;
+  color: #91a3b5;
+  font-size: 13px;
+}
+
+.pending-pane {
+  display: grid;
+  place-items: center;
+  color: #91a3b5;
+  font-size: 13px;
+}
+
+.workbench {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  background: #101418;
+}
+
+#settings-form {
+  max-height: 100vh;
+  overflow-y: auto;
+}
+
+.overlay-root {
+  display: contents;
+}
+
+.app-overlays-root {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  pointer-events: none;
+}
+
+.app-overlays-root > * {
+  pointer-events: auto;
+}
+
