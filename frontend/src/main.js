@@ -125,6 +125,7 @@ import { createTooltipController } from './ui/tooltip.js';
 import { createMessageCenter } from './messages/controller.js';
 import { createUpdateController } from './updates/controller.js';
 import { registerRuntimeEvents } from './app/runtime-events.js';
+import { createMenuActions } from './app/menu-actions.js';
 import './terminal-fonts.css';
 import './styles.css';
 import './terminal/workspace.css';
@@ -382,11 +383,21 @@ const messageCenter = createMessageCenter({
   showLog: (options) => showAppModal(options),
 });
 const writeNotice = (message, level = '') => messageCenter.write(message, level);
+const menuActions = createMenuActions({
+  showModal: (options) => showAppModal(options),
+  openRuntimeURL,
+  openWindow: (url) => window.open(url, '_blank', 'noopener'),
+  importHosts: () => apiImportFromHostsFile(),
+  refreshHosts: () => refreshHosts(),
+  withBusy: (task) => withBusy(task),
+  writeNotice,
+  restoreFocus: () => restoreTerminalFocusAfterOverlay(),
+});
 const updateController = createUpdateController({
   checkForUpdate: () => apiCheckForUpdate(),
   storage: localStorage,
   showModal: (options) => showAppModal(options),
-  openURL: (url) => openExternalURL(url),
+  openURL: (url) => menuActions.openURL(url),
 });
 const tooltip = createTooltipController({ element: document.querySelector('#app-tooltip') });
 const fieldHelp = createFieldHelpController();
@@ -587,10 +598,10 @@ registerRuntimeEvents({
   refreshHosts,
   loadTunnels,
   restoreFocus: restoreTerminalFocusAfterOverlay,
-  showHostsFilePreview: showHostsFileImportPreview,
+  showHostsFilePreview: (result) => menuActions.showHostsPreview(result),
   openSettings: () => settingsController.open(),
   openSSHKeys: () => openKeysPanel({ allowInstall: false }),
-  showAbout: showAboutModal,
+  showAbout: (info) => menuActions.showAbout(info),
   showUpdate: (info, manual) => updateController.show(info, manual),
   showUpdateError: (message) => updateController.showError(message),
 });
@@ -825,9 +836,9 @@ async function openWebAppPanel(webApp = null) {
       title: 'A supported browser is required',
       message: 'Install Firefox, Chrome, Chromium, or Microsoft Edge before adding a Web App.',
       primaryLabel: 'Firefox',
-      primaryAction: () => openExternalURL('https://www.mozilla.org/firefox/new/'),
+      primaryAction: () => menuActions.openURL('https://www.mozilla.org/firefox/new/'),
       secondaryLabel: 'Chrome',
-      secondaryAction: () => openExternalURL('https://www.google.com/chrome/'),
+      secondaryAction: () => menuActions.openURL('https://www.google.com/chrome/'),
     });
     return;
   }
@@ -997,9 +1008,9 @@ async function launchWebApp(webApp, auth = null, { promptAuth = true } = {}) {
           title: 'A supported browser is required',
           message: detail,
           primaryLabel: 'Firefox',
-          primaryAction: () => openExternalURL('https://www.mozilla.org/firefox/new/'),
+          primaryAction: () => menuActions.openURL('https://www.mozilla.org/firefox/new/'),
           secondaryLabel: 'Chrome',
-          secondaryAction: () => openExternalURL('https://www.google.com/chrome/'),
+          secondaryAction: () => menuActions.openURL('https://www.google.com/chrome/'),
         });
         return false;
       }
@@ -2567,65 +2578,6 @@ function clearAllSessionsFromUI() {
   renderSelection();
 }
 
-function showHostsFileImportPreview(result) {
-  const hosts = result?.hosts ?? [];
-  const details = [
-    ['Hosts file', result?.path ?? ''],
-    ['Default SSH user', result?.user ?? ''],
-    ['Skipped duplicates', String(result?.skipped ?? 0)],
-    ...hosts.map((host, index) => [
-      `Host ${index + 1}`,
-      `${host.user}@${host.hostname}:${host.port}${host.ip ? ` (${host.ip})` : ''}`,
-    ]),
-  ];
-
-  showAppModal({
-    kicker: 'Tools',
-    title: 'Import From Hosts File',
-    message: hosts.length > 0
-      ? `${hosts.length} host${hosts.length === 1 ? '' : 's'} will be imported.`
-      : 'No new remote hosts were found.',
-    details,
-    primaryLabel: hosts.length > 0 ? 'Import' : 'OK',
-    primaryAction: hosts.length > 0 ? () => applyHostsFileImport() : null,
-    secondaryLabel: hosts.length > 0 ? 'Cancel' : '',
-  });
-}
-
-async function applyHostsFileImport() {
-  await withBusy(async () => {
-    const result = await apiImportFromHostsFile();
-    await refreshHosts();
-    const imported = result?.imported ?? 0;
-    const skipped = result?.skipped ?? 0;
-    writeNotice(`Imported ${imported} host${imported === 1 ? '' : 's'} from hosts file. Skipped ${skipped}.`);
-    restoreTerminalFocusAfterOverlay();
-  });
-}
-
-function showAboutModal(info) {
-  const appInfo = info ?? {};
-  showAppModal({
-    kicker: 'About',
-    title: 'Bashes',
-    message: 'Fast remote server session manager.',
-    details: [
-      ['Version', appInfo.version ?? 'dev'],
-      ['Platform', `${appInfo.platform ?? 'unknown'}/${appInfo.arch ?? 'unknown'}`],
-      ['Data file', appInfo.dataPath ?? ''],
-    ],
-    primaryLabel: 'README',
-    primaryAction: () => openExternalURL(appInfo.readmeUrl ?? 'https://github.com/signoredellarete/bashes#readme'),
-    secondaryLabel: 'Releases',
-    secondaryAction: () => openExternalURL(appInfo.releasesUrl ?? 'https://github.com/signoredellarete/bashes/releases'),
-  });
-}
-
-function openExternalURL(url) {
-  if (!url) return;
-  if (!openRuntimeURL(url)) window.open(url, '_blank', 'noopener');
-}
-
 function openTerminalLink(event, value) {
   const url = externalHttpURL(value);
   if (!url) {
@@ -2633,5 +2585,5 @@ function openTerminalLink(event, value) {
     return;
   }
   event?.preventDefault?.();
-  openExternalURL(url);
+  menuActions.openURL(url);
 }
