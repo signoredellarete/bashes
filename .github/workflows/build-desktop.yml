@@ -204,7 +204,7 @@ jobs:
 
   macos-desktop:
     name: macOS desktop build
-    runs-on: macos-15
+    runs-on: macos-15-intel
     needs:
       - test
       - icons
